@@ -29,6 +29,28 @@ const EVIDENCE_SECTIONS = [
 /** 三重验证关键词（跨域复现 + 生成力 + 排他性）——筛选心智模型用。 */
 const TRIPLE_VALIDATION = ['跨域复现', '生成力', '排他性']
 
+/**
+ * 协同架构四要素（CEO 卡硬闸）：子角色如何协同的最小完备集。
+ * CEO 决定子角色后，必须为每个角色明确：位置/依赖/介入时机/协同方式。
+ * 缺任一 → 协同设计不完整，禁止建队。
+ */
+const COLLAB_FOUR = ['位置', '依赖', '介入时机', '协同方式']
+
+/** 全局协作健康检查：依赖图是否闭环/孤立/有升级路径。 */
+export function checkCollabHealth(collabText, roleCount) {
+  const issues = []
+  if (!collabText || !collabText.trim()) return ['缺少协同架构（每个角色需 位置/依赖/介入时机/协同方式）']
+  for (const f of COLLAB_FOUR) {
+    if (!collabText.includes(f)) issues.push(`协同架构缺「${f}」`)
+  }
+  if (!/(升级|裁决|CEO|review|上报|复核)/.test(collabText)) issues.push('无冲突升级路径（角色分歧向谁升级？应有 jarvis_review/CEO 裁决）')
+  if (!/并行|同时|实时|讨论|辩论/.test(collabText)) issues.push('未体现并行协作（应非串行交接：角色并行讨论/实时同步）')
+  if (roleCount && !/(每个角色|逐角色|all|所有角色)/.test(collabText) && roleCount > 1) {
+    // 仅当文本明显只描述单一角色而无全局协同视角时提示
+  }
+  return issues
+}
+
 /** 六段式/协同架构/证据链/保真度 结构校验（女娲式：不只要"有"，还要"查实"）。 */
 export function validateCardShape(card, isCeo) {
   const missing = []
@@ -64,6 +86,17 @@ export function validateCardShape(card, isCeo) {
   if (hasTripleValidation < 2) missing.push('三重验证(跨域复现/生成力/排他性 至少2项)')
   // 诚实边界必须提到"信息截止"或"推测成分"其一
   if (!/(信息截止|推测|局限|做不到)/.test(card)) missing.push('诚实边界(信息截止/推测成分/做不到什么)')
+
+  // ── 协同架构四要素硬闸（"子角色如何协同"最小完备集；CEO 卡必含）──
+  if (isCeo) {
+    for (const f of COLLAB_FOUR) {
+      if (!card.includes(f)) missing.push(`协同架构缺「${f}」`)
+    }
+    const collabIssues = checkCollabHealth(card, 1)
+    for (const ci of collabIssues) {
+      if (!card.includes('并行') && /并行/.test(ci)) missing.push(ci)
+    }
+  }
   return missing
 }
 
@@ -253,6 +286,65 @@ export const TOOLS = [
         verdict: !issues.length
           ? '保真度合格：一手来源充分、三重验证齐备、诚实边界清晰。可注入（仍只借鉴框架，不冒充署名）。'
           : `保真度不足：${issues.length} 项待修。修改后用 jarvis_distill + jarvis_fidelity 复验。宁要 60 分诚实，不要 90 分编造。`,
+      }
+    },
+  },
+
+  {
+    name: 'jarvis_collab',
+    description:
+      '团队协同架构设计与校验器（CEO 定子角色后的必备步骤）。输入各角色职责与协同段，输出：1) 每个角色的协同四要素（位置=上游/下游/并行/横向支持；依赖=依赖谁/给谁喂产出；介入时机=从哪个阶段进入/是否全程；协同方式=实时讨论/事件驱动/阶段交接/冲突向谁升级）；2) 全局健康检查（依赖闭环无悬空、并行而非串行交接、有冲突升级路径、无孤立角色）；3) 判定是否可建队。铁律：角色是"怎么思考"的框架+协作者，不是各干各的；真实协同像真实团队——并行讨论、实时同步、关键节点对齐、分歧升级 CEO 裁决。',
+    parameters: {
+      type: 'object',
+      properties: {
+        requirement: { type: 'string', description: '原始需求（协同设计围绕它）' },
+        rolesJson: { type: 'string', description: '角色清单 JSON，如 [{"name":"产品增长","duty":"定义价值与增长"},{"name":"供应链","duty":"履约与备货"}]' },
+        collabText: { type: 'string', description: '协同架构描述（各角色的位置/依赖/介入时机/协同方式 + 全局协作）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          roles: { type: 'array', items: { type: 'string' }, description: '解析出的角色名' },
+          perRole: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { role: { type: 'string' }, position: { type: 'string' }, depends: { type: 'string' }, intervenes: { type: 'string' }, collabMode: { type: 'string' }, escalate: { type: 'string' } } }, description: '每个角色的协同四要素' },
+          issues: { type: 'array', items: { type: 'string' }, description: '全局健康检查发现的问题' },
+          ok: { type: 'boolean', description: '协同设计是否可建队' },
+          verdict: { type: 'string' },
+        },
+        required: ['ok', 'verdict'],
+      },
+      render: (r) => `协同设计校验：${r.ok ? '✅ 可建队' : '❌ 待修'}\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n${r.verdict}`,
+    },
+    handler: async (args) => {
+      const req = String(args?.requirement ?? '')
+      const collab = String(args?.collabText ?? '')
+      const issues = []
+      let roles = []
+      try {
+        const parsed = JSON.parse(String(args?.rolesJson ?? '[]'))
+        roles = (Array.isArray(parsed) ? parsed : []).map((x) => String(x.name ?? '?'))
+      } catch {
+        issues.push('rolesJson 解析失败（需合法 JSON 数组）')
+      }
+      if (roles.length < 2) issues.push('角色过少（协同设计至少 2 个角色；1 个角色无需建队）')
+      // 协同四要素完备性
+      for (const f of COLLAB_FOUR) {
+        if (!collab.includes(f)) issues.push(`协同描述缺「${f}」（位置/依赖/介入时机/协同方式）`)
+      }
+      // 全局健康
+      if (!/(升级|裁决|CEO|review|上报|复核)/.test(collab)) issues.push('无冲突升级路径（分歧应升级 CEO/jarvis_review 裁决）')
+      if (!/并行|同时|实时|讨论|辩论/.test(collab) && /串行|依次|先.*再.*再/.test(collab)) issues.push('当前是串行交接而非并行协作——应改为角色并行开工、实时讨论（测试从产品阶段介入、研发与测试同步）')
+      if (!/并行|同时|实时|讨论/.test(collab)) issues.push('未体现并行协作（建议：多角色并行 + 实时讨论，非单向依次完成）')
+      const ok = issues.length === 0 && roles.length >= 2
+      return {
+        roles,
+        issues,
+        ok,
+        verdict: ok
+          ? `协同设计合格：${roles.length} 个角色，四要素齐备（位置/依赖/介入时机/协同方式），有升级路径且体现并行协作。可建队（agent_teams_create → add_member(role=现场蒸馏卡) → create_task(带验收标准+dependencies)）。`
+          : `协同设计待修（${issues.length} 项）：补齐后重新调用。CEO 定子角色后必须先设计协同，再建队——协同缺失 = 团队各干各的，不是真团队。`,
       }
     },
   },

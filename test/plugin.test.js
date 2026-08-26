@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert'
-import plugin, { TOOLS, validateCardShape, jarvisCommand, identifyIndustry } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, jarvisCommand, identifyIndustry, checkCollabHealth } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责……',
@@ -17,7 +17,7 @@ const GOOD_CEO_CARD = [
   '代表作品：参考真实作品公开框架——只借鉴框架，不冒充署名。',
   '决策红线：虚假规模一票否决。',
   '语言风格：数据驱动，结论先行。',
-  '协同架构：与产品增长并行；依赖 web 蒸馏结果；从立项介入；冲突升级 jarvis_review。',
+  '协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。',
   '证据链：著作(2部) + 对话(3段访谈) + 表达(社媒) + 他者评价 + 决策记录 + 时间线——达标。',
   '保真度：一手占比约0.7；矛盾点1处已保留（他对 A 与 B 的立场存在张力，未和稀泥）。',
   '诚实边界：信息截止2026-08；无法预判全新问题；存在公开表达 vs 真实想法差距；含推测成分已标注。',
@@ -82,13 +82,13 @@ test('validateCardShape：缺防冒名不通过', () => {
 })
 
 test('validateCardShape：CEO 缺协同架构不通过', () => {
-  const card = GOOD_CEO_CARD.replace('协同架构：与产品增长并行；依赖 web 蒸馏结果；从立项介入；冲突升级 jarvis_review。', '')
+  const card = GOOD_CEO_CARD.replace('协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。', '')
   const missing = validateCardShape(card, true)
   assert.ok(missing.includes('协同架构'))
 })
 
 test('validateCardShape：普通角色不需协同架构（但需证据链）', () => {
-  const card = GOOD_CEO_CARD.replace('协同架构：与产品增长并行；依赖 web 蒸馏结果；从立项介入；冲突升级 jarvis_review。', '')
+  const card = GOOD_CEO_CARD.replace('协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。', '')
   const missing = validateCardShape(card, false)
   assert.ok(!missing.includes('协同架构'), '普通角色不需协同架构')
   assert.ok(!missing.includes('证据链'), '但仍需证据链')
@@ -167,9 +167,56 @@ test('/jarvis 命令执行：电商需求识别为电商', () => {
   assert.ok(r.content.includes('短视频/内容') || r.content.includes('待确认'))
 })
 
-test('工具清单应含 5 个 jarvis_* 工具（含保真度审计）', () => {
+test('工具清单应含 6 个 jarvis_* 工具（含保真度审计+协同设计）', () => {
   const names = TOOLS.map((t) => t.name)
-  for (const n of ['jarvis_project', 'jarvis_distill', 'jarvis_review', 'jarvis_think', 'jarvis_fidelity']) {
+  for (const n of ['jarvis_project', 'jarvis_distill', 'jarvis_review', 'jarvis_think', 'jarvis_fidelity', 'jarvis_collab']) {
     assert.ok(names.includes(n), `缺少 ${n}`)
   }
+})
+
+// ── 团队协同（CEO 定子角色后的必备硬闸）──
+
+test('CEO 卡协同架构缺「位置」→ 不通过', () => {
+  const card = GOOD_CEO_CARD.replace(/位置=[^；;]+；?/, '')
+  const missing = validateCardShape(card, true)
+  assert.ok(missing.includes('协同架构缺「位置」'))
+})
+
+test('CEO 卡协同架构缺「协同方式」→ 不通过', () => {
+  const card = GOOD_CEO_CARD.replace('协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。', '')
+  const missing = validateCardShape(card, true)
+  assert.ok(missing.includes('协同架构缺「协同方式」'))
+})
+
+test('jarvis_collab：合格协同（2+角色/四要素/升级/并行）→ ok=true', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_collab')
+  const r = await def.handler({
+    requirement: '电商拼团系统',
+    rolesJson: JSON.stringify([
+      { name: '产品增长', duty: '定义价值' },
+      { name: '供应链', duty: '履约' },
+      { name: '研发', duty: '实现' },
+      { name: '风控', duty: '资金安全' },
+    ]),
+    collabText: '位置=产品上游、研发并行、风控横向否决；依赖=产品给契约、研发给接口；介入时机=风控从立项全程、测试从产品阶段；协同方式=并行实时讨论 send_message，升级 jarvis_review/CEO 裁决',
+  })
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(r.issues.length, 0)
+})
+
+test('jarvis_collab：串行交接 → ok=false（改为并行）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_collab')
+  const r = await def.handler({
+    requirement: '电商拼团系统',
+    rolesJson: JSON.stringify([{ name: '产品' }, { name: '研发' }, { name: '测试' }]),
+    collabText: '位置=依次先后；依赖=前者完成后给后者；介入时机=依次进入；协同方式=先产品再研发最后测试（串行交接）',
+  })
+  assert.strictEqual(r.ok, false)
+  assert.ok(r.issues.some((i) => /串行/.test(i) || /并行/.test(i)))
+})
+
+test('jarvis_collab：角色太少（1 个）→ ok=false', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_collab')
+  const r = await def.handler({ requirement: '小事', rolesJson: JSON.stringify([{ name: '研发' }]), collabText: '位置=独立；依赖=无；介入时机=现在；协同方式=独立完成' })
+  assert.strictEqual(r.ok, false)
 })
