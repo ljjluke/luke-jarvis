@@ -12,22 +12,65 @@ import plugin, { TOOLS, validateCardShape, jarvisCommand, identifyIndustry } fro
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责……',
-  '思维模型：第一性原理……',
+  '思维模型：第一性原理……（跨域复现：在产品和定价均出现；生成力：可推断新品类立场；排他性：独特）',
   '核心方法论：1) xx；2) yy……',
   '代表作品：参考真实作品公开框架——只借鉴框架，不冒充署名。',
   '决策红线：虚假规模一票否决。',
   '语言风格：数据驱动，结论先行。',
   '协同架构：与产品增长并行；依赖 web 蒸馏结果；从立项介入；冲突升级 jarvis_review。',
-  'source：https://example.com/real-source',
+  '证据链：著作(2部) + 对话(3段访谈) + 表达(社媒) + 他者评价 + 决策记录 + 时间线——达标。',
+  '保真度：一手占比约0.7；矛盾点1处已保留（他对 A 与 B 的立场存在张力，未和稀泥）。',
+  '诚实边界：信息截止2026-08；无法预判全新问题；存在公开表达 vs 真实想法差距；含推测成分已标注。',
+  'source：https://example.com/real-source/interview',
   '防冒名声明：本角色卡借鉴其公开方法论，非其本人观点。',
 ].join('\n')
 
-test('validateCardShape：合格 CEO 卡通过', () => {
+test('validateCardShape：合格 CEO 卡（女娲式证据链完整）通过', () => {
   assert.deepStrictEqual(validateCardShape(GOOD_CEO_CARD, true), [])
 })
 
+test('validateCardShape：缺证据链段不通过', () => {
+  const card = GOOD_CEO_CARD.replace('证据链：著作(2部) + 对话(3段访谈) + 表达(社媒) + 他者评价 + 决策记录 + 时间线——达标。', '')
+  const missing = validateCardShape(card, true)
+  assert.ok(missing.includes('证据链'))
+})
+
+test('validateCardShape：缺诚实边界不通过（防编造型蒸馏）', () => {
+  const card = GOOD_CEO_CARD.replace('诚实边界：信息截止2026-08；无法预判全新问题；存在公开表达 vs 真实想法差距；含推测成分已标注。', '')
+  const missing = validateCardShape(card, true)
+  assert.ok(missing.some((m) => /诚实边界/.test(m)))
+})
+
+test('validateCardShape：source 非真实 URL 不通过（拦截编造出处）', () => {
+  const card = GOOD_CEO_CARD.replace('source：https://example.com/real-source/interview', 'source：据某书，非URL')
+  const missing = validateCardShape(card, true)
+  assert.ok(missing.some((m) => /真实URL/.test(m)))
+})
+
+test('jarvis_fidelity：保真度合格卡评级 PRIMARILY-FIRST-HAND', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_fidelity')
+  const r = await def.handler({ role: 'CEO', card: GOOD_CEO_CARD })
+  assert.strictEqual(r.rating, 'PRIMARILY-FIRST-HAND')
+  assert.deepStrictEqual(r.issues, [])
+})
+
+test('jarvis_fidelity：命中黑名单源 → 标记问题', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_fidelity')
+  const bad = GOOD_CEO_CARD + '\n补充来源：知乎某回答'
+  const r = await def.handler({ role: 'CEO', card: bad })
+  assert.ok(r.issues.some((i) => /知乎|黑名单/.test(i)))
+})
+
+test('jarvis_fidelity：缺诚实边界 → 非 PRIMARILY', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_fidelity')
+  const card = GOOD_CEO_CARD.replace('诚实边界：信息截止2026-08；无法预判全新问题；存在公开表达 vs 真实想法差距；含推测成分已标注。', '')
+  const r = await def.handler({ role: 'CEO', card })
+  assert.notStrictEqual(r.rating, 'PRIMARILY-FIRST-HAND')
+  assert.ok(r.issues.length >= 1)
+})
+
 test('validateCardShape：缺 source 不通过', () => {
-  const card = GOOD_CEO_CARD.replace('source：https://example.com/real-source', '')
+  const card = GOOD_CEO_CARD.replace('source：https://example.com/real-source/interview', '')
   const missing = validateCardShape(card, true)
   assert.ok(missing.includes('source'))
 })
@@ -44,9 +87,11 @@ test('validateCardShape：CEO 缺协同架构不通过', () => {
   assert.ok(missing.includes('协同架构'))
 })
 
-test('validateCardShape：普通角色不需协同架构', () => {
+test('validateCardShape：普通角色不需协同架构（但需证据链）', () => {
   const card = GOOD_CEO_CARD.replace('协同架构：与产品增长并行；依赖 web 蒸馏结果；从立项介入；冲突升级 jarvis_review。', '')
-  assert.deepStrictEqual(validateCardShape(card, false), [])
+  const missing = validateCardShape(card, false)
+  assert.ok(!missing.includes('协同架构'), '普通角色不需协同架构')
+  assert.ok(!missing.includes('证据链'), '但仍需证据链')
 })
 
 test('jarvis_distill handler：空卡 → ok=false 且提示现场蒸馏', async () => {
@@ -113,7 +158,8 @@ test('/jarvis 命令执行：真实产物含行业识别与蒸馏指令（非占
   const r = jarvisCommand('做一个金融风控系统，要管住资金安全')
   assert.ok(r.content.includes('行业识别：金融'), '应识别行业')
   assert.ok(r.content.includes('jarvis_distill'), '应包含蒸馏校验指令')
-  assert.ok(r.content.includes('绝不直接复用旧卡'), '应包含铁律')
+  assert.ok(r.content.includes('jarvis_fidelity'), '应包含保真度审计指令')
+  assert.ok(r.content.includes('证据不足宁 60 分诚实不要 90 分编造'), '应包含女娲式铁律')
 })
 
 test('/jarvis 命令执行：电商需求识别为电商', () => {
@@ -121,9 +167,9 @@ test('/jarvis 命令执行：电商需求识别为电商', () => {
   assert.ok(r.content.includes('短视频/内容') || r.content.includes('待确认'))
 })
 
-test('工具清单应含 4 个 jarvis_* 工具', () => {
+test('工具清单应含 5 个 jarvis_* 工具（含保真度审计）', () => {
   const names = TOOLS.map((t) => t.name)
-  for (const n of ['jarvis_project', 'jarvis_distill', 'jarvis_review', 'jarvis_think']) {
+  for (const n of ['jarvis_project', 'jarvis_distill', 'jarvis_review', 'jarvis_think', 'jarvis_fidelity']) {
     assert.ok(names.includes(n), `缺少 ${n}`)
   }
 })
