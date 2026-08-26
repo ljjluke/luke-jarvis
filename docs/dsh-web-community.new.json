@@ -1,0 +1,403 @@
+[
+  {
+    "id": "dsh-data-agent",
+    "name": "Data Agent",
+    "nameEn": "Data Agent",
+    "author": "omdsh-dev",
+    "description": "为 DSH 定义专用 Data Agent 预设，让 AI 帮你查询、更新、分析数据。",
+    "descriptionEn": "Defines a dedicated Data Agent preset for DSH so the AI can query, update and analyze data.",
+    "repo": "https://github.com/omdsh-dev/dsh-data-agent",
+    "category": "agent"
+  },
+  {
+    "id": "dsh-tui",
+    "name": "dsh-TUI",
+    "nameEn": "dsh-TUI",
+    "author": "ccch1mneyyy",
+    "description": "Claude Code 风格全屏交互终端插件：像素鲸鱼顶栏、实时工作状态行、思考流式展开、双击 Esc 回滚、上下文进度条与 TPS 仪表。",
+    "descriptionEn": "A Claude Code style fullscreen interactive terminal plugin: pixel-whale header, live working-state line, streaming reasoning expansion, double-Esc rollback, context progress bar and TPS gauges.",
+    "repo": "https://github.com/ccch1mneyyy/dsh-TUI",
+    "npm": "@deepseek-harness-tui/dsh-tui",
+    "category": "ui"
+  },
+  {
+    "id": "dsh-tianshu-tui",
+    "name": "天书 TUI",
+    "nameEn": "Tianshu TUI",
+    "author": "huiliyi37",
+    "description": "基于官方 DeepSeek Harness 的交互式终端 UI 插件，在官方基础上增加 TDD 与证据门等工作流。",
+    "descriptionEn": "An interactive terminal UI plugin for DeepSeek Harness that adds TDD and evidence-gate workflows on top of the official base.",
+    "repo": "https://github.com/huiliyi37/dsh-tianshu-tui",
+    "category": "ui"
+  },
+  {
+    "id": "dsh-context",
+    "name": "上下文可视化",
+    "nameEn": "Context Visualizer",
+    "author": "bowenliang123",
+    "description": "一站式 DeepSeek Harness 上下文洞察与可视化插件：Context 面板与浏览器加 /context 命令，透视上下文构成、历史演进与压缩/剪枝等事件，并展示消息与图片的 token 占用。",
+    "descriptionEn": "A one-stop DeepSeek Harness context insight and visualization plugin: a Context dashboard and browser plus /context command that reveal composition, history evolution, compaction/prune events, and token cost per message and image.",
+    "repo": "https://github.com/bowenliang123/dsh-context",
+    "npm": "dsh-context",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-builtin-toggles",
+    "name": "内置能力检查器",
+    "nameEn": "Built-in Capability Inspector",
+    "author": "Starfie1d1272",
+    "description": "Evidence-backed 内置 capability Inspector：展示 DSH Web built-in capability 的 provenance、compatibility 与 structural drift；仅对 9 个经过审阅的 UI leaves 提供 fail-closed 开关。",
+    "descriptionEn": "Evidence-backed built-in capability Inspector: surfaces provenance, compatibility and structural drift of DSH Web built-ins, with fail-closed toggles for only the nine reviewed UI leaves.",
+    "repo": "https://github.com/Starfie1d1272/dsh-builtin-toggles",
+    "npm": "dsh-builtin-toggles",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-pilot",
+    "name": "Pilot 浏览器驾驶舱",
+    "nameEn": "Pilot Browser Cockpit",
+    "author": "guo6x",
+    "description": "给 agent 一双会开车的手：零依赖 CDP 浏览器操控（8 个 pilot_* 工具：导航/点击/输入/按键/JS/截图）+ Web GUI 可拖拽驾驶舱面板，无需 Playwright、无需 API key。",
+    "descriptionEn": "Give your agent hands: zero-dependency CDP browser control (8 pilot_* tools: navigate/click/type/keys/eval/screenshot) plus a draggable cockpit panel in the Web GUI - no Playwright, no API key.",
+    "repo": "https://github.com/guo6x/dsh-pilot",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-housekeeper",
+    "name": "环境管家",
+    "nameEn": "Environment Housekeeper",
+    "author": "guo6x",
+    "description": "管住 agent 的脏手：工具链台账（node/pnpm/git/gh/ffmpeg 等自动探测）、缓存与临时目录扫描 + 白名单安全一键清理、机器规则 AGENTS.md 查看编辑，全在设置面板完成。",
+    "descriptionEn": "Keep your agent's hands clean: toolchain inventory, scratch/cache scan with whitelist-guarded one-click cleanup, and the machine rules file (AGENTS.md) view/edit - all in the settings panel.",
+    "repo": "https://github.com/guo6x/dsh-housekeeper",
+    "category": "utility"
+  },
+  {
+    "id": "dsh-deepread",
+    "name": "DeepRead 精读助手",
+    "nameEn": "DeepRead Assistant",
+    "author": "xiehuan123",
+    "description": "五种模式精读插件（quick / deep / map / feynman / book），支持公众号链接与文件输入、批量对比、预算预检与后台任务进度透明，导出 md / mm / html，Web UI 提供工具结果卡片与精读面板。",
+    "descriptionEn": "A five-mode deep reading plugin (quick / deep / map / feynman / book) for links and files, with batch comparison, budget preflight, transparent background-job progress, md / mm / html exports, and Web UI tool-result cards plus a reading panel.",
+    "repo": "https://github.com/xiehuan123/dsh-deepread",
+    "npm": "dsh-deepread",
+    "category": "knowledge"
+  },
+  {
+    "id": "dsh-mnemon",
+    "name": "Mnemon 记忆系统",
+    "nameEn": "Mnemon Memory",
+    "author": "omdsh-dev",
+    "description": "与 Mnemon CLI 集成的跨 Agent、本地优先持久记忆插件：用户画像 / 工作记忆 / 项目档案与长期 Memory Spaces，支持导入导出。",
+    "descriptionEn": "A cross-agent, local-first persistent memory plugin integrating the Mnemon CLI: profiles, working memory, project documents and long-term Memory Spaces, with import and export.",
+    "repo": "https://github.com/omdsh-dev/dsh-mnemon",
+    "npm": "dsh-mnemon",
+    "category": "knowledge"
+  },
+  {
+    "id": "dsh-plugin-hub",
+    "name": "插件中心（dsh-plugin-hub）",
+    "nameEn": "Plugin Hub",
+    "author": "Noob-stupid",
+    "description": "插件管理面板：已安装插件一键启用/停用，内置 GitHub dsh-plugin 插件市场（官方/聚合识别、子包浏览、一键安装与本地 AI 兜底修复、删除卸载），版本检测与一键更新、框架一键升级。",
+    "descriptionEn": "Plugin management panel: one-click enable/disable, a GitHub dsh-plugin marketplace with official/aggregate detection, subpackage browsing, one-click installs with local-AI fallback repair, uninstall, update detection and one-click framework upgrade.",
+    "repo": "https://github.com/Noob-stupid/dsh-plugin-hub",
+    "npm": "@noob-stupid/dsh-plugin-console",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-genui",
+    "name": "GenUI 生成式 UI",
+    "nameEn": "GenUI",
+    "author": "omdsh-dev",
+    "description": "给模型输出配交互式 UI：助手回复内联渲染 dsh-ui 围栏（布局、图表、表格、表单、Mermaid、3D、原生音视频），双通道渲染兼容原版 DSH 与新构建，支持流式渲染、面板停靠与组件交互回传模型。",
+    "descriptionEn": "Interactive UI inside assistant replies via the dsh-ui fence: layouts, charts, tables, forms, quizzes, Mermaid, 3D and native audio/video. Dual-channel rendering covers stock DSH and newer builds, with streaming render, panel docking and component actions that loop back to the model.",
+    "repo": "https://github.com/omdsh-dev/dsh-genui",
+    "category": "ui"
+  },
+  {
+    "id": "dsh-annotation",
+    "name": "选中批注",
+    "nameEn": "Selection Annotation",
+    "author": "omdsh-dev",
+    "description": "选中助手文字即可批注，回车随消息发送；自己的气泡只显示问题与「批注 ×N」标签，模型按 Annotation N 逐条对照回复（悬浮芯片）；UI 与批注块跟随 DSH 语言切换 zh/en，Cmd/Ctrl+Enter 可直发纯批注，斜杠命令原样放行。",
+    "descriptionEn": "Select text in an assistant reply to annotate it; annotations ride along with your next message, hidden in your own bubble behind an Annotations xN chip, and the model replies per Annotation N with hoverable chips. UI and annotation block follow the DSH locale (zh/en); Cmd/Ctrl+Enter sends annotations alone; slash commands pass through.",
+    "repo": "https://github.com/omdsh-dev/dsh-annotation",
+    "category": "ui"
+  },
+  {
+    "id": "deepseek-harness-auth",
+    "name": "DeepSeek Harness Auth",
+    "nameEn": "DeepSeek Harness Auth",
+    "author": "taichuy",
+    "description": "为 DSH Web 公网部署提供登录认证前置代理，支持账号密码、验证码、失败锁定和 IP/CIDR 白名单。",
+    "descriptionEn": "An authentication proxy for public DSH Web deployments with password login, captcha, failed-attempt locking, and IP/CIDR allowlists.",
+    "repo": "https://github.com/taichuy/deepseek-harness-auth",
+    "npm": "deepseek-harness-auth",
+    "category": "security"
+  },
+  {
+    "id": "dsh-cloud-sync",
+    "name": "云同步服务",
+    "nameEn": "Cloud Sync",
+    "author": "dickpy",
+    "description": "支持 WebDAV、S3、阿里云 OSS、腾讯云 COS 与 MinIO 的 DSH 云同步插件，可同步 profile、插件配置及本地插件源码归档。",
+    "descriptionEn": "DSH cloud sync for WebDAV, S3, Alibaba Cloud OSS, Tencent Cloud COS and MinIO, syncing profiles, plugin settings and local plugin source archives.",
+    "repo": "https://github.com/dickpy/dsh-cloud-sync",
+    "npm": "@dickpy/dsh-cloud-sync",
+    "category": "integration"
+  },
+  {
+    "id": "dsh-auto-memory",
+    "name": "自动记忆",
+    "nameEn": "Auto Memory",
+    "author": "Aik358",
+    "description": "三层自动记忆插件：用户级/项目笔记/每日日志自动注入与检索、每轮自动沉淀、AI 时段问候、智能检索、日历与工作区思维导图，支持继承 WorkBuddy/CodeBuddy/Claude Code/Codex 等其他 AI 工具的记忆。",
+    "descriptionEn": "Three-layer auto memory for DSH: user-level/project-notes/daily-logs with automatic injection and retrieval, per-turn auto-consolidation, AI greetings, smart search, calendar, workspace mind map, and inheritance from WorkBuddy/CodeBuddy/Claude Code/Codex.",
+    "repo": "https://github.com/Aik358/dsh-auto-memory",
+    "npm": "@a9i5k4/dsh-auto-memory",
+    "category": "knowledge"
+  },
+  {
+    "id": "dsh-memoir",
+    "name": "项目记忆 Memoir",
+    "nameEn": "Project Memory Memoir",
+    "author": "Qinling-Melon-Farmers",
+    "description": "项目持久化记忆与会话经验沉淀：memoir_record / memoir_read 工具（BM25 相关度排序检索）、每轮工作自动蒸馏、记忆诊断面板与跨项目全局检索，纯本地零外部依赖。",
+    "descriptionEn": "Project persistent memory and session-lessons distillation: memoir_record / memoir_read tools with BM25-ranked retrieval, per-turn auto-distill, a memory diagnostics panel and cross-project search - fully local, no external dependency.",
+    "repo": "https://github.com/Qinling-Melon-Farmers/dsh-memoir",
+    "category": "knowledge",
+    "npm": "dsh-memoir"
+  },
+  {
+    "id": "dsh-worktime-board",
+    "name": "牛马修仙看板",
+    "nameEn": "Worktime Cultivation Board",
+    "author": "spacexun2",
+    "description": "DeepSeek Harness 工时统计 × 修仙养成：日/周/月/学年四档汇总 agent 活跃时长、token、输入与工具调用，十二重境界（炼气→宇宙洪荒）量化进度，纯本地存储。",
+    "descriptionEn": "Worktime statistics meets cultivation: daily / weekly / monthly / yearly agent activity, token, input and tool-call summaries with a twelve-realm progression (Qi Refining to Cosmic Chaos), fully local.",
+    "repo": "https://github.com/spacexun2/dsh-worktime-board",
+    "npm": "dsh-worktime-board",
+    "category": "utility"
+  },
+  {
+    "id": "dsh-skill-explorer",
+    "name": "技能中心（Skill Explorer）",
+    "nameEn": "Skill Explorer",
+    "author": "wingsky-1",
+    "description": "DSH 技能中心：按来源分级浏览已加载 skill（系统内置 / 项目 / 用户 / 自定义 / 运行时），支持启用/禁用、创建与删除（移入 .trash）。",
+    "descriptionEn": "DSH skill center: browse loaded skills grouped by source (bundled / project / user / custom / runtime), with enable/disable, create and delete (move to .trash).",
+    "repo": "https://github.com/wingsky-1/dsh-skill-explorer",
+    "npm": "@linxin666/dsh-client-ui-skill-explorer",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-friendly-steps",
+    "name": "过程精简 Friendly Steps",
+    "nameEn": "Friendly Steps",
+    "author": "dongwenxiu83-web",
+    "description": "面向文字工作者的过程精简：纯 CSS 折叠 Think / 工具调用等技术过程行，右下角浮条「已完成 N 步」一键展开收起，失败步骤红色计数反馈；不注入 React 列表、无全量扫描，零侵入。",
+    "descriptionEn": "Writer-friendly process collapse: hides Think / tool-call rows via pure CSS behind a floating 'N steps done' pill with red failure counts and one-click expand/collapse. No foreign nodes in React lists, no full-DOM scans — zero interference.",
+    "repo": "https://github.com/dongwenxiu83-web/dsh-friendly-steps",
+    "category": "ui"
+  },
+  {
+    "id": "dsh-full-remote",
+    "name": "全功能远程访问",
+    "nameEn": "Full Remote Access",
+    "author": "JUANWANG-BUAA",
+    "description": "令牌门控反向代理：公网隧道或局域网下，在手机等设备上远程使用 DeepSeek Harness，设置、凭据与文件访问保持可用，支持按设备会话。",
+    "descriptionEn": "Token-gated reverse proxy for remote access: use DeepSeek Harness over public tunnels or LAN from phones and other devices, with settings, credentials and file access kept working and per-device sessions.",
+    "repo": "https://github.com/JUANWANG-BUAA/dsh-full-remote",
+    "npm": "dsh-full-remote",
+    "category": "integration"
+  },
+  {
+    "id": "dsh-history-tree",
+    "name": "历史树",
+    "nameEn": "History Tree",
+    "author": "z953218350",
+    "description": "在聊天消息左侧提供 Codex 风格对话轮次时间线点阵与悬浮历史概览卡片，支持鱼眼放大动效与点击直达对应轮次。",
+    "descriptionEn": "Codex-style conversation turn timeline rail and hover overview cards beside chat messages, with fish-eye magnification and click-to-jump navigation.",
+    "repo": "https://github.com/z953218350/dsh-history-tree",
+    "npm": "dsh-history-tree",
+    "category": "ui"
+  },
+  {
+    "id": "dsh-gzip",
+    "name": "dsh-gzip",
+    "nameEn": "dsh-gzip",
+    "author": "wingsky-1",
+    "description": "/api 响应 gzip 压缩插件：为远程 / 低带宽链路开启 /api 响应压缩，解决会话历史因大响应无压缩而超时加载失败的问题；SSE / zip / 已编码响应自动豁免，无全局副作用。",
+    "descriptionEn": "API response gzip plugin for DSH Web GUI: enables gzip on /api responses for remote / low-bandwidth links, fixing session-history loads that fail on the timeout of large uncompressed responses; SSE, zip and already-encoded responses are passed through untouched, with no global side effects.",
+    "repo": "https://github.com/wingsky-1/dsh-plugin-hub/tree/main/packages/dsh-gzip",
+    "npm": "@wingsky-1/dsh-gzip"
+  },
+  {
+    "id": "dsh-wsl-bridge",
+    "name": "WSL Windows 桥",
+    "nameEn": "WSL Windows Bridge",
+    "author": "ch1bug",
+    "description": "让 WSL 里的 agent 访问 Windows 侧：读写 C:\\ 文件、运行 .exe、Explorer 打开、wslpath 路径互转与盘符枚举（win_ls/read/write/run/open/path/drives）。",
+    "descriptionEn": "Lets a WSL agent reach the Windows host: read/write C:\\ files, run .exe programs, open in Explorer, convert paths via wslpath and list drives (win_ls/read/write/run/open/path/drives).",
+    "repo": "https://github.com/ch1bug/dsh-wsl-bridge",
+    "category": "integration"
+  },
+  {
+    "id": "dsh-mimo-agent-tools",
+    "name": "MiMo 多模态工具",
+    "nameEn": "MiMo Multimodal Tools",
+    "author": "ch1bug",
+    "description": "把小米 MiMo API 封装为 agent 工具：联网搜索、图像/音频/视频理解、语音转写、语音合成与音色克隆（mimo_search/vision/audio/video/asr/tts/voiceclone）。",
+    "descriptionEn": "Turns the Xiaomi MiMo API into agent tools: web search, image/audio/video understanding, speech-to-text, text-to-speech and voice cloning (mimo_search/vision/audio/video/asr/tts/voiceclone).",
+    "repo": "https://github.com/ch1bug/dsh-mimo-agent-tools",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-skill-fuzzy",
+    "name": "技能模糊搜索",
+    "nameEn": "Skill Fuzzy Search",
+    "author": "ch1bug",
+    "description": "Codex 风格模糊技能搜索：/bug、/diag、/regression 都能在 / 技能菜单里命中 diagnosing-bugs（名称子序列 + 描述连续子串匹配）。",
+    "descriptionEn": "Codex-style fuzzy skill search: /bug, /diag and /regression all find diagnosing-bugs in the / skill menu (name subsequence + description substring matching).",
+    "repo": "https://github.com/ch1bug/dsh-skill-fuzzy",
+    "category": "ui"
+  },
+  {
+    "id": "dsh-approve-for-me",
+    "name": "自动审批审核",
+    "nameEn": "Approve for Me",
+    "author": "DamonKoy",
+    "description": "只读工具自动放行、危险命令自动拒绝，可配置全自动模式。",
+    "descriptionEn": "Auto-approves read-only tools, auto-denies dangerous commands, optional full-auto mode.",
+    "repo": "https://github.com/DamonKoy/dsh-plugins/tree/main/packages/dsh-approve-for-me",
+    "npm": "dsh-approve-for-me"
+  },
+  {
+    "id": "dsh-memories",
+    "name": "项目记忆",
+    "nameEn": "Project Memories",
+    "author": "DamonKoy",
+    "description": "按项目作用域持久化的键值记忆，支持增删查列与搜索。",
+    "descriptionEn": "Project-scoped persistent key-value memories with set/get/list/delete/search.",
+    "repo": "https://github.com/DamonKoy/dsh-plugins/tree/main/packages/dsh-memories",
+    "npm": "dsh-memories"
+  },
+  {
+    "id": "dsh-notifier",
+    "name": "dsh-notifier",
+    "nameEn": "dsh-notifier",
+    "author": "wingsky-1",
+    "description": "审批/完成/错误事件通知：浏览器 Notification + 系统原生 toast（Windows PowerShell WinRT / Linux·macOS notify-send，零依赖）；提示音可配、错误同类合并、免打扰时段、通知历史与配置面板；非安全上下文自动降级横幅。",
+    "descriptionEn": "Approval / completion / error event notifications: browser Notification API plus native OS toasts (Windows PowerShell WinRT, Linux and macOS notify-send, zero dependencies); configurable sound, error merging, quiet hours, notification history and a settings panel; falls back to in-page banners outside secure contexts.",
+    "repo": "https://github.com/wingsky-1/dsh-plugin-hub/tree/main/packages/dsh-notifier",
+    "npm": "@wingsky-1/dsh-notifier",
+    "category": "utility"
+  },
+  {
+    "id": "dsh-logicprobe",
+    "name": "逻辑探针",
+    "nameEn": "Logic Probe",
+    "author": "AmethystLuna",
+    "description": "AI 智能体声明核查技能：枚举设计文档与重构计划中的每个可验证声明，对照代码库事实逐条核验；行为类声明升级为逻辑原语验证（7 项结构检查 + 7 项对抗探针），重构前后模型对比做回归检测，输出 file:line 证据。",
+    "descriptionEn": "Claim verification for AI coding agents: enumerate every verifiable claim in design docs and refactoring plans, verify against codebase facts, then escalate behavioral claims to logic-primitive verification (7 structural checks + 7 adversarial probes), with before/after model comparison for refactoring regression detection.",
+    "repo": "https://github.com/AmethystLuna/logicprobe",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-chatgpt-subscription",
+    "name": "子代理管理",
+    "nameEn": "Subagent Management",
+    "author": "Aa728848",
+    "description": "让 DSH 通过 ChatGPT 订阅使用 GPT 系列模型：PKCE OAuth 登录、DPAPI/钥匙串/0600 凭据存储、流式 Responses、图片生成、Codex 搜索、额度展示与子代理管理。",
+    "descriptionEn": "Use GPT models in DSH through your ChatGPT subscription: PKCE OAuth login, DPAPI/keychain/0600 credential storage, streaming Responses, image generation, Codex search, quota display and subagent management.",
+    "repo": "https://github.com/Aa728848/dsh-chatgpt-subscription",
+    "npm": "@eddyskywalker/dsh-chatgpt-subscription",
+    "category": "integration"
+  },
+  {
+    "id": "dsh-imagegen",
+    "name": "AI 生图",
+    "nameEn": "AI ImageGen",
+    "author": "dickpy",
+    "description": "AI 生图插件：通过可配置的 OpenAI 兼容端点（gpt-image-2 / gpt-image-1 / dall-e-3）实现文生图与图生图，提供生成历史、提示词模板库与 API 设置卡片。",
+    "descriptionEn": "AI image generation for the DSH Web GUI: text-to-image and image-to-image through a configurable OpenAI-compatible endpoint (gpt-image-2 / gpt-image-1 / dall-e-3), with generation history, a prompt template library and an API settings card.",
+    "repo": "https://github.com/dickpy/dsh-imagegen",
+    "npm": "@dickpy/dsh-imagegen",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-api-visualizer",
+    "name": "接口捕获",
+    "nameEn": "API Capture",
+    "author": "lemonmmice",
+    "description": "Fiddler 式实时抓包面板：tail 客户端 System.Net 跟踪日志自动解析 HTTP 请求/响应（gzip 自动解包）并实时入库，内置本地 MITM 代理可抓任意进程，支持筛选 / 详情 / 导出 / 重放 / 标记。",
+    "descriptionEn": "Fiddler-style realtime capture panel: tails the client's System.Net trace log into live HTTP request/response records (gzip auto-decompressed), plus a built-in local MITM proxy for arbitrary processes, with filters, detail view, export, replay and flags.",
+    "repo": "https://github.com/lemonmmice/dsh-api-visualizer",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-postman",
+    "name": "接口调试",
+    "nameEn": "API Debugger",
+    "author": "lemonmmice",
+    "description": "类 Postman 接口调试面板：由宿主服务端发起 HTTP 请求（绕过浏览器 CORS），支持 WebSocket / 原始 TCP / gRPC、鉴权助手、环境变量、cURL 导入导出、请求集合与历史。",
+    "descriptionEn": "Postman-style API debug panel: host-side HTTP requests without browser CORS limits, plus WebSocket / raw TCP / gRPC, auth helpers, env variables, cURL import/export, request collections and history.",
+    "repo": "https://github.com/lemonmmice/dsh-postman",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-workspace-api",
+    "name": "企业信息查询 Agent",
+    "nameEn": "Workspace API",
+    "author": "liaoyonghong",
+    "description": "把企业文档变成可对话的聊天机器人：员工或应用系统用自然语言提问，AI 代理查阅文档后带出处回答；同时提供 workspace 内容 HTTP API。",
+    "descriptionEn": "Turn enterprise documents into a conversational Q&A bot: employees or apps ask in natural language and an AI agent answers with cited sources; also exposes a workspace content HTTP API.",
+    "repo": "https://github.com/liaoyonghong/dsh-workspace-api",
+    "npm": "dsh-workspace-api",
+    "category": "knowledge"
+  },
+  {
+    "id": "dsh-llm-verifier",
+    "name": "LLM 裁判复核",
+    "nameEn": "LLM Verifier",
+    "author": "Aa728848",
+    "description": "DSH 原生可配置 LLM 裁判复核插件：成对比较、锦标赛择优、进度判定与自动验收门控（verifier_compare/select/track/current_session），A–T 标尺 + 期望评分，自带 Web 设置面板。",
+    "descriptionEn": "Configurable DSH-native LLM verifier plugin: pairwise comparison, pivot tournament selection, progress tracking and auto-acceptance gating (verifier_compare/select/track/current_session) with A-T scale scoring and a Web settings page.",
+    "repo": "https://github.com/Aa728848/dsh-llm-verifier",
+    "npm": "dsh-llm-verifier",
+    "category": "tools"
+  },
+  {
+    "id": "dsh-session-id",
+    "name": "会话 ID",
+    "nameEn": "Session ID",
+    "author": "yufengnigel",
+    "description": "侧边栏底部会话 ID 面板：列出全部会话的完整 ID 并一键复制（纯浏览器、只读，不修改会话状态）。",
+    "descriptionEn": "Sidebar-foot Session ID panel: lists every session with its full id and one-click copy (browser-only and read-only, never mutates sessions).",
+    "repo": "https://github.com/zhu1090093659/dsh-web/tree/main/packages/dsh-session-id",
+    "npm": "@linxin666/dsh-client-ui-session-id",
+    "category": "ui"
+  },
+  {
+    "id": "dsh-session-insights",
+    "name": "会话复盘",
+    "nameEn": "Session Insights",
+    "author": "GreenLv",
+    "description": "通过 /session-insights 把 DSH 会话历史生成为本地、基于证据的工作流复盘：自包含 HTML Dashboard 与配套 JSON，支持确定性分析与可选的模型辅助分析。",
+    "descriptionEn": "Generates local, evidence-backed workflow retrospectives from DSH session history through /session-insights: a self-contained HTML dashboard plus companion JSON, with deterministic and optional model-assisted analysis.",
+    "repo": "https://github.com/GreenLv/dsh-session-insights",
+    "npm": "dsh-session-insights",
+    "category": "tools"
+  },
+  {
+    "id": "luke-jarvis",
+    "name": "贾维斯数字员工公司",
+    "nameEn": "Luke Jarvis — Digital Employee Company",
+    "author": "ljjluke",
+    "description": "给 DSH 用的数字员工公司：识别行业→现场 web 蒸馏该领域真实大佬做 CEO/子角色（六段式+协同架构+source+防冒名，jarvis_distill 校验）→AgentTeams 并行建队协作→收口交付。铁律：角色卡每次现场蒸馏，绝不复用旧卡。",
+    "descriptionEn": "A digital-employee company for DSH: identify the industry, live-distill the domain real authority into CEO/sub-role cards (six-section + co-architecture + source + anti-impersonation, validated by jarvis_distill), build a parallel AgentTeams team, and deliver. Hard rule: every role card is live-distilled per requirement, never reused.",
+    "repo": "https://github.com/ljjluke/luke-jarvis",
+    "category": "agent"
+  }
+]
