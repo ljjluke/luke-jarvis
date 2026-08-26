@@ -1,0 +1,54 @@
+{
+  "name": "luke-jarvis",
+  "version": "0.1.0",
+  "description": "贾维斯数字员工公司：识别行业 → 现场蒸馏真实大佬 CEO/子角色(六段式+协同架构+source+防冒名) → AgentTeams 并行建队协作 → 收口交付。铁律：角色卡每次现场蒸馏，绝不复用旧卡。含可执行 /jarvis 命令。",
+  "type": "module",
+  "main": "src/host/plugin.js",
+  "exports": {
+    ".": "./src/host/plugin.js",
+    "./client": "./src/client/plugin.js",
+    "./host": "./src/host/plugin.js",
+    "./distill": "./src/host/distill.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.1.1-rc.1"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "BSD-3-Clause",
+  "files": [
+    "src",
+    "preset",
+    "skills",
+    "roles",
+    "docs",
+    "test",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "agent",
+    "preset",
+    "agent-teams",
+    "digital-employee",
+    "jarvis",
+    "luke-jarvis",
+    "distill",
+    "role-card"
+  ],
+  "scripts": {
+    "test": "node --test test/plugin.test.js",
+    "typecheck:manual": "node --check src/host/plugin.js && node --check src/client/plugin.js",
+    "selfcheck": "bash scripts/selfcheck.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ljjluke/luke-jarvis.git"
+  }
+}

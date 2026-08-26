@@ -1,0 +1,29 @@
+{
+  "id": "software-dev-sop",
+  "name": "软件开发 0→1 标准流程（SOP v1）",
+  "source": "AI 辅助项目 0→1 完整开发 SOP（分阶段执行标准）",
+  "tier": "L",
+  "stages": [
+    {"stage": "s0", "name": "项目启动与背景对齐", "outputs": ["00_project_brief.md"], "verify": "项目目标/验收标准/与AI交互背景先例齐全", "deps": []},
+    {"stage": "s1", "name": "需求对齐与文档化", "outputs": ["01_user_stories.md", "01_non_functional_requirements.md"], "verify": "用户故事/优先级PO/P1/P2/非功能性需求(性能/安全/可用性)", "deps": ["s0"]},
+    {"stage": "s2", "name": "交互原型设计", "outputs": ["02_prototypes/"], "verify": "覆盖所有用户故事/含加载空错误禁用状态", "deps": ["s1"]},
+    {"stage": "s3", "name": "技术架构与技术栈", "outputs": ["03_tech_stack.md", "03_architecture.md", "03_adr/"], "verify": "技术栈选型理由/满足QPS SLA/ADR覆盖关键决策", "deps": ["s1"]},
+    {"stage": "s4", "name": "详细设计与开发规范", "outputs": ["04_*.md"], "verify": "Lint零警告/命名规范(camelCase/PascalCase/snake_case/kebab-case/UPPER_CASE)/配置文件齐全", "deps": ["s2", "s3"]},
+    {"stage": "s5", "name": "接口文档", "outputs": ["05_api_docs/", "openapi.yaml", "Mock+Postman"], "verify": "OpenAPI Schema校验/用例含正常异常/与数据模型一致", "deps": ["s3", "s4"]},
+    {"stage": "s6", "name": "测试方案", "outputs": ["06_test_plan.md", "06_test_cases/", "06_smoke_checklist.md"], "verify": "覆盖率阈值/集成端到端覆盖/冒烟清单/小规模压测", "deps": ["s4", "s5"]},
+    {"stage": "s7", "name": "运维监控与可靠性", "outputs": ["07_devops.md", "07_monitoring.md", "07_disaster_recovery.md"], "verify": "Metrics/Logs/Traces三件套/Trace ID贯穿/告警规则/回滚预案/镜像保留10个/每日备份", "deps": ["s4"]},
+    {"stage": "s8", "name": "可视化与排期", "outputs": ["08_architecture_diagrams/", "08_roadmap.md"], "verify": "任务分阶段齐全/依赖无环/PRD功能100%覆盖", "deps": ["s0", "s1", "s6"]},
+    {"stage": "s9", "name": "开发与部署（小步快跑）", "outputs": ["代码+测试+生产部署"], "verify": "全量冒烟通过/性能压测达标/监控告警回滚验证通过/灰度发布可回退", "deps": ["s5", "s6", "s7", "s8"]}
+  ],
+  "codingStandards": {
+    "变量函数方法": "小驼峰 camelCase (getUserInfo, orderCount)",
+    "常量枚举类名": "大驼峰 PascalCase (MAX_RETRY_COUNT, UserService)",
+    "文件服务数据库表字段": "下划线 snake_case (httpClient.ts, user_profile)",
+    "URL路径": "小写短横线 kebab-case (/api/user-profiles)",
+    "环境变量": "全大写 UPPER_CASE (DATABASE_URL)",
+    "代码风格": "Prettier/gofmt，单行小于50字符，禁止单字母变量，注释最少化",
+    "Git Commit": "类型(范围): 描述 (feat/fix/docs/style/refactor/perf/test/chore)，长度小于50字符"
+  },
+  "principles": ["文档驱动", "左移质量", "小步快跑", "自动化验证", "可观测性优先", "安全可回滚"],
+  "taskLoop": "任务指令→开发→单元测试→本地自测→提测代码→交互确认→冒烟测试→回归测试→环境更新→人工确认→自动化更新→推进下一任务"
+}

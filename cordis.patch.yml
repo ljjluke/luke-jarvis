@@ -1,0 +1,9 @@
+# luke-jarvis bundle patch: 注册 Jarvis 核心插件行。
+#
+# 安装方式：作为 npm bundle 安装到 profile（package.json `dsh.bundle.patch` 指向本文件），
+# 或把本文件中的插件行追加进预设的 agent.cordis.yml。
+#
+# 该行把 Jarvis 的 Host 工具(jarvis_project/distill/review/think) 与 /jarvis 命令
+# 注册进当前作用域；铁律全部内嵌插件源码（现场蒸馏、source 必填、协同架构必含、真实优先、防冒名）。
+- id: jarvis-core
+  name: ./src/host/plugin.js
