@@ -143,28 +143,30 @@ test('/jarvis 命令：空输入返回用法', () => {
   assert.ok(r.content.includes('用法'))
 })
 
-test('identifyIndustry：电商需求识别为电商并给出蒸馏方向', () => {
+test('identifyIndustry：无领域预设（插件领域无关），只给分级建议', () => {
   const r = identifyIndustry('我要做一个下沉市场拼团电商小程序，2人团24h成团')
-  assert.strictEqual(r.industry, '电商')
-  assert.ok(r.distillDirections.some((d) => d.includes('黄峥') || d.includes('Sean') || d.includes('丰田')))
+  assert.ok(r.industry.includes('CEO 现场判断'), '不应识别具体行业（领域由 CEO 结合项目判断）')
+  assert.ok(r.suggestion.includes('L') || r.suggestion.includes('M'), '给出分级建议')
+  assert.ok(r.distillDirections.some((d) => d.includes('CEO')), '蒸馏方向由 CEO 按需求特性决定')
 })
 
-test('identifyIndustry：未命中返回待确认', () => {
-  const r = identifyIndustry('今天天气怎么样')
-  assert.ok(r.industry.includes('待确认'))
+test('identifyIndustry：短需求给 S 级（不需要建队）', () => {
+  const r = identifyIndustry('改个文案')
+  assert.ok(r.suggestion.includes('S'), '短需求 S 级')
 })
 
-test('/jarvis 命令执行：真实产物含行业识别与蒸馏指令（非占位）', () => {
+test('/jarvis 命令执行：真实产物含流程/沉淀/蒸馏指令（非占位，无领域预设）', () => {
   const r = jarvisCommand('做一个金融风控系统，要管住资金安全')
-  assert.ok(r.content.includes('行业识别：金融'), '应识别行业')
+  assert.ok(!r.content.includes('行业识别：金融'), '不应预设具体行业（领域无关）')
   assert.ok(r.content.includes('jarvis_distill'), '应包含蒸馏校验指令')
-  assert.ok(r.content.includes('jarvis_fidelity'), '应包含保真度审计指令')
-  assert.ok(r.content.includes('证据不足宁 60 分诚实不要 90 分编造'), '应包含女娲式铁律')
+  assert.ok(r.content.includes('jarvis_process'), '应包含领域流程设计指令')
+  assert.ok(r.content.includes('.jarvis/'), '应包含项目沉淀指令')
+  assert.ok(r.content.includes('60 分诚实'), '应包含女娲式铁律')
 })
 
-test('/jarvis 命令执行：电商需求识别为电商', () => {
+test('/jarvis 命令执行：同一机制适配任意需求（无行业关键词命中）', () => {
   const r = jarvisCommand('做一个短视频带货直播间运营方案')
-  assert.ok(r.content.includes('短视频/内容') || r.content.includes('待确认'))
+  assert.ok(r.content.includes('建议建队等级'), '机制通用')
 })
 
 test('工具清单应含 6 个 jarvis_* 工具（含保真度审计+协同设计）', () => {
@@ -348,4 +350,129 @@ test('jarvis_review：think 为非法 JSON → 明确提示格式错误', async 
   const def = TOOLS.find((t) => t.name === 'jarvis_review')
   const r = await def.handler({ issue: 'x', sideA: 'a', sideB: 'b', thinkA: '不是JSON{{{', thinkB: null })
   assert.ok(r.analysis.includes('不是合法 JSON'), '提示格式错误')
+})
+
+// ── 领域流程（CEO 决定流程：插件无领域预设，永远现场定制）──
+
+test('jarvis_process：任何领域都不返回预设模板（插件领域无关，customized 恒 true）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_process')
+  for (const req of [
+    { industry: '电商', requirement: '下沉市场拼团商城' },
+    { industry: '金融', requirement: '量化风控系统' },
+    { industry: '医疗', requirement: '问诊平台' },
+  ]) {
+    const r = await def.handler(req)
+    assert.strictEqual(r.customized, true, `${req.industry} 也必须 CEO 现场定制`)
+    assert.ok(r.designChecklist.includes('CEO'), '给出设计清单由 CEO 逐项定')
+    assert.ok(r.gates.some((g) => g.includes('CEO')), '闸门占位须 CEO 亲手定义')
+  }
+})
+
+test('jarvis_process：支持参考本项目沉淀（projectRef），但强调按需求修订', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_process')
+  const r = await def.handler({ industry: '电商', requirement: '拼团二期', projectRef: '.jarvis/process-拼团一期.json' })
+  assert.ok(r.verdict.includes('不预设'), '插件无领域预设')
+  assert.ok(r.designChecklist.includes('项目流程沉淀参考'), '提示可参考本项目沉淀')
+  assert.ok(r.designChecklist.includes('严禁原样照搬'), '禁止照搬沉淀')
+})
+
+test('jarvis_process：overrideStages 增删（CEO 有权改流程）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_process')
+  const r = await def.handler({ industry: '软件', requirement: 'x', overrideStages: '+合规审查,-复盘' })
+  assert.ok(r.stages.includes('合规审查'), '追加阶段生效')
+  assert.ok(!r.stages.includes('复盘'), '删除阶段生效')
+})
+
+// ── 项目沉淀（领域无关的"项目资产仓库"，角色卡沉淀在项目里）──
+
+test('jarvis_store：scaffold 输出项目沉淀目录结构（不携带任何静态卡）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  const r = await def.handler({ mode: 'scaffold' })
+  assert.ok(r.structure.some((s) => s.includes('cards/')), '沉淀目录含 cards/')
+  assert.ok(r.structure.some((s) => s.includes('process-')), '沉淀目录含流程文件')
+  assert.ok(r.structure.some((s) => s.includes('components.json')), '含组件清单')
+  assert.ok(r.reuseRule.includes('插件无静态卡'), '复用规则声明插件无卡')
+})
+
+test('jarvis_store：本项目沉淀可复用（须校验+修订），跨项目/插件禁止', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  // 本项目沉淀中存在"研发"卡 → 可复用起点
+  const local = await def.handler({ mode: 'reuse', itemType: 'card', name: '研发', existingCards: JSON.stringify([{ role: '研发', file: 'cards/研发.md' }]) })
+  assert.ok(local.reuseRule.includes('本项目沉淀'), '本项目沉淀可复用')
+  assert.ok(local.reuseRule.includes('jarvis_distill'), '复用须过校验')
+  assert.ok(local.reuseRule.includes('修订'), '复用须按新需求修订')
+  // 不是本项目沉淀 → 禁止复用
+  const cross = await def.handler({ mode: 'reuse', itemType: 'card', name: '某外部大佬', existingCards: JSON.stringify([{ role: '研发' }]) })
+  assert.ok(cross.reuseRule.includes('跨项目/插件禁止'), '跨项目/外部禁止复用')
+})
+
+test('jarvis_store：save 给出项目内落盘路径（非插件资产）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  const r = await def.handler({ mode: 'save', itemType: 'card', name: '产品增长', projectDir: '/x/proj/.jarvis/' })
+  assert.ok(r.savePath.includes('cards/产品增长.md'), '角色卡落盘 cards/')
+  assert.ok(r.verdict.includes('项目沉淀，非插件资产'), '明确是项目资产')
+})
+
+// ── 统一黑板（会议驱动协作的状态中枢）──
+
+test('jarvis_board：add 阻塞 → needsMeeting=true；resolve 后收敛', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  let r = await def.handler({ role: '研发', add: '阻塞：支付接口技术绕不开（风控侧字段缺失）' })
+  assert.strictEqual(r.needsMeeting, true, '存在阻塞 → 必须二次会')
+  assert.ok(r.blockers.length === 1, '阻塞被识别')
+  r = await def.handler({ board: JSON.stringify({ items: r.items }), resolve: '支付接口' })
+  assert.strictEqual(r.needsMeeting, false, '解决后黑板收敛，不需要开会')
+})
+
+test('jarvis_board：未决项≥3 → 建议二次会；决策条目未过 essence → 提示', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  const r = await def.handler({ role: '产品', add: '问题：拼团人数未定\n问题：灰度范围未定\n问题：上线时间未定\n决策：采用固定 2 人团' })
+  assert.ok(r.needsMeeting, '未决 4 项 ≥3 → 建议开会')
+  assert.ok(r.summary.includes('jarvis_essence'), '决策条目提示需需求本质校验')
+  const r2 = await def.handler({ board: JSON.stringify({ items: r.items }), audited: '采用固定 2 人团' })
+  assert.ok(!r2.summary.includes('决策条目未过'), '审计后不再提示')
+})
+
+// ── 问题上行（不许跳过问题）──
+
+test('jarvis_escalate：完整上报（问题+尝试+风险+决策请求）→ 可上报', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_escalate')
+  const r = await def.handler({
+    role: '研发',
+    problem: '分布式事务无法在两数据库间保持强一致，技术上绕不开',
+    attempts: '尝试 TCC/SAGA/本地消息表，均不满足一致性要求',
+    risk: '不解决将导致订单与库存数据不一致，资损风险高，影响上线',
+    decisionNeeded: '是否允许引入 Seata 或接受最终一致降级',
+    urgency: 'high',
+  })
+  assert.strictEqual(r.ok, true, '完整上报单通过')
+  assert.ok(r.record.includes('风险细节'), '记录含风险')
+  assert.ok(r.boardEntry.startsWith('阻塞：'), '黑板条目是阻塞类型')
+  assert.ok(r.protocol.includes('不许跳过'), '纪律文本在位')
+})
+
+test('jarvis_escalate：缺风险细节或决策请求 → 打回（不许空单）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_escalate')
+  const r = await def.handler({ role: '研发', problem: '某某问题搞不定' })
+  assert.strictEqual(r.ok, false, '空单打回')
+  assert.ok(r.missing.some((m) => /风险细节/.test(m)), '提示补风险细节')
+  assert.ok(r.missing.some((m) => /决策请求/.test(m)), '提示补决策请求')
+})
+
+// ── 能力补足（组件化，防没能力硬装会）──
+
+test('jarvis_capability：无现有无市场 → 自研组件化路径', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_capability')
+  const r = await def.handler({ task: '实时风控规则引擎' })
+  assert.ok(r.decision.includes('自研'), '走向自研组件化')
+  assert.ok(r.decision.includes('luke-jarvis'), '自研要求参照可发布插件模式')
+  assert.ok(r.buildNote.includes('组件清单'), '写入组件清单供复用')
+  assert.ok(r.honestNote.includes('没有就是没有'), '诚实边界在位')
+})
+
+test('jarvis_capability：有市场结果 → 验证要点（防假装找到）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_capability')
+  const r = await def.handler({ task: '流程图渲染', marketSearch: 'mermaid 高star' })
+  assert.ok(r.verifyNotes.includes('真实存在'), '要求验证真实存在')
+  assert.ok(r.verifyNotes.includes('license'), '要求验证 license')
 })

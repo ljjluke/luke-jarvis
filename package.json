@@ -1,7 +1,7 @@
 {
   "name": "luke-jarvis",
   "version": "0.1.0",
-  "description": "贾维斯数字员工公司：识别行业 → 现场蒸馏真实大佬 CEO/子角色(六段式+协同架构+source+防冒名) → AgentTeams 并行建队协作 → 收口交付。铁律：角色卡每次现场蒸馏，绝不复用旧卡。含可执行 /jarvis 命令。",
+  "description": "贾维斯数字员工公司（领域无关的操作系统）：需求分级 → CEO 定领域流程 → 现场蒸馏角色卡(六段式+证据链+防冒名) → 项目沉淀(.jarvis/ 可复用) → 协同/会议/黑板/问题上行/能力补足。插件不携带任何静态角色卡与领域模板——卡与流程沉淀在项目里。含可执行 /jarvis 命令。",
   "type": "module",
   "main": "src/host/plugin.js",
   "exports": {
@@ -24,7 +24,6 @@
     "src",
     "preset",
     "skills",
-    "roles",
     "docs",
     "test",
     "scripts",

@@ -23,16 +23,24 @@ let allOk = true
 // ── 0. 入口：/jarvis 命令回执 ─────────────────────────────
 step('0. /jarvis 入口（命令回执含完整 CEO 协议）', async () => {
   const r = jarvisCommand('做一个下沉市场的拼团电商系统，2人团24h成团')
-  allOk = ok('命令回执包含行业识别', r.content.includes('行业识别：电商')) && allOk
-  allOk = ok('回执包含证据链+保真度+协同指令', r.content.includes('证据链') && r.content.includes('保真度') && r.content.includes('协同架构（位置/依赖')) && allOk
+  allOk = ok('命令回执无行业预设（领域无关）', !r.content.includes('行业识别：电商')) && allOk
+  allOk = ok('回执包含证据链+保真度+协同+沉淀指令', r.content.includes('证据链') && r.content.includes('保真度') && r.content.includes('协同') && r.content.includes('jarvis_process') && r.content.includes('.jarvis/')) && allOk
   allOk = ok('回执包含女娲式铁律', r.content.includes('宁 60 分诚实')) && allOk
 })
 
-// ── 1. jarvis_project 识别行业 ────────────────────────────
-step('1. jarvis_project 识别行业', async () => {
+// ── 1. jarvis_project 需求分级 + jarvis_process 定流程（无领域预设）+ jarvis_store 沉淀 ──
+step('1. jarvis_project 分级 + jarvis_process CEO 定制流程 + jarvis_store 项目沉淀', async () => {
   const r = await jd('jarvis_project').handler({ requirement: '做一个下沉市场的拼团电商系统，2人团24h成团' })
-  console.log(`  行业=${r.industry} 建议=${r.suggestion} 方向=${r.distillDirection}`)
-  allOk = ok('识别为电商', r.industry === '电商') && allOk
+  console.log(`  分级=${r.suggestion}`)
+  allOk = ok('分级建议而非行业预设', r.suggestion.includes('L')) && allOk
+  allOk = ok('不返回具体行业（领域由 CEO 判断）', !/^电商$|^金融$/.test(r.industry)) && allOk
+  // CEO 用 jarvis_process 定流程：插件无领域预设 → 给设计清单，CEO 逐项定
+  const p = await jd('jarvis_process').handler({ industry: '电商', requirement: '下沉市场拼团电商系统' })
+  allOk = ok('jarvis_process 不返回预设领域模板（customized 恒 true）', p.customized === true && p.designChecklist.includes('CEO')) && allOk
+  // 项目沉淀：cards/ 结构、复用规则（本项目沉淀可复用 + 跨项目禁止）
+  const st = await jd('jarvis_store').handler({ mode: 'scaffold' })
+  allOk = ok('jarvis_store 项目沉淀结构（cards/ 角色卡沉淀在项目里）', st.structure.some((s) => s.includes('cards/'))) && allOk
+  allOk = ok('复用规则：插件无静态卡', st.reuseRule.includes('插件无静态卡')) && allOk
 })
 
 // ── 2. 女娲式蒸馏 CEO 卡（完整证据链） ─────────────────────
@@ -151,9 +159,32 @@ step('6. jarvis_think_deep 深度思考（防幻觉多阶段）→ jarvis_review
   allOk = ok('裁判优先级铁律保留', r.basis.includes('真实情况 > 用户需求 > 专业判断')) && allOk
 })
 
+// ── 7. 问题上行 + 能力补足 + 黑板闭环（不许跳过/组件化）──
+step('7. 问题上行→黑板阻塞→二次会闭环；能力补足组件化', async () => {
+  // 研发遇到技术绕不开的问题 → jarvis_escalate 上报（带风险细节）
+  const esc = await jd('jarvis_escalate').handler({
+    role: '研发',
+    problem: '秒杀扣库存与支付回调无法做到强一致，技术上绕不开',
+    attempts: '已试本地消息表与事务消息，均不满足',
+    risk: '不解决则库存超卖/支付回调丢失，资损与客诉，影响上线',
+    decisionNeeded: '是否引入分布式事务中间件，或接受最终一致降级',
+    urgency: 'high',
+  })
+  allOk = ok('完整上报单可上报（含风险细节+决策请求）', esc.ok && esc.boardEntry.startsWith('阻塞：')) && allOk
+  // 上报写黑板 → 触发二次会
+  const board = await jd('jarvis_board').handler({ role: '研发', add: esc.boardEntry })
+  allOk = ok('黑板出现阻塞 → 必须二次开会', board.needsMeeting && board.blockers.length === 1) && allOk
+  const cycle = await jd('jarvis_meeting').handler({ meetingType: 'cycle', agenda: '解决支付一致性阻塞', context: board.summary })
+  allOk = ok('二次会（cycle）聚焦黑板未决项', cycle.goal.includes('黑板未决项') && cycle.protocol.includes('jarvis_essence')) && allOk
+  // 能力不足 → jarvis_capability 三级路径（无市场 → 自研组件化）
+  const cap = await jd('jarvis_capability').handler({ task: '分布式事务最终一致补偿', existingTools: '无', marketSearch: '' })
+  console.log(`  能力补足决策: ${cap.decision.split('\n')[0]}...`)
+  allOk = ok('缺能力 → 自研组件化路径 + 诚实边界', cap.decision.includes('自研') && cap.honestNote.includes('没有就是没有')) && allOk
+})
+
 // ── 汇总 ─────────────────────────────────────────────────
 step('汇总', () => {
-  console.log(allOk ? '\n🎉 端到端全流程通过：入口→识别→蒸馏(防迎合)→保真度→协同(防串行)→深度思考→裁决闭环→可建队' : '\n❌ 存在未通过项，见上方 ❌')
-  console.log('流程完整性：7 个工具 + /jarvis 命令，各环节均有硬闸，链路闭环。')
+  console.log(allOk ? '\n🎉 端到端全流程通过：入口→识别→蒸馏(防迎合)→保真度→协同(防串行)→深度思考→裁决→问题上行→能力补足→黑板闭环→可建队' : '\n❌ 存在未通过项，见上方 ❌')
+  console.log('流程完整性：13 个工具 + /jarvis 命令，各环节均有硬闸，链路闭环。')
   process.exit(allOk ? 0 : 1)
 })
