@@ -26,8 +26,6 @@ const EVIDENCE_SECTIONS = [
   '保真度',      // 一手/二手/推断占比，矛盾点
 ]
 
-/** 三重验证关键词（跨域复现 + 生成力 + 排他性）——筛选心智模型用。 */
-const TRIPLE_VALIDATION = ['跨域复现', '生成力', '排他性']
 
 /**
  * 协同架构四要素（CEO 卡硬闸）：子角色如何协同的最小完备集。
@@ -82,8 +80,6 @@ export function validateCardShape(card, isCeo) {
   }
   const hasSourceUrl = /https?:\/\/[^\s）)】]+/.test(card)
   if (!hasSourceUrl) missing.push('source 真实URL(需 https://…，防编造出处)')
-  const hasTripleValidation = TRIPLE_VALIDATION.filter((k) => card.includes(k)).length
-  if (hasTripleValidation < 2) missing.push('三重验证(跨域复现/生成力/排他性 至少2项)')
   // 诚实边界必须提到"信息截止"或"推测成分"其一
   if (!/(信息截止|推测|局限|做不到)/.test(card)) missing.push('诚实边界(信息截止/推测成分/做不到什么)')
 
@@ -384,7 +380,7 @@ export const TOOLS = [
   {
     name: 'jarvis_distill',
     description:
-      '角色卡蒸馏校验器（女娲式，防迎合蒸馏核心）：校验现场蒸馏出的角色卡是否满足证据链硬闸。要求：1) 六段式(身份定位/思维模型/核心方法论/代表作品/决策红线/语言风格) 必含；2) CEO 卡必含协同架构段；3) 证据链必含「证据链/诚实边界/保真度」段——证据链须含 6 维度调研(著作/对话/表达/他者/决策/时间线)，诚实边界须写信息截止/推测成分，保真度须写一手/二手/推断占比；4) source 必须是真实 https URL（防编造出处）；5) 心智模型须过三重验证(跨域复现/生成力/排他性 ≥2 项)；6) 防冒名独立声明。任缺 → 不通过，禁止注入。铁律：捕捉 HOW they think 而非 WHAT they said；证据不足宁可 60 分诚实，不要 90 分编造。',
+      '角色卡蒸馏校验器（女娲式，防迎合蒸馏核心）：校验现场蒸馏出的角色卡是否满足证据链硬闸。要求：1) 六段式(身份定位/思维模型/核心方法论/代表作品/决策红线/语言风格) 必含；2) CEO 卡必含协同架构段；3) 证据链必含「证据链/诚实边界/保真度」段——证据链须含 6 维度调研(著作/对话/表达/他者/决策/时间线)，诚实边界须写信息截止/推测成分，保真度须写一手/二手/推断占比；4) source 必须是真实 https URL（防编造出处）；5) 防冒名独立声明；6) 深度闸：六段正文须有实质内容、方法论须含 HOW 动作链(捕捉 HOW they think 而非 WHAT they said)、证据链六维度逐项带内容、有反例/失效边界、source 非保留域+有查证痕迹(assessCardDepth≥60)。任缺 → 不通过，禁止注入；浅层卡(结构齐全内容空洞)一票否决。证据不足宁可 60 分诚实，不要 90 分编造。',
     parameters: {
       type: 'object',
       properties: {
@@ -756,7 +752,7 @@ export const TOOLS = [
   {
     name: 'jarvis_fidelity',
     description:
-      '角色卡保真度审计器（女娲 FIDELITY 机制）：对蒸馏产出的角色卡做保真度审计，输出证据质量报告。审计项：1) 一手来源占比（本人著作/对话/决策记录 vs 二手转述 vs 推断）；2) 心智模型是否过三重验证（跨域复现/生成力/排他性）；3) 诚实边界是否明确（信息截止时间/做不到什么/推测成分）；4) 矛盾点是否保留（不和稀泥）；5) 信息源黑名单是否回避（知乎/微信公众号等洗稿源）。产出 PRIMARILY-FIRST-HAND / MIXED / SPECULATIVE 评级 + 建议。',
+      '角色卡保真度审计器（女娲 FIDELITY 机制）：对蒸馏产出的角色卡做保真度审计，输出证据质量报告。审计项：1) 一手来源占比（本人著作/对话/决策记录 vs 二手转述 vs 推断）；2) 方法论是否含 HOW 动作链与反例边界（有深度而非贴标签）；3) 诚实边界是否明确（信息截止时间/做不到什么/推测成分）；4) 矛盾点是否保留（不和稀泥）；5) 信息源黑名单是否回避（知乎/微信公众号等洗稿源）。产出 PRIMARILY-FIRST-HAND / MIXED / SPECULATIVE 评级 + 建议。',
     parameters: {
       type: 'object',
       properties: {
@@ -792,7 +788,7 @@ export const TOOLS = [
       if (/推断|推测/.test(evidenceText)) firstHand += 0.15
       firstHand = Math.min(1, firstHand + depth.dimsCovered * 0.03)
       if (!card.includes('诚实边界') || !/(信息截止[:：]?\s*(20\d\d|至今|v\d)|做不到|推测|局限)/.test(card)) issues.push('缺诚实边界（须含具体信息截止时间/推测成分/做不到什么）')
-      if (!/(跨域复现|生成力|排他性)/.test(card)) issues.push('心智模型未经三重验证（跨域复现/生成力/排他性）')
+      if (!depth.hasHow) issues.push('方法论只有标签没有 HOW 动作链（真实人物蒸馏要写出"怎么做/什么情况怎么办"，非贴标签）')
       if (!/(矛盾|张力|分歧|反例|不适用|失效)/.test(card)) issues.push('未记录矛盾/反例/失效边界（女娲原则：保留张力而非和稀泥）')
       if (/知乎|微信公众号|百度百科/.test(card)) issues.push('命中了信息源黑名单（知乎/公众号/百度百科）——洗稿源需替换为权威一手来源')
       if (/example\.com|localhost|127\.0\.0\.1/.test(card)) issues.push('source 是保留/示例域（example.com 等不可能有真实内容）——必须换成真实查到的 URL')
