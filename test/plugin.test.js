@@ -8,20 +8,20 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert'
-import plugin, { TOOLS, validateCardShape, jarvisCommand, identifyIndustry, checkCollabHealth } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
-  '身份定位：电商 CEO，负责……',
-  '思维模型：第一性原理……（跨域复现：在产品和定价均出现；生成力：可推断新品类立场；排他性：独特）',
-  '核心方法论：1) xx；2) yy……',
-  '代表作品：参考真实作品公开框架——只借鉴框架，不冒充署名。',
-  '决策红线：虚假规模一票否决。',
-  '语言风格：数据驱动，结论先行。',
-  '协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。',
-  '证据链：著作(2部) + 对话(3段访谈) + 表达(社媒) + 他者评价 + 决策记录 + 时间线——达标。',
-  '保真度：一手占比约0.7；矛盾点1处已保留（他对 A 与 B 的立场存在张力，未和稀泥）。',
+  '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
+  '思维模型：第一性原理+供应链效率——先拆商品毛利结构，按"有效GMV"判断增长真假，再用供应链成本反推定价（跨域复现：商品/渠道/获客均出现；生成力：可推断新品类打法；排他性：独特）。',
+  '核心方法论：1) 先定北极星指标，再排优先级；2) 供应链效率是本质，先算成本再谈让利；3) 让利只给真实用户，按拆单/地址/设备特征反刷单。',
+  '代表作品：参考拼购模式与供应链整合的公开打法——只借鉴框架，不冒充署名。',
+  '决策红线：虚假规模/刷单/套利冲量一票否决；绕过资金风控底线一票否决；不适用场景：非价格敏感品类。',
+  '语言风格：数据驱动，结论先行，直指本质。',
+  '协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约、供应链成本；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。',
+  '证据链：著作(内部方法论，2009年起多篇) + 对话(2段访谈，2021 podcast) + 表达(个人社媒长文) + 他者评价(供应链同行背书) + 决策记录(拼购案例复盘) + 时间线(2015-2023 逐年公开动作)——6维度达标。',
+  '保真度：一手占比约0.7；矛盾点1处已保留（对规模与利润的立场存在张力，未和稀泥）。',
   '诚实边界：信息截止2026-08；无法预判全新问题；存在公开表达 vs 真实想法差距；含推测成分已标注。',
-  'source：https://example.com/real-source/interview',
+  'source：https://www.chinastarmarket.cn/article/26317（本次 web 搜索确认该访谈原文，方法论摘自其决策记录段落）',
   '防冒名声明：本角色卡借鉴其公开方法论，非其本人观点。',
 ].join('\n')
 
@@ -30,7 +30,7 @@ test('validateCardShape：合格 CEO 卡（女娲式证据链完整）通过', (
 })
 
 test('validateCardShape：缺证据链段不通过', () => {
-  const card = GOOD_CEO_CARD.replace('证据链：著作(2部) + 对话(3段访谈) + 表达(社媒) + 他者评价 + 决策记录 + 时间线——达标。', '')
+  const card = GOOD_CEO_CARD.replace('证据链：著作(内部方法论，2009年起多篇) + 对话(2段访谈，2021 podcast) + 表达(个人社媒长文) + 他者评价(供应链同行背书) + 决策记录(拼购案例复盘) + 时间线(2015-2023 逐年公开动作)——6维度达标。', '')
   const missing = validateCardShape(card, true)
   assert.ok(missing.includes('证据链'))
 })
@@ -42,7 +42,7 @@ test('validateCardShape：缺诚实边界不通过（防编造型蒸馏）', () 
 })
 
 test('validateCardShape：source 非真实 URL 不通过（拦截编造出处）', () => {
-  const card = GOOD_CEO_CARD.replace('source：https://example.com/real-source/interview', 'source：据某书，非URL')
+  const card = GOOD_CEO_CARD.replace('source：https://www.chinastarmarket.cn/article/26317（本次 web 搜索确认该访谈原文，方法论摘自其决策记录段落）', 'source：据某书，非URL')
   const missing = validateCardShape(card, true)
   assert.ok(missing.some((m) => /真实URL/.test(m)))
 })
@@ -52,6 +52,44 @@ test('jarvis_fidelity：保真度合格卡评级 PRIMARILY-FIRST-HAND', async ()
   const r = await def.handler({ role: 'CEO', card: GOOD_CEO_CARD })
   assert.strictEqual(r.rating, 'PRIMARILY-FIRST-HAND')
   assert.deepStrictEqual(r.issues, [])
+})
+
+// ── 深度硬闸（防"标题齐全内容空洞"的浅层蒸馏）──
+
+test('assessCardDepth：空洞但关键词齐全的卡 → 深度分低（浅层卡拦下）', () => {
+  const VOID = [
+    '身份定位：高管。', '思维模型：很强（跨域复现：有；生成力：有）。', '核心方法论：方法论。',
+    '代表作品：作品——只借鉴框架，不冒充署名。', '决策红线：底线。', '语言风格：简洁。',
+    '我的协同：本角色位置=上游；依赖=产品给契约；给测试喂接口；升级=CEO。',
+    '证据链：著作+对话+表达+他者+决策+时间线。', '保真度：一手0.6；矛盾保留。',
+    '诚实边界：信息截止；推测已标。', 'source：https://example.com/fake', '防冒名声明：只借鉴框架，不冒充署名。',
+  ].join('\n')
+  const d = assessCardDepth(VOID, false)
+  assert.ok(d.score < 60, `空洞卡深度分应<60，实际 ${d.score}`)
+  assert.ok(d.issues.some((i) => /太空洞/.test(i)), '应指出段内容空洞')
+})
+
+test('assessCardDepth：真实感深度卡 → 高分（六段实content+HOW+反例+查证痕迹+真实域）', () => {
+  const d = assessCardDepth(GOOD_CEO_CARD, true)
+  assert.ok(d.score >= 75, `深度卡应≥75 分，实际 ${d.score}`)
+  assert.ok(d.hasHow, '方法论含 HOW 动作链')
+  assert.ok(d.dimsCovered >= 5, `证据链维度覆盖 ≥5，实际 ${d.dimsCovered}`)
+  assert.ok(d.hasBoundary, '含反例/失效边界')
+  assert.ok(d.hasVerifyTrace, '含查证痕迹')
+})
+
+test('jarvis_distill：空洞卡 → ok=false（深度闸拦截，不是只看标题）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill')
+  const VOID = [
+    '身份定位：高管。', '思维模型：很强（跨域复现：有；生成力：有）。', '核心方法论：方法论。',
+    '代表作品：作品——只借鉴框架，不冒充署名。', '决策红线：底线。', '语言风格：简洁。',
+    '我的协同：本角色位置=上游；依赖=产品给契约；给测试喂接口；升级=CEO。',
+    '证据链：著作+对话+表达+他者+决策+时间线。', '保真度：一手0.6；矛盾保留。',
+    '诚实边界：信息截止；推测已标。', 'source：https://example.com/fake', '防冒名声明：只借鉴框架，不冒充署名。',
+  ].join('\n')
+  const r = await def.handler({ role: '公关', card: VOID, isCeo: false })
+  assert.strictEqual(r.ok, false, '空洞卡必须拦下')
+  assert.ok(r.depthScore !== undefined && r.depthScore < 60, `给出低深度分 ${r.depthScore}`)
 })
 
 test('jarvis_fidelity：命中黑名单源 → 标记问题', async () => {
@@ -70,7 +108,7 @@ test('jarvis_fidelity：缺诚实边界 → 非 PRIMARILY', async () => {
 })
 
 test('validateCardShape：缺 source 不通过', () => {
-  const card = GOOD_CEO_CARD.replace('source：https://example.com/real-source/interview', '')
+  const card = GOOD_CEO_CARD.replace('source：https://www.chinastarmarket.cn/article/26317（本次 web 搜索确认该访谈原文，方法论摘自其决策记录段落）', '')
   const missing = validateCardShape(card, true)
   assert.ok(missing.includes('source'))
 })
@@ -82,13 +120,13 @@ test('validateCardShape：缺防冒名不通过', () => {
 })
 
 test('validateCardShape：CEO 缺协同架构不通过', () => {
-  const card = GOOD_CEO_CARD.replace('协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。', '')
+  const card = GOOD_CEO_CARD.replace('协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约、供应链成本；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。', '')
   const missing = validateCardShape(card, true)
   assert.ok(missing.includes('协同架构'))
 })
 
 test('validateCardShape：普通角色不需协同架构（但需证据链）', () => {
-  const card = GOOD_CEO_CARD.replace('协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。', '')
+  const card = GOOD_CEO_CARD.replace('协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约、供应链成本；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。', '')
   const missing = validateCardShape(card, false)
   assert.ok(!missing.includes('协同架构'), '普通角色不需协同架构')
   assert.ok(!missing.includes('证据链'), '但仍需证据链')
@@ -103,7 +141,7 @@ test('jarvis_distill handler：空卡 → ok=false 且提示现场蒸馏', async
 
 test('jarvis_distill handler：缺段卡 → ok=false 并列出缺失', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_distill')
-  const bad = GOOD_CEO_CARD.replace('决策红线：虚假规模一票否决。', '')
+  const bad = GOOD_CEO_CARD.replace('决策红线：虚假规模/刷单/套利冲量一票否决；绕过资金风控底线一票否决；不适用场景：非价格敏感品类。', '')
   const r = await def.handler({ role: 'CEO', card: bad, isCeo: true })
   assert.strictEqual(r.ok, false)
   assert.ok(r.missing.includes('决策红线'))
@@ -263,7 +301,7 @@ test('非 CEO 角色卡缺「我的协同/位置/依赖/升级」→ 不通过�
     '证据链：著作+对话+表达+他者+决策+时间线。',
     '保真度：一手0.6；矛盾保留。',
     '诚实边界：信息截止；推测已标。',
-    'source：https://example.com/dev',
+    'source：https://developer.mozilla.org/zh-CN/docs/Web/API（本次 web 检索确认其公开演讲原文，方法论摘自决策记录段落）',
     '防冒名声明：只借鉴框架，不冒充署名。',
   ].join('\n')
   const missing = validateCardShape(bare, false)
@@ -282,7 +320,7 @@ test('非 CEO 角色卡含「我的职责/依赖/升级」→ 通过', () => {
     '证据链：著作+对话+表达+他者+决策+时间线。',
     '保真度：一手0.6；矛盾保留。',
     '诚实边界：信息截止；推测已标。',
-    'source：https://example.com/dev',
+    'source：https://developer.mozilla.org/zh-CN/docs/Web/API（本次 web 检索确认其公开演讲原文，方法论摘自决策记录段落）',
     '防冒名声明：只借鉴框架，不冒充署名。',
   ].join('\n')
   const missing = validateCardShape(good, false)

@@ -34,8 +34,17 @@ node --test test/plugin.test.js >/dev/null 2>&1 && echo "   TESTS-OK" || { echo 
 echo "== 8) 端到端流程（入口→流程→蒸馏→保真度→协同→思考→裁决→问题上行→黑板→沉淀→建队） =="
 node test/e2e-flow.test.mjs >/dev/null 2>&1 && echo "   E2E-OK" || { echo "   E2E-FAIL"; exit 1; }
 
-echo "== 9) 新铁律落位（需求本质/问题上行/能力补足/项目沉淀） =="
-grep -q "jarvis_essence" src/host/plugin.js && grep -q "jarvis_escalate" src/host/plugin.js && grep -q "jarvis_capability" src/host/plugin.js && grep -q "jarvis_store" src/host/plugin.js && echo "   IRON-RULES-OK (essence/escalate/capability/store 四闸在位)" || { echo "   IRON-RULES-MISSING"; exit 1; }
+echo "== 9) 新铁律落位（需求本质/问题上行/能力补足/项目沉淀/深度闸） =="
+grep -q "jarvis_essence" src/host/plugin.js && grep -q "jarvis_escalate" src/host/plugin.js && grep -q "jarvis_capability" src/host/plugin.js && grep -q "jarvis_store" src/host/plugin.js && grep -q "assessCardDepth" src/host/plugin.js && echo "   IRON-RULES-OK (essence/escalate/capability/store/deep 五闸在位)" || { echo "   IRON-RULES-MISSING"; exit 1; }
+
+echo "== 10) 蒸馏深度硬闸行为实测（浅层卡须被拦） =="
+node -e "
+import('./src/host/plugin.js').then(async (m) => {
+  const VOID = ['身份定位：高管。','思维模型：很强（跨域复现：有；生成力：有）。','核心方法论：方法论。','代表作品：作品——只借鉴框架，不冒充署名。','决策红线：底线。','语言风格：简洁。','我的协同：本角色位置=上游；依赖=产品给契约；给测试喂接口；升级=CEO。','证据链：著作+对话+表达+他者+决策+时间线。','保真度：一手0.6；矛盾保留。','诚实边界：信息截止；推测已标。','source：https://example.com/fake','防冒名声明：只借鉴框架，不冒充署名。'].join('\n')
+  const r = await m.TOOLS.find(t=>t.name==='jarvis_distill').handler({role:'x',card:VOID,isCeo:false})
+  if (r.ok || (r.depthScore ?? 100) >= 60) { console.error('FAIL: 空洞卡未拦'); process.exit(1) }
+  console.log('   空洞卡被深度闸拦下(深度 '+r.depthScore+'/100): OK')
+})" >/dev/null 2>&1 && echo "   DEPTH-GATE-OK" || { echo "   DEPTH-GATE-FAIL"; exit 1; }
 
 echo ""
 echo "✅ 全部通过：luke-jarvis 可发布/可安装。"

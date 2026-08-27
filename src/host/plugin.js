@@ -113,6 +113,87 @@ export function validateCardShape(card, isCeo) {
   return missing
 }
 
+/** 角色卡深度评估（防"浅层蒸馏"：结构标题齐全 ≠ 内容有深度）。
+ * 无网可判定的"实质"证据：六段正文不是空话、方法论含 HOW 动作链、证据链六维度逐项带内容、
+ * 有反例/失效边界（真实方法的边界感）、source 域名真实（非保留域）+ 有查证痕迹（蒸馏时实际搜过）。
+ * 返回 0-100 深度分 + 各维度问题清单。浅层卡（标题齐全但内容空洞）必须被拦住。
+ */
+export function assessCardDepth(card, isCeo) {
+  const issues = []
+  const text = String(card ?? '')
+  // ── 1. 六段式正文实质（标题后要有内容，不能是空话/占位）──
+  const PLACEHOLDER = /待(填|补|写)|xxx|……|…\s*$|暂缺|未写|TODO|不详|无内容/i
+  const depthSections = {}
+  const lines = text.split('\n')
+  let cur = ''
+  for (const ln of lines) {
+    const m = ln.match(/^\s*([^：:\n]{2,12})[：:]\s*(.*)$/)
+    if (m && SECTIONS.includes(m[1].trim())) {
+      cur = m[1].trim()
+      depthSections[cur] = m[2] || ''
+    } else if (cur && ln.trim()) {
+      depthSections[cur] = (depthSections[cur] || '') + ln
+    }
+  }
+  let filled = 0
+  for (const s of SECTIONS) {
+    const body = (depthSections[s] || '').trim()
+    if (body.length >= 15 && !PLACEHOLDER.test(body)) filled++
+    else issues.push(`「${s}」内容太空洞（应≥15字且非占位/空话，当前='${body.slice(0, 20)}'）`)
+  }
+  // ── 2. HOW 而非 WHAT：思维模型/核心方法论须含动作链（怎么做，不是贴标签）──
+  const HOW = /(先|再|然后|若|则|当|按|根据|判断|优先级|流程|步骤|对比|拆解|验证|假设|原则[：:]|反推|复盘|迭代)/
+  const methodologyText = (depthSections['思维模型'] || '') + (depthSections['核心方法论'] || '')
+  const hasHow = HOW.test(methodologyText)
+  if (!hasHow) issues.push('思维模型/核心方法论只有标签没有"怎么做"的动作链（HOW 而非 WHAT：要写出先做什么、遇到什么情况怎么办）')
+  // ── 3. 证据链六维度逐项带内容（不是光秃秃列词）──
+  // 证据链/诚实边界不在 SECTIONS 六段里，直接在全文中定位
+  const evidenceText = text
+  const DIMS = ['著作', '对话', '表达', '他者', '决策', '时间线']
+  let dimsCovered = 0
+  for (const dim of DIMS) {
+    const idx = evidenceText.indexOf(dim)
+    // 该维度出现且后面 30 字内有实质内容（非空话）
+    if (idx >= 0) {
+      const tail = evidenceText.slice(idx + dim.length, idx + dim.length + 30)
+      if (tail.trim().length >= 2 && !PLACEHOLDER.test(tail)) dimsCovered++
+    }
+  }
+  if (dimsCovered < 5) issues.push(`证据链六维度只覆盖 ${dimsCovered}/6（著作/对话/表达/他者/决策/时间线 须逐项带实际内容，不是列词）`)
+  // ── 4. 反例/失效边界（真实方法的边界感；女娲"保留矛盾"）──
+  const hasBoundary = /不适用|边界|例外|反例|失效|不成立|局限|矛盾|张力|做不到/.test(text)
+  if (!hasBoundary) issues.push('无反例/失效边界（真实方法论应写明"什么情况不适用/会失效"，防把方法当万能）')
+  // ── 5. source 真实性：域名非保留域 + 蒸馏有查证痕迹 ──
+  const url = (text.match(/https?:\/\/[^\s）)】]+/) || [''])[0]
+  const RESERVED = /example\.com|localhost|127\.0\.0\.1|\.test\b|your-domain|占位/
+  const hasReservedDomain = RESERVED.test(url)
+  if (!url) issues.push('无 source URL')
+  else if (hasReservedDomain) issues.push(`source 域名不可信（${url.slice(0, 40)} 是保留/示例域，不可能有真实内容——需换成真实查到的 URL）`)
+  const hasVerifyTrace = /查证|核实|搜索|检索|web 搜|查到|访问.*页|原文|出处|检索记录/.test(text)
+  if (!hasVerifyTrace) issues.push('无查证痕迹（应写明"本次 web 搜索了什么/在哪页确认了真人与其方法"——证明真查过，不是编 URL）')
+  // ── 6. 诚实边界实质（信息截止须带具体时间/版本；不只在六段式里找）──
+  const hasHonestyDepth = /(信息截止[:：]?\s*(20\d\d|202\d|至今|某月|v\d|版本)|截至\s*20\d\d|推测成分[:：]?\s*(已标注|已标)|做不到[:：])/.test(text)
+  if (!hasHonestyDepth) issues.push('诚实边界缺具体信息截止（应写"信息截止到 20XX-XX"或"截至版本"，不是只说"有推测"）')
+
+  // ── 评分（0-100）──
+  let score = 0
+  score += filled * 6            // 六段实质内容 36
+  if (hasHow) score += 15        // HOW 动作链 15
+  score += Math.min(15, dimsCovered * 2.5) // 证据链维度 15
+  if (hasBoundary) score += 10   // 反例边界 10
+  if (url && !hasReservedDomain) score += 10 // source 域名 10
+  if (hasVerifyTrace) score += 8 // 查证痕迹 8
+  if (hasHonestyDepth) score += 6 // 诚实边界 6
+  score = Math.round(score)
+  const verdict =
+    score >= 75
+      ? `深度合格（${score}/100）：六段有实质内容、方法论含 HOW、证据链维度齐全、有反例边界与查证痕迹。`
+      : score >= 55
+        ? `深度一般（${score}/100）：结构齐全但内容偏浅，建议补实后再用。`
+        : `深度不足（${score}/100）：属于"标题齐全内容空洞"的浅层卡——蒸馏人不许把浅卡当成品交付。`
+  return { score, issues, filled, hasHow, dimsCovered, hasBoundary, hasVerifyTrace, verdict }
+}
+
 /** 四个模型工具定义（ToolDefinition 形态，供 tools.register） */
 export const TOOLS = [
   {
@@ -319,11 +400,15 @@ export const TOOLS = [
         properties: {
           ok: { type: 'boolean' },
           missing: { type: 'array', items: { type: 'string' }, description: '缺失的段/声明' },
+          depthScore: { type: 'number', description: '深度分 0-100（防浅层蒸馏）' },
+          depthIssues: { type: 'array', items: { type: 'string' }, description: '深度不足的问题' },
           verdict: { type: 'string', description: '通过/不通过 + 原因' },
         },
         required: ['ok', 'verdict'],
       },
-      render: (r) => (r.ok ? `✅ ${r.verdict}` : `❌ ${r.verdict}${r.missing && r.missing.length ? ' 缺失:' + r.missing.join(',') : ''}`),
+      render: (r) =>
+        `✅ ${r.verdict}` +
+        (r.depthScore !== undefined ? `\n深度 ${r.depthScore}/100${r.depthIssues?.length ? ' 待补:' + r.depthIssues.slice(0, 3).join(';') : ''}` : ''),
     },
     handler: async (args) => {
       const card = String(args.card ?? '')
@@ -335,7 +420,17 @@ export const TOOLS = [
       if (missing.length) {
         return { ok: false, missing, verdict: `角色卡缺 ${missing.join('、')}；请补全后重新蒸馏并用 jarvis_distill 校验` }
       }
-      return { ok: true, verdict: `卡结构合格（六段式${isCeo ? '+协同架构' : ''}+source+防冒名）。注入后员工只借鉴其思考框架，真实判断必须基于实际数据/代码/复现。` }
+      // 深度硬闸：结构齐全≠有深度。浅层卡（标题齐全内容空洞/编造保留域 URL/无查证痕迹）→ 不通过
+      const depth = assessCardDepth(card, isCeo)
+      if (depth.score < 60) {
+        return { ok: false, missing: [], depthScore: depth.score, depthIssues: depth.issues, verdict: `深度不足（${depth.score}/100）——"结构齐全内容空洞"的浅层卡不得注入。${depth.issues.slice(0, 3).join('；')}` }
+      }
+      return {
+        ok: true,
+        depthScore: depth.score,
+        depthIssues: depth.issues,
+        verdict: `卡合格（结构+深度 ${depth.score}/100）：六段式${isCeo ? '+协同架构' : ''}+source+防冒名，方法论含 HOW、证据链维度齐全、有查证痕迹。注入后员工只借鉴其思考框架，真实判断必须基于实际数据/代码/复现。`,
+      }
     },
   },
 
@@ -686,24 +781,30 @@ export const TOOLS = [
     handler: async (args) => {
       const card = String(args.card ?? '')
       const issues = []
+      // 保真度不再"出现关键词就加分"，而是吃深度评估的实质证据：
+      // 证据链维度真实覆盖数、有无查证痕迹、有无反例边界、source 是否真实域
+      const depth = assessCardDepth(card, false)
+      // 一手占比（证据链维度里"著作/对话/决策记录"属一手；"他者评价/二手"属二手；无覆盖不给分）
       let firstHand = 0
-      if (/一手|著作|原创|决策记录/.test(card)) firstHand += 0.4
-      if (/对话|访谈|transcript|播客/.test(card)) firstHand += 0.3
-      if (/他人评价|二手|转述/.test(card)) firstHand += 0.15
-      if (/推断|推测/.test(card)) firstHand += 0.1
-      firstHand = Math.min(1, firstHand + 0.05)
-      if (!card.includes('诚实边界') || !/(信息截止|推测|局限|做不到)/.test(card)) issues.push('缺诚实边界（信息截止/推测成分/做不到什么）')
+      const evidenceText = card
+      if (/(著作|对话|访谈|决策记录|原创|演讲原文)/.test(evidenceText)) firstHand += 0.45
+      if (/他者评价|二手|转述|他人/.test(evidenceText)) firstHand += 0.2
+      if (/推断|推测/.test(evidenceText)) firstHand += 0.15
+      firstHand = Math.min(1, firstHand + depth.dimsCovered * 0.03)
+      if (!card.includes('诚实边界') || !/(信息截止[:：]?\s*(20\d\d|至今|v\d)|做不到|推测|局限)/.test(card)) issues.push('缺诚实边界（须含具体信息截止时间/推测成分/做不到什么）')
       if (!/(跨域复现|生成力|排他性)/.test(card)) issues.push('心智模型未经三重验证（跨域复现/生成力/排他性）')
-      if (!/(矛盾|张力|分歧)/.test(card)) issues.push('未记录矛盾/内在张力（女娲原则：保留矛盾而非和稀泥）')
+      if (!/(矛盾|张力|分歧|反例|不适用|失效)/.test(card)) issues.push('未记录矛盾/反例/失效边界（女娲原则：保留张力而非和稀泥）')
       if (/知乎|微信公众号|百度百科/.test(card)) issues.push('命中了信息源黑名单（知乎/公众号/百度百科）——洗稿源需替换为权威一手来源')
-      const rating = !issues.length && firstHand >= 0.6 ? 'PRIMARILY-FIRST-HAND' : issues.length <= 1 ? 'MIXED' : 'SPECULATIVE'
+      if (/example\.com|localhost|127\.0\.0\.1/.test(card)) issues.push('source 是保留/示例域（example.com 等不可能有真实内容）——必须换成真实查到的 URL')
+      if (!/查证|核实|搜索|检索|原文|出处/.test(card)) issues.push('无查证痕迹（应写明 web 搜索记录/在哪页确认真人）——防"编 URL"')
+      const rating = !issues.length && firstHand >= 0.6 && depth.dimsCovered >= 5 ? 'PRIMARILY-FIRST-HAND' : issues.length <= 1 ? 'MIXED' : 'SPECULATIVE'
       return {
         rating,
         firstHandRatio: Math.round(firstHand * 100) / 100,
         issues,
         verdict: !issues.length
-          ? '保真度合格：一手来源充分、三重验证齐备、诚实边界清晰。可注入（仍只借鉴框架，不冒充署名）。'
-          : `保真度不足：${issues.length} 项待修。修改后用 jarvis_distill + jarvis_fidelity 复验。宁要 60 分诚实，不要 90 分编造。`,
+          ? `保真度合格（一手占比 ${Math.round(firstHand * 100) / 100}，证据链维度 ${depth.dimsCovered}/6）：一手来源充分、三重验证齐备、诚实边界清晰、有查证痕迹。可注入（仍只借鉴框架，不冒充署名）。`
+          : `保真度不足：${issues.length} 项待修（${issues.slice(0, 3).join('；')}）。修改后用 jarvis_distill + jarvis_fidelity 复验。宁要 60 分诚实，不要 90 分编造。`,
       }
     },
   },
