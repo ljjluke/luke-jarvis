@@ -106,9 +106,54 @@ step('5b. 防呆：串行交接被拦（应改并行）', async () => {
   allOk = ok('串行交接被拦', r.ok === false) && allOk
 })
 
+// ── 6. 深度思考 + 分歧裁决闭环（角色卡×ponder 轻量七段 → review 消费） ──
+const roleCard = [
+  '身份定位：风控负责人。',
+  '思维模型：黑产对抗思维（先想最坏）。',
+  '核心方法论：1) 最坏情况先于体验；2) 规则可解释。',
+  '代表作品：参考公开风控框架——只借鉴框架。',
+  '决策红线：资金安全一票否决。',
+  '语言风格：先结论后风险。',
+  '我的协同：我负责资金安全；从交易系统拿订单数据；给产品反馈拦截率；升级=分歧交 CEO/jarvis_review。',
+  '证据链：著作+对话+表达+他者+决策+时间线。',
+  '保真度：一手0.6；矛盾保留。',
+  '诚实边界：信息截止；推测已标。',
+  'source：https://example.com/risk/interview',
+  '防冒名声明：只借鉴框架，不冒充署名。',
+].join('\n')
+
+step('6. jarvis_think_deep 深度思考（防幻觉多阶段）→ jarvis_review 裁决闭环', async () => {
+  const t = await jd('jarvis_think_deep').handler({ question: '拼团是否支持虚拟拼单凑单？', roleCard, stakes: 'high' })
+  allOk = ok('深度思考任务单七段齐全（前提/视角/反方/失效/真实核对/边界/收敛）',
+    t.premises && t.counter.includes('当X时不成立') && t.respondAs.includes('JSON')) && allOk
+  // 该角色"完成"思考并按格式产出结构化帧（模拟 LLM 按任务单思考后的结果）
+  const thinkFrame = {
+    premises: ['凑单能拉成团率：未验证', '虚拟身份可被拦截：待核对'],
+    perspective: '最坏情况先于体验——虚拟拼单引入欺诈面',
+    counter: ['当风控无法识别虚拟身份时不成立', '当用户真实参团率本就不足时不成立', '当拦截规则可被绕过时不成立'],
+    failure: '若允许：黑产批量占库存，真实用户买不到',
+    realityCheck: ['核对历史参团率', '核对黑产样本特征'],
+    limits: '无法预判未来代收方式；推测已标',
+    conclusion: '禁止虚拟拼单，除非真实核对通过且风控可拦截',
+    confidence: 'high',
+    escalateTo: 'CEO/jarvis_review',
+  }
+  const r = await jd('jarvis_review').handler({
+    issue: '拼团是否支持虚拟拼单凑单？',
+    sideA: '允许（增长视角，拉成团率）',
+    sideB: '禁止（风控视角，资金安全）',
+    thinkA: JSON.stringify({ counter: ['当真实用户不足时成团率不升反降'], realityCheck: ['核对真实参团率'], confidence: 'medium', conclusion: '允许但限频' }),
+    thinkB: JSON.stringify(thinkFrame),
+  })
+  console.log(`  分析:\n${r.analysis}`)
+  allOk = ok('裁决引用双方反方攻击', r.analysis.includes('当风控无法识别虚拟身份时不成立')) && allOk
+  allOk = ok('裁决引用真实核对项', r.analysis.includes('黑产样本') || r.analysis.includes('参团率')) && allOk
+  allOk = ok('裁判优先级铁律保留', r.basis.includes('真实情况 > 用户需求 > 专业判断')) && allOk
+})
+
 // ── 汇总 ─────────────────────────────────────────────────
 step('汇总', () => {
-  console.log(allOk ? '\n🎉 端到端全流程通过：入口→识别→蒸馏(防迎合)→保真度→协同(防串行)→可建队' : '\n❌ 存在未通过项，见上方 ❌')
-  console.log('流程完整性：6 个工具 + /jarvis 命令，各环节均有硬闸，链路闭环。')
+  console.log(allOk ? '\n🎉 端到端全流程通过：入口→识别→蒸馏(防迎合)→保真度→协同(防串行)→深度思考→裁决闭环→可建队' : '\n❌ 存在未通过项，见上方 ❌')
+  console.log('流程完整性：7 个工具 + /jarvis 命令，各环节均有硬闸，链路闭环。')
   process.exit(allOk ? 0 : 1)
 })

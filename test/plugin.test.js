@@ -286,3 +286,66 @@ test('非 CEO 角色卡含「我的职责/依赖/升级」→ 通过', () => {
   const missing = validateCardShape(good, false)
   assert.ok(!missing.some((m) => /我的协同|我的位置|我的依赖|我的升级/.test(m)), '分工明确应通过')
 })
+
+// ── 深度思考增强（角色卡 × ponder 轻量七段）──
+
+test('jarvis_think_deep：输出七段对抗式思考任务单（ponder 轻量化）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
+  const r = await def.handler({ question: '拼团要 2 人还是 3 人成团？', roleCard: '身份定位：产品增长负责人。', stakes: 'medium' })
+  assert.ok(r.premises.includes('前提'), '前提审视段')
+  assert.ok(r.perspective.includes('第一判断'), '视角展开段')
+  assert.ok(r.counter.includes('当X时不成立'), '反方攻击段')
+  assert.ok(r.failure.length > 0, '失效推演段')
+  assert.ok(r.realityCheck.includes('真实'), '真实优先核对段')
+  assert.ok(r.limits.includes('诚实边界'), '诚实边界段')
+  assert.ok(r.conclusion.includes('置信度'), '收敛结论段')
+  assert.ok(r.respondAs.includes('JSON'), '要求结构化回复')
+})
+
+test('jarvis_think_deep：stakes=high 强制更强对抗（反方≥3+可谬自评）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
+  const r = await def.handler({ question: '是否接入第三方支付？', roleCard: '身份定位：风控负责人。', stakes: 'high' })
+  assert.ok(r.counter.includes('至少 3 条'), '高赌注反方≥3')
+  assert.ok(r.failure.includes('至少 2 种'), '高赌注失效推演×2')
+  assert.ok(r.conclusion.includes('最可能因为什么错'), '高赌注可谬自评')
+})
+
+test('jarvis_think_deep：stakes=low 轻量对抗（反方≥1）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
+  const r = await def.handler({ question: '按钮文案用哪个？', roleCard: '身份定位：产品负责人。', stakes: 'low' })
+  assert.ok(r.counter.includes('至少 1 条'), '低赌注反方≥1')
+})
+
+test('jarvis_review：传入双方深度思考帧 → analysis 引用反方/真实核对', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({
+    issue: '拼团是否允许虚拟拼单凑单？',
+    sideA: '允许（增长视角）',
+    sideB: '禁止（风控视角）',
+    thinkA: JSON.stringify({ counter: ['当用户真实参团率不足时不成立'], realityCheck: ['核对真实参团率数据'], confidence: 'medium', conclusion: '建议允许但限频' }),
+    thinkB: JSON.stringify({ counter: ['当风控规则无法拦截虚假身份时不成立'], realityCheck: ['核对黑产样本'], confidence: 'high', conclusion: '禁止' }),
+  })
+  assert.ok(r.analysis.includes('A 方深度思考'), '引用 A 方思考帧')
+  assert.ok(r.analysis.includes('用户真实参团率不足'), 'A 方反方被引用')
+  assert.ok(r.analysis.includes('黑产样本'), 'B 方真实核对被引用')
+  assert.ok(r.basis.includes('真实情况 > 用户需求 > 专业判断'), '裁判优先级不变')
+})
+
+test('jarvis_review：一方缺深度思考帧 → 提示先跑 jarvis_think_deep（防一面之词）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({
+    issue: '上线时间',
+    sideA: '本周上线',
+    sideB: '下周上线',
+    thinkA: JSON.stringify({ counter: ['当测试未完成时不成立'], confidence: 'medium' }),
+    // thinkB 缺失
+  })
+  assert.ok(r.analysis.includes('B 方未提供深度思考帧'), '提示 B 方补深度思考')
+  assert.ok(r.analysis.includes('jarvis_think_deep'), '指向深度思考器')
+})
+
+test('jarvis_review：think 为非法 JSON → 明确提示格式错误', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({ issue: 'x', sideA: 'a', sideB: 'b', thinkA: '不是JSON{{{', thinkB: null })
+  assert.ok(r.analysis.includes('不是合法 JSON'), '提示格式错误')
+})

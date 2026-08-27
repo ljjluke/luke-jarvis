@@ -195,13 +195,15 @@ export const TOOLS = [
   {
     name: 'jarvis_review',
     description:
-      '分歧升级裁决器：团队角色间对同一问题有冲突（如产品 vs 风控、测试 vs 研发）时，CEO 调用本工具采集双方观点并按裁判优先级裁决。裁判优先级(铁律)：真实情况 > 用户需求 > 专业判断。LLM 不得迎合角色卡，裁决依据真实情况。',
+      '分歧升级裁决器：团队角色间对同一问题有冲突（如产品 vs 风控、测试 vs 研发）时，CEO 调用本工具采集双方观点并按裁判优先级裁决。裁判优先级(铁律)：真实情况 > 用户需求 > 专业判断。LLM 不得迎合角色卡，裁决依据真实情况。可选传入双方 thinkA/thinkB（各角色先跑 jarvis_think_deep 的结构化思考 JSON），裁决时会引用双方的 反方攻击/真实核对/诚实边界 来防一面之词。',
     parameters: {
       type: 'object',
       properties: {
         issue: { type: 'string', description: '分歧问题是什么' },
         sideA: { type: 'string', description: 'A 方观点与依据' },
         sideB: { type: 'string', description: 'B 方观点与依据' },
+        thinkA: { type: 'string', description: 'A 方 jarvis_think_deep 的结构化思考 JSON（可选）' },
+        thinkB: { type: 'string', description: 'B 方 jarvis_think_deep 的结构化思考 JSON（可选）' },
       },
     },
     output: {
@@ -211,15 +213,37 @@ export const TOOLS = [
         properties: {
           ruling: { type: 'string', description: 'CEO 裁决结论' },
           basis: { type: 'string', description: '裁决依据（真实情况/用户需求/专业判断）' },
+          analysis: { type: 'string', description: '基于双方深度思考帧的对抗分析（可选）' },
         },
         required: ['ruling'],
       },
-      render: (r) => `裁决：${r.ruling}\n依据：${r.basis ?? ''}`,
+      render: (r) => `裁决：${r.ruling}\n依据：${r.basis ?? ''}${r.analysis ? '\n分析：' + r.analysis : ''}`,
     },
     handler: async (args) => {
+      const issue = String(args.issue ?? '')
+      const sideA = String(args.sideA ?? '')
+      const sideB = String(args.sideB ?? '')
+      // 消费双方 jarvis_think_deep 的结构化思考（含反方攻击/真实核对/诚实边界），防止"只亮结论不亮推理"
+      const notes = []
+      for (const [label, raw] of [['A', args.thinkA], ['B', args.thinkB]]) {
+        if (!raw) {
+          notes.push(`${label} 方未提供深度思考帧——建议该角色先跑 jarvis_think_deep（前提/反方/失效推演/诚实边界）再裁决，避免一面之词`)
+          continue
+        }
+        try {
+          const t = typeof raw === 'string' ? JSON.parse(raw) : raw
+          const counter = Array.isArray(t.counter) ? t.counter.join('；') : String(t.counter ?? '')
+          const check = Array.isArray(t.realityCheck) ? t.realityCheck.join('；') : String(t.realityCheck ?? '')
+          const conf = t.confidence ? `（置信 ${t.confidence}）` : ''
+          notes.push(`${label} 方深度思考${conf}：反方=${counter || '无'}；真实核对=${check || '无'}`)
+        } catch {
+          notes.push(`${label} 方 think 不是合法 JSON——请用 jarvis_think_deep 按要求格式输出后重传`)
+        }
+      }
       return {
-        ruling: `待 CEO 基于真实情况裁决：「${String(args.issue ?? '')}」。A=${String(args.sideA ?? '')}；B=${String(args.sideB ?? '')}。`,
+        ruling: `待 CEO 基于真实情况裁决：「${issue}」。A=${sideA}；B=${sideB}。`,
         basis: '真实情况 > 用户需求 > 专业判断（角色卡只提供分析框架，不取代真实判断）',
+        analysis: notes.length ? notes.join('\n') : undefined,
       }
     },
   },
@@ -249,6 +273,65 @@ export const TOOLS = [
     handler: async (args) => {
       return {
         note: `问题「${String(args.question ?? '')}」：先用该角色卡的框架如何分析（引用卡中思维模型），但结论必须回到真实情况——检查真实数据/代码/复现后再下判断，禁止为迎合角色卡而扭曲事实。`,
+      }
+    },
+  },
+
+  {
+    name: 'jarvis_think_deep',
+    description:
+      '角色深度思考器（ponder 轻量化，防幻觉核心）：给某角色一张"七段对抗式思考任务单"，强制该角色以 前提审视→视角展开→反方攻击→失效推演→真实优先核对→诚实边界→收敛结论 的顺序完成深度推理，并结构化为 JSON 回复。stakes 控制对抗深度：low=反方≥1，medium=反方≥2+失效推演，high=反方≥3+失效推演×2+可谬自评。产出可直接喂给 jarvis_review 做分歧裁决的双方依据（thinkA/thinkB）。铁律不变：真实情况优先于角色卡；宁 60 分诚实不要 90 分编造。',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: '需要深度思考的问题' },
+        roleCard: { type: 'string', description: '该员工的角色卡（六段式+协同段）' },
+        stakes: { type: 'string', description: '赌注 high/medium/low（默认 medium）：high=重大决策/对外承诺，medium=常规关键决策，low=可逆小事' },
+      },
+      required: ['question'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          role: { type: 'string' },
+          stakes: { type: 'string' },
+          premises: { type: 'string', description: '前提审视指令：列出隐含前提并标出未验证项' },
+          perspective: { type: 'string', description: '视角展开指令：引用角色卡思维模型给出第一判断' },
+          counter: { type: 'string', description: '反方攻击指令：当X时不成立' },
+          failure: { type: 'string', description: '失效推演指令：换场景/换数据后的失败路径' },
+          realityCheck: { type: 'string', description: '真实优先核对清单指令' },
+          limits: { type: 'string', description: '诚实边界指令' },
+          conclusion: { type: 'string', description: '收敛结论指令：含置信度与升级对象' },
+          respondAs: { type: 'string', description: '要求按此 JSON 结构回复思考结果' },
+        },
+        required: ['respondAs'],
+      },
+      render: (r) =>
+        `【${r.role ?? '角色'} 深度思考任务单 · stakes=${r.stakes}\n① 前提审视：${r.premises}\n② 视角展开：${r.perspective}\n③ 反方攻击：${r.counter}\n④ 失效推演：${r.failure}\n⑤ 真实优先核对：${r.realityCheck}\n⑥ 诚实边界：${r.limits}\n⑦ 收敛结论：${r.conclusion}\n响应格式：${r.respondAs}`,
+    },
+    handler: async (args) => {
+      const q = String(args.question ?? '').trim()
+      const card = String(args.roleCard ?? '').trim()
+      const stakes = String(args.stakes ?? 'medium')
+      const roleName = (card.match(/身份定位[:：]\s*([^，。\n]+)/) || [])[1] || '该角色'
+      // 反方条数/失效推演次数按赌注分级（ponder 门控：高赌注必做深度动作）
+      const counterMin = stakes === 'high' ? 3 : stakes === 'low' ? 1 : 2
+      const failureN = stakes === 'high' ? 2 : stakes === 'low' ? 0 : 1
+      const failureReq = failureN >= 1 ? `写至少 ${failureN} 种"换场景/换数据/换时间"推演，指出最可能失败路径` : '简写一种"换场景"检查'
+      const selfRefute = stakes === 'high' ? '最后必须做可谬自评：我这份结论最可能因为什么错？如果错，改走什么方向？' : ''
+      return {
+        role: roleName,
+        stakes,
+        premises: `列出问题「${q.slice(0, 60)}」隐含的 2-3 个前提（如：需求真存在？数据可真？时间够？竞争对手真没有？），并标出哪个前提未经验证——未验证的前提先写"待核对"，不许直接当成立。`,
+        perspective: `以「${roleName}」身份，引用角色卡中的思维模型/核心方法论（如适用），给出你对本题的第一判断：我会怎么看、第一步做什么。注意：这只是第一判断，下面几步会攻击它。`,
+        counter: `写至少 ${counterMin} 条"当X时不成立"的反方攻击逐一质询第一判断（如：当数据口径不同时不成立；当对手也这样做时不成立；当用户真实行为与假设不符时不成立）。`,
+        failure: `${failureReq}。`,
+        realityCheck: `列出 2-3 个必须先核对的真实项（真实数据/代码/复现/历史记录/用户实证），明确标注：没核对前，禁止把判断写成结论——这是铁律（真实情况优先于角色卡）。`,
+        limits: `写诚实边界：信息截止时间？本题哪些是推测成分？作为「${roleName}」你做不到什么/不能断言什么？`,
+        conclusion: `${selfRefute}\n吸收以上攻击与核对后保留的结论 + 置信度（low/medium/high）+ 需要向谁确认或升级（同事/CEO/jarvis_review）。`,
+        respondAs: `按顺序完成上面七段思考，最后以 JSON 输出：{"premises":[未验证前提清单],"perspective":"我的第一判断","counter":["当X时不成立…"],"failure":"失败路径","realityCheck":["先核对…"],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","escalateTo":"向谁升级"}。`,
       }
     },
   },
@@ -410,7 +493,7 @@ export function jarvisCommand(requirement) {
   const len = text.length
   const suggestion = len < 4 ? 'S：直接做（不需要建队）' : len < 40 ? 'M：精简公司（2-4 人，现场蒸馏子角色）' : 'L：全链公司（4-7 人，现场蒸馏 CEO+子角色）'
   return {
-    content: `已收到需求[${text.slice(0, 120)}]。行业识别：${hit.industry}（建议建队等级 ${suggestion}）。\nCEO 流程启动（女娲式蒸馏）：\n1. 现场蒸馏 CEO 卡：web 搜索该行业真实大佬 → 6 维度调研(著作/对话/表达/他者/决策/时间线) → 提炼心智模型(三重验证：跨域复现/生成力/排他性) + 决策启发式 + 表达DNA → 六段式+协同架构+证据链+诚实边界+保真度+source+防冒名\n2. jarvis_distill 校验（证据链硬闸）→ jarvis_fidelity 保真度审计 → 双通过才注入\n3. CEO 定子角色 → 逐个同样蒸馏+双验（参考方向：${hit.distillDirections.join(' / ')}）\n4. 设计协同架构（位置/依赖/介入时机/协同方式）→ AgentTeams 建队 → 盯控 → 收口交付\n（铁律：捕捉 HOW they think 而非 WHAT they said；证据不足宁 60 分诚实不要 90 分编造；绝不复用旧卡；真实情况优先于角色卡。）`,
+    content: `已收到需求[${text.slice(0, 120)}]。行业识别：${hit.industry}（建议建队等级 ${suggestion}）。\nCEO 流程启动（女娲式蒸馏）：\n1. 现场蒸馏 CEO 卡：web 搜索该行业真实大佬 → 6 维度调研(著作/对话/表达/他者/决策/时间线) → 提炼心智模型(三重验证：跨域复现/生成力/排他性) + 决策启发式 + 表达DNA → 六段式+协同架构+证据链+诚实边界+保真度+source+防冒名\n2. jarvis_distill 校验（证据链硬闸）→ jarvis_fidelity 保真度审计 → 双通过才注入\n3. CEO 定子角色 → 逐个同样蒸馏+双验（参考方向：${hit.distillDirections.join(' / ')}）\n4. 设计协同架构（位置/依赖/介入时机/协同方式）→ AgentTeams 建队\n5. 关键决策/分歧：各角色先用 jarvis_think_deep 深度思考（前提审视→反方攻击→失效推演→真实核对→诚实边界→收敛，按 stakes 分级对抗）→ 分歧用 jarvis_review 裁决（吃双方思考帧，防一面之词）→ 盯控 → 收口交付\n（铁律：捕捉 HOW they think 而非 WHAT they said；证据不足宁 60 分诚实不要 90 分编造；绝不复用旧卡；真实情况优先于角色卡。）`,
   }
 }
 
@@ -430,7 +513,7 @@ export default {
       ctx.effect(() =>
         commands.register({
           name: 'jarvis',
-          description: '贾维斯数字员工公司：识别行业 → 现场蒸馏真实大佬 CEO → CEO 定子角色 → 现场蒸馏各角色卡(jarvis_distill 校验) → 设计协同架构 → AgentTeams 建队执行',
+          description: '贾维斯数字员工公司：识别行业 → 现场蒸馏真实大佬 CEO → CEO 定子角色 → 现场蒸馏各角色卡(jarvis_distill 校验) → 设计协同架构(jarvis_collab) → key 决策各角色 jarvis_think_deep 深度思考 → jarvis_review 裁决 → AgentTeams 建队执行',
           usage: '/jarvis <需求描述>',
           execute: async (agent, line) => jarvisCommand(line),
         }),

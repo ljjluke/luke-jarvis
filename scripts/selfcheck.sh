@@ -26,7 +26,7 @@ grep -q "validateCardShape" src/host/plugin.js && grep -q "协同架构" src/hos
 echo "== 6) 单元测试（node --test） =="
 node --test test/plugin.test.js >/dev/null 2>&1 && echo "   TESTS-OK" || { echo "   TESTS-FAIL"; exit 1; }
 
-echo "== 7) 端到端流程（入口→蒸馏→保真度→协同→建队） =="
+echo "== 7) 端到端流程（入口→蒸馏→保真度→协同→深度思考→裁决→建队） =="
 node test/e2e-flow.test.mjs >/dev/null 2>&1 && echo "   E2E-OK" || { echo "   E2E-FAIL"; exit 1; }
 
 echo ""
