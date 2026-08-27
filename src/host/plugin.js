@@ -96,6 +96,19 @@ export function validateCardShape(card, isCeo) {
     for (const ci of collabIssues) {
       if (!card.includes('并行') && /并行/.test(ci)) missing.push(ci)
     }
+  } else {
+    // 非 CEO 角色卡：分工明确硬闸——必须含"我的协同/我的位置"声明（知道自己干什么、依赖谁、向谁升级），
+    // 不能只是一张"思考风格"卡。缺 → 分工不明确，禁止注入。
+    const myCollab =
+      card.includes('我的协同') ||
+      card.includes('我的位置') ||
+      card.includes('我的依赖') ||
+      card.includes('本角色') ||
+      card.includes('我负责')
+    if (!myCollab) missing.push('我的协同（本角色位置/依赖/介入时机/升级路径——分工明确硬闸）')
+    if (!/位置|上游|下游|并行|横向/.test(card) && !/负责|职责|干什么/.test(card)) missing.push('我的位置/职责')
+    if (!/(依赖|从.*(拿|获取|接收|取)|给.*(喂|提供|交)|喂|提供)/.test(card)) missing.push('我的依赖（依赖谁/给谁喂产出）')
+    if (!/(升级|裁决|CEO|review|上报|向谁)/.test(card)) missing.push('我的升级路径（分歧向谁升级）')
   }
   return missing
 }
@@ -322,9 +335,25 @@ export const TOOLS = [
       const collab = String(args?.collabText ?? '')
       const issues = []
       let roles = []
+      const allPerRole = []
       try {
         const parsed = JSON.parse(String(args?.rolesJson ?? '[]'))
-        roles = (Array.isArray(parsed) ? parsed : []).map((x) => String(x.name ?? '?'))
+        if (Array.isArray(parsed)) {
+          for (const x of parsed) {
+            const name = String(x?.name ?? '?')
+            roles.push(name)
+            // 若 rolesJson 里已带该角色的协同段（perspective/collabText/duty），原样归一化进 perRole
+            const own = String(x?.perspective ?? x?.collabText ?? x?.collab ?? x?.duty ?? x?.position ?? '')
+            allPerRole.push({
+              role: name,
+              position: own || '待CEO补充',
+              depends: own || '待CEO补充',
+              intervenes: own || '待CEO补充',
+              collabMode: own || '待CEO补充',
+              escalate: own || '升级CEO/jarvis_review',
+            })
+          }
+        } else issues.push('rolesJson 需为数组')
       } catch {
         issues.push('rolesJson 解析失败（需合法 JSON 数组）')
       }
@@ -333,18 +362,22 @@ export const TOOLS = [
       for (const f of COLLAB_FOUR) {
         if (!collab.includes(f)) issues.push(`协同描述缺「${f}」（位置/依赖/介入时机/协同方式）`)
       }
+      // 每角色须有"我的协同"（分工明确硬闸：成员要知道自己依赖谁/向谁升级，不能全部待CEO补充）
+      const unfilled = allPerRole.filter((p) => p.position === '待CEO补充' || p.depends === '待CEO补充')
+      if (unfilled.length) issues.push(`${unfilled.length} 个角色缺自己的协同段（position/depends 为待补）——建队前必须为每个角色明确其位置/依赖/介入时机/协同方式，否则成员分工不明`)
       // 全局健康
       if (!/(升级|裁决|CEO|review|上报|复核)/.test(collab)) issues.push('无冲突升级路径（分歧应升级 CEO/jarvis_review 裁决）')
       if (!/并行|同时|实时|讨论|辩论/.test(collab) && /串行|依次|先.*再.*再/.test(collab)) issues.push('当前是串行交接而非并行协作——应改为角色并行开工、实时讨论（测试从产品阶段介入、研发与测试同步）')
       if (!/并行|同时|实时|讨论/.test(collab)) issues.push('未体现并行协作（建议：多角色并行 + 实时讨论，非单向依次完成）')
-      const ok = issues.length === 0 && roles.length >= 2
+      const ok = issues.length === 0 && roles.length >= 2 && unfilled.length === 0
       return {
         roles,
+        perRole: allPerRole,
         issues,
         ok,
         verdict: ok
-          ? `协同设计合格：${roles.length} 个角色，四要素齐备（位置/依赖/介入时机/协同方式），有升级路径且体现并行协作。可建队（agent_teams_create → add_member(role=现场蒸馏卡) → create_task(带验收标准+dependencies)）。`
-          : `协同设计待修（${issues.length} 项）：补齐后重新调用。CEO 定子角色后必须先设计协同，再建队——协同缺失 = 团队各干各的，不是真团队。`,
+          ? `协同设计合格：${roles.length} 个角色，每角色已明确 位置/依赖/介入时机/协同方式，有升级路径且体现并行协作。建队时每个成员 role 必须携带各自的协同段（见 perRole）。可建队（agent_teams_create → add_member(role=蒸馏卡+该角色协同段) → create_task(带验收标准+dependencies)）。`
+          : `协同设计待修（${issues.length} 项）：补齐后重新调用。CEO 定子角色后必须先设计协同（含每角色自己的协同段），再建队——协同缺失 = 团队各干各的，不是真团队。`,
       }
     },
   },

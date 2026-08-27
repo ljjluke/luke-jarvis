@@ -220,3 +220,69 @@ test('jarvis_collab：角色太少（1 个）→ ok=false', async () => {
   const r = await def.handler({ requirement: '小事', rolesJson: JSON.stringify([{ name: '研发' }]), collabText: '位置=独立；依赖=无；介入时机=现在；协同方式=独立完成' })
   assert.strictEqual(r.ok, false)
 })
+// ── 分工明确 + 真实协作（用户核心关切）──
+
+test('jarvis_collab：输出 perRole（每个角色的协同四要素）且合格', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_collab')
+  const r = await def.handler({
+    requirement: '电商拼团系统',
+    rolesJson: JSON.stringify([
+      { name: '产品增长', duty: '定义价值', position: '上游' },
+      { name: '供应链', duty: '履约', position: '下游' },
+      { name: '研发', duty: '实现', position: '并行' },
+    ]),
+    collabText: '位置=并行；依赖=产品给契约；介入时机=全程；协同方式=实时讨论；升级=CEO',
+  })
+  assert.ok(Array.isArray(r.perRole), '应输出 perRole')
+  assert.strictEqual(r.perRole.length, 3, '每角色都有协同段')
+  assert.ok(r.perRole.every((p) => p.role && p.position && p.depends), '每角色有 position/depends')
+})
+
+test('jarvis_collab：角色缺自己的协同段（position=待CEO补充）→ 判不合格', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_collab')
+  const r = await def.handler({
+    requirement: '电商',
+    rolesJson: JSON.stringify([{ name: '产品' }, { name: '研发' }]),
+    collabText: '位置=X；依赖=Y；介入时机=Z；协同方式=W；升级=CEO',
+  })
+  // 两个角色都没给 own 段 → position/depends 是待CEO补充 → 应判不合格
+  assert.strictEqual(r.ok, false)
+  assert.ok(r.issues.some((i) => /待CEO补充|分工/.test(i)), '应提示角色分工不明')
+})
+
+test('非 CEO 角色卡缺「我的协同/位置/依赖/升级」→ 不通过（分工明确硬闸）', () => {
+  const bare = [
+    '身份定位：研发工程师。',
+    '思维模型：演进式架构。',
+    '核心方法论：1) 小步重构；2) 测试先行。',
+    '代表作品：参考公开框架——只借鉴框架。',
+    '决策红线：无测试不提交。',
+    '语言风格：先结论后实现。',
+    '证据链：著作+对话+表达+他者+决策+时间线。',
+    '保真度：一手0.6；矛盾保留。',
+    '诚实边界：信息截止；推测已标。',
+    'source：https://example.com/dev',
+    '防冒名声明：只借鉴框架，不冒充署名。',
+  ].join('\n')
+  const missing = validateCardShape(bare, false)
+  assert.ok(missing.some((m) => /我的协同|我的位置|我的依赖|我的升级/.test(m)), '分工不明应被拦')
+})
+
+test('非 CEO 角色卡含「我的职责/依赖/升级」→ 通过', () => {
+  const good = [
+    '身份定位：研发工程师。',
+    '思维模型：演进式架构。',
+    '核心方法论：1) 小步重构；2) 测试先行。',
+    '代表作品：参考公开框架——只借鉴框架。',
+    '决策红线：无测试不提交。',
+    '语言风格：先结论后实现。',
+    '我的协同：我负责实现交易核心；从产品阶段拿契约；给测试喂接口；我给风控提供订单数据；升级=分歧交 CEO/jarvis_review。',
+    '证据链：著作+对话+表达+他者+决策+时间线。',
+    '保真度：一手0.6；矛盾保留。',
+    '诚实边界：信息截止；推测已标。',
+    'source：https://example.com/dev',
+    '防冒名声明：只借鉴框架，不冒充署名。',
+  ].join('\n')
+  const missing = validateCardShape(good, false)
+  assert.ok(!missing.some((m) => /我的协同|我的位置|我的依赖|我的升级/.test(m)), '分工明确应通过')
+})
