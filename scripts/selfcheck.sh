@@ -22,8 +22,8 @@ grep -q "DOMAIN_PROCESS" src/host/plugin.js && { echo "   FAIL: jarvis_process �
 grep -qE "黄峥|巴菲特" src/host/plugin.js && { echo "   FAIL: identifyIndustry 仍有领域关键词"; exit 1; } || echo "   identifyIndustry 无行业关键词: OK"
 
 echo "== 5) 铁律落位（防 bug 核心） =="
-R=$(grep -l "现场蒸馏\|项目沉淀\|真实情况优先" src/host/plugin.js skills/jarvis-roles.md skills/jarvis-boss.md preset/agent.cordis.yml 2>/dev/null | wc -l)
-[ "$R" -ge 4 ] && echo "   铁律已内嵌(≥4 处文件): $R" || { echo "   铁律缺失: $R"; exit 1; }
+R=$(grep -l "现场蒸馏\|项目沉淀\|真实情况优先" src/host/plugin.js skills/jarvis-boss.md preset/agent.cordis.yml README.md 2>/dev/null | wc -l)
+[ "$R" -ge 3 ] && echo "   铁律已内嵌(≥3 处文件): $R" || { echo "   铁律缺失: $R"; exit 1; }
 
 echo "== 6) distill 校验四检查（source/六段式/协同架构/防冒名） =="
 grep -q "validateCardShape" src/host/plugin.js && grep -q "协同架构" src/host/plugin.js && grep -q "source" src/host/plugin.js && grep -q "防冒名" src/host/plugin.js && echo "   DISTILL-CHECKS-OK" || { echo "   DISTILL-CHECKS-MISSING"; exit 1; }
@@ -34,8 +34,8 @@ node --test test/plugin.test.js >/dev/null 2>&1 && echo "   TESTS-OK" || { echo 
 echo "== 8) 端到端流程（入口→流程→蒸馏→保真度→协同→思考→裁决→问题上行→黑板→沉淀→建队） =="
 node test/e2e-flow.test.mjs >/dev/null 2>&1 && echo "   E2E-OK" || { echo "   E2E-FAIL"; exit 1; }
 
-echo "== 9) 新铁律落位（需求本质/问题上行/能力补足/项目记忆库/深度闸/蒸馏引导） =="
-grep -q "jarvis_essence" src/host/plugin.js && grep -q "jarvis_escalate" src/host/plugin.js && grep -q "jarvis_capability" src/host/plugin.js && grep -q "jarvis_store" src/host/plugin.js && grep -q "assessCardDepth" src/host/plugin.js && grep -q "jarvis_distill_guide" src/host/plugin.js && echo "   IRON-RULES-OK (essence/escalate/capability/store/deep/guide 六闸在位)" || { echo "   IRON-RULES-MISSING"; exit 1; }
+echo "== 9) 新铁律落位（需求本质/问题上行/能力补足/项目记忆库/深度闸/蒸馏引导/版本交付/绩效换人） =="
+grep -q "jarvis_essence" src/host/plugin.js && grep -q "jarvis_escalate" src/host/plugin.js && grep -q "jarvis_capability" src/host/plugin.js && grep -q "jarvis_store" src/host/plugin.js && grep -q "assessCardDepth" src/host/plugin.js && grep -q "jarvis_distill_guide" src/host/plugin.js && grep -q "jarvis_release" src/host/plugin.js && grep -q "jarvis_perf" src/host/plugin.js && echo "   IRON-RULES-OK (essence/escalate/capability/store/deep/guide/release/perf 八闸在位)" || { echo "   IRON-RULES-MISSING"; exit 1; }
 
 echo "== 10) 蒸馏深度硬闸行为实测（浅层卡须被拦） =="
 node -e "

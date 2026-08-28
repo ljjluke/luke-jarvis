@@ -556,3 +556,59 @@ test('jarvis_capability：有市场结果 → 验证要点（防假装找到）'
   assert.ok(r.verifyNotes.includes('真实存在'), '要求验证真实存在')
   assert.ok(r.verifyNotes.includes('license'), '要求验证 license')
 })
+
+// ── 交付版本管理（乙方与甲方的契约机制）──
+
+test('jarvis_release：new_version 打版本快照（冻结旧版/变更开新版）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const r = await def.handler({ mode: 'new_version', version: 'v1.1' })
+  assert.ok(r.version === 'v1.1', '版本号正确')
+  assert.ok(r.verdict.includes('冻结为历史'), '旧版冻结')
+  assert.ok(r.verdict.includes('变更'), '变更开新版')
+})
+
+test('jarvis_release：checklist 生成交付清单（需求本质逐条对应）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const r = await def.handler({ mode: 'checklist', version: 'v1.0', requirement: '能让用户拼团下单', items: JSON.stringify(['拼团功能', '支付功能']) })
+  assert.ok(r.checklist.some((c) => c.includes('需求本质')), '清单含需求本质')
+  assert.ok(r.checklist.some((c) => c.includes('拼团功能')), '清单含交付物')
+  assert.ok(r.verdict.includes('按条确认'), '甲方按条确认')
+})
+
+test('jarvis_release：status 版本状态含确认时限（不无限等）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const r = await def.handler({ mode: 'status', version: 'v1.0', confirmDeadline: '3 天' })
+  assert.ok(r.verdict.includes('待甲方确认'), '版本待确认')
+  assert.ok(r.verdict.includes('不无限等'), '有确认时限')
+})
+
+test('jarvis_release：communication 记录甲方沟通结论（留痕）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const r = await def.handler({ mode: 'communication', question: '拼团 2 人还是 3 人？', answer: '3 人' })
+  assert.ok(r.log.includes('问甲方'), '记录问题')
+  assert.ok(r.log.includes('3 人'), '记录甲方答复')
+  assert.ok(r.verdict.includes('project.md'), '写入项目记忆')
+})
+
+// ── 绩效评估（CEO 换人决策量化）──
+
+test('jarvis_perf：全面达标 → 继续（不换）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', quality: 2, completion: 2, escalation: 2, fit: 2, depth: 90 })
+  assert.strictEqual(r.ok, true, '达标')
+  assert.ok(r.action.includes('继续'), '不换人')
+})
+
+test('jarvis_perf：连续 2 次不达标 → 建议换人', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '供应链', quality: 0, completion: 0, escalation: 1, fit: 0, depth: 40, history: JSON.stringify([{ ok: false }]) })
+  assert.strictEqual(r.ok, false, '不达标')
+  assert.ok(r.action.includes('换人'), '连续2次建议换人')
+})
+
+test('jarvis_perf：问题上行异常（高频信号）→ 立即触发不达标，不等 2 次', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '测试', quality: 2, completion: 2, escalation: 0, fit: 2, depth: 85 })
+  assert.strictEqual(r.ok, false, '问题上行异常=不达标')
+  assert.ok(r.action.includes('换人') || r.action.includes('补强'), '异常触发评估')
+})

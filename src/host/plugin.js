@@ -999,6 +999,66 @@ export const TOOLS = [
   },
 
   {
+    name: 'jarvis_perf',
+    description:
+      '员工绩效评估器（CEO 时刻盯人的量化工具）：多角度评估员工能力——①成果质量（产出被打回几次/过验收标准没）；②任务完成度（负责任务持续未完成/超时）；③问题上行健康度（过度上报=没判断力，长期不上报=在闷着，高频信号加权）；④角色卡契合度（产出与蒸馏卡方法论是否符合）；⑤深度分（角色卡 distill 深度分）。判定规则：连续 2 次评估不达标 → 建议换人（走离任→重蒸馏补位流程）；高频信号异常（问题上行异常）→ 立即触发评估，不等 2 次。不武断：每次评估写"哪项不足+依据"，留痕可追溯。',
+    parameters: {
+      type: 'object',
+      properties: {
+        role: { type: 'string', description: '被评估的员工角色名（必填）' },
+        quality: { type: 'string', description: '成果质量信号：0-2（0=多次打回/不过验收，1=偶有小问题，2=稳定达标）' },
+        completion: { type: 'string', description: '任务完成度信号：0-2（0=持续未完成/超时，1=部分延迟，2=稳定按时）' },
+        escalation: { type: 'string', description: '问题上行健康度信号：0-2（0=过度上报或长期不上报，1=偶有异常，2=健康（及时且合理））' },
+        fit: { type: 'string', description: '角色卡契合度信号：0-2（0=产出与卡方法论明显不符，1=部分符合，2=契合）' },
+        depth: { type: 'string', description: '角色卡深度分（jarvis_distill 输出，0-100）' },
+        history: { type: 'string', description: '历史评估记录 JSON（连续判定用），如 [{"ok":false,"at":"2026-08-01"}]' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean', description: '本次是否达标' },
+          score: { type: 'number', description: '综合分 0-100' },
+          signals: { type: 'object', description: '各信号明细' },
+          strikes: { type: 'number', description: '连续不达标次数' },
+          action: { type: 'string', description: '建议动作：继续观察/补强/换人' },
+          verdict: { type: 'string' },
+        },
+        required: ['ok', 'score', 'action', 'verdict'],
+      },
+      render: (r) => `【绩效评估 · ${r.role ?? '?'}】综合 ${r.score}/100 → ${r.action}\n${r.verdict}`,
+    },
+    handler: async (args) => {
+      const role = String(args.role ?? '').trim()
+      const num = (v, d = 1) => { const n = Number(v); return Number.isFinite(n) ? n : d }
+      const quality = num(args.quality, 1)
+      const completion = num(args.completion, 1)
+      const escalation = num(args.escalation, 1)
+      const fit = num(args.fit, 1)
+      const depth = num(args.depth, 0)
+      // 信号权重：问题上行健康度高频加权（异常即触发）
+      const weighted = quality * 0.25 + completion * 0.2 + escalation * 0.3 + fit * 0.15 + Math.min(2, depth / 50) * 0.1
+      const score = Math.round(weighted * 50) // 0-2 → 0-100
+      let history = []
+      try { history = JSON.parse(String(args.history ?? '[]')) } catch { history = [] }
+      const okThis = score >= 60 && escalation > 0 // 问题上行=0（异常）视为不达标，高优先级
+      // 高频信号异常 → 立即记一次不达标（不等 2 次）
+      const isTriggered = escalation === 0
+      const strikes = isTriggered ? 1 : okThis ? 0 : (history.filter((h) => h.ok === false).length + 1)
+      const totalStrikes = okThis ? 0 : (history.filter((h) => h.ok === false).length + (isTriggered ? 1 : 1))
+      const action = !okThis && (isTriggered || totalStrikes >= 2)
+        ? '换人（走 离任→重蒸馏补位 流程）'
+        : !okThis ? '补强观察（本次不达标，暂不换）' : '继续（达标）'
+      const verdict = role
+        ? `${role} 综合 ${score}/100（成果${quality}/完成${completion}/上行${escalation}/契合${fit}/深度${depth}）。${action}。依据已留痕。`
+        : `缺 role 参数。`
+      return { ok: okThis, score, signals: { quality, completion, escalation, fit, depth }, strikes: totalStrikes, action, verdict }
+    },
+  },
+
+  {
     name: 'jarvis_meeting',
     description:
       '团队会议协议器（会议驱动协作核心）：kickoff=开工全员会（对齐目标/验收标准/接口契约/依赖与分工）；cycle=二次会（聚焦黑板未决项：分歧/阻塞/接口变更，必要项用 jarvis_review 裁决）；close=收口会（逐项验收与交付）。每次会议必须输出：决议清单 + 会后任务（谁会后负责什么）+ 黑板更新。铁律：先开会再独思——角色必须先互相碰撞对齐，再各自独自思考；议题没必要时不开会。',
@@ -1068,6 +1128,79 @@ export const TOOLS = [
         actions: m.actions,
         respondAs: `完成本次「${type}」会后，以 JSON 输出纪要：{"date":"","type":"${type}","attendees":["${attendees}"],"agenda":["…"],"resolutions":["按模板逐条"],"boardUpdates":["写回黑板的条目"],"actions":[{"who":"角色","what":"会后负责什么"}]}`,
       }
+    },
+  },
+
+  {
+    name: 'jarvis_release',
+    description:
+      '交付版本管理器（乙方与甲方的契约机制，防"需求永远改/无法自证"）：vibe 模式+甲方确认才算完成+验收随时可调 → 乙方必须靠"版本快照+交付清单+沟通留痕"自证。①new_version=打新版本（v1.0/v1.1…，冻结旧版，变更开新版承接）；②checklist=生成交付清单（需求本质逐条→对应交付物→自测结果，甲方可逐条确认）；③status=版本状态（待确认/已确认/已否决，含确认时限：超时默认通过或明确挂起）；④communication=记录与甲方的沟通结论（问题/答复/时间，只记结论不记过程）。铁律：乙方永远能说清"交付了什么、等什么确认"；版本是内部记账不打扰甲方；清单是逐条对应不是模板。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'new_version 打新版本 / checklist 生成交付清单 / status 版本状态 / communication 记录甲方沟通' },
+        version: { type: 'string', description: '版本号（如 v1.0），new_version 必填' },
+        requirement: { type: 'string', description: '原始需求/需求本质（checklist 用，逐条对应）' },
+        items: { type: 'string', description: '交付物清单 JSON 数组（checklist 用）' },
+        selfTest: { type: 'string', description: '自测结果（checklist 用，每条交付物的验证证据）' },
+        prevVersions: { type: 'string', description: '已有版本状态 JSON（status 用）' },
+        confirmDeadline: { type: 'string', description: '甲方确认时限（如 3 天；status 用，超时默认通过或挂起）' },
+        question: { type: 'string', description: '与甲方的沟通问题（communication 用）' },
+        answer: { type: 'string', description: '甲方答复（communication 用）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          version: { type: 'string' },
+          status: { type: 'string', description: '版本状态或操作结果' },
+          checklist: { type: 'array', items: { type: 'string' }, description: '交付清单（checklist 用）' },
+          log: { type: 'string', description: '沟通留痕记录（communication 用）' },
+          verdict: { type: 'string' },
+        },
+        required: ['verdict'],
+      },
+      render: (r) => `【交付版本${r.version ? ' · ' + r.version : ''}】${r.status ? '状态：' + r.status + '\n' : ''}${(r.checklist || []).map((c) => '  ☐ ' + c).join('\n')}${r.log ? '\n沟通留痕：' + r.log : ''}\n判定：${r.verdict}`,
+    },
+    handler: async (args) => {
+      const mode = String(args.mode ?? '').trim()
+      const version = String(args.version ?? '').trim()
+      const requirement = String(args.requirement ?? '').trim()
+      let verdict = ''
+      if (mode === 'new_version') {
+        verdict = version
+          ? `已打新版 ${version}：旧版冻结为历史，本版承接甲方最新变更需求。乙方现在能说清"交付过什么、当前在做什么"。`
+          : '⚠️ new_version 需要 version 参数（如 v1.0）。'
+        return { version: version || '?', status: '进行中（待交付/待确认）', verdict }
+      }
+      if (mode === 'checklist') {
+        let items = []
+        try { items = JSON.parse(String(args.items ?? '[]')) } catch { items = [] }
+        const self = String(args.selfTest ?? '').trim()
+        const rows = requirement
+          ? [`需求本质：${requirement.slice(0, 120)}`].concat(items.map((it, i) => `${i + 1}. ${it}${self ? ' —— 自测：' + self.slice(0, 60) : ''}`))
+          : items.map((it, i) => `${i + 1}. ${it}`)
+        verdict = `交付清单已生成（${rows.length} 条）：甲方按条确认即验收；清单 = 需求本质逐条对应，不是模板。`
+        return { version: version || '?', status: '待甲方逐条确认', checklist: rows, verdict }
+      }
+      if (mode === 'status') {
+        const dl = String(args.confirmDeadline ?? '3 天')
+        let prev = []
+        try { prev = JSON.parse(String(args.prevVersions ?? '[]')) } catch { prev = [] }
+        const line = prev.length ? `已有版本：${prev.map((v) => v.version + '=' + v.state).join(', ')}` : '尚无已交付版本'
+        verdict = `版本状态：${line}。当前版「${version || '?'}」${dl} 内待甲方确认；超时：默认通过或明确挂起（不无限等）。`
+        return { version: version || '?', status: `待确认（时限 ${dl}）`, verdict }
+      }
+      if (mode === 'communication') {
+        const q = String(args.question ?? '')
+        const a = String(args.answer ?? '')
+        const log = `[${new Date().toISOString().slice(0, 16)}] 问甲方：${q.slice(0, 80)}${a ? ` → 甲方答：${a.slice(0, 80)}` : '（待甲方答复）'}`
+        verdict = `沟通留痕已记录：${log}。写入 project.md（只记结论）。`
+        return { version: version || '?', log, verdict }
+      }
+      return { version: version || '?', status: '未知模式（new_version/checklist/status/communication）', verdict: '请指定 mode' }
     },
   },
 
@@ -1194,7 +1327,7 @@ export function jarvisCommand(requirement) {
   if (!text) return { content: '用法：/jarvis <需求描述>（可模糊）' }
   const hit = identifyIndustry(text)
   return {
-    content: `已收到需求[${text.slice(0, 120)}]（建议建队等级 ${hit.suggestion}）。\nJarvis 流程启动（Jarvis=主面板/对客户沟通；CEO=团队内角色。先查记忆 → 蒸馏 → 建队 → CEO 盯人换人 → 交付，单一 /jarvis 入口）：\n0. 【先查项目记忆库】先查 <项目>/.jarvis/：prototypes(真实人物原型)+cards(虚拟人物卡)+process(流程)+project.md(项目细节)+board(进度)+lessons(经验) → 有就直接读取继续（不用重分析源码）；没有才从零蒸馏\n1. 需求本质回归：先重述"为谁解决什么、怎样算成功"（可判定标准），未清晰前不开工\n2. 定领域流程：jarvis_process 按本需求定流程（阶段/闸门/红线/必须角色/会议触点）——插件无预设，可参考本项目沉淀（按本次需求修订）\n3. 【蒸馏 CEO 角色卡】CEO 是团队内角色，不是主面板——web 查证该领域真实大佬（长访谈/一手文章/决策记录优先，避开知乎/公众号/百度百科）→ 存 prototypes/ → **先 jarvis_distill_guide 提炼独有 HOW（决策触发词/独特取舍/领域黑话/反直觉/认知变化轨迹/失效边界 + 7品味原则 + 来源分级 + 验证锚点）→ 再写六段式 CEO 卡** → jarvis_distill 证据链硬闸 + jarvis_fidelity 保真度审计 双验 → 作为团队成员注入\n4. 定子角色 → 逐个 同样【distill_guide 提炼 HOW → 写卡 → distill 校验】+ 保真度审计双验（蒸馏方向：${hit.distillDirections[0]}）→ jarvis_collab 设计协同（四要素+每角色自己的协同段）\n5. kickoff 全员会（jarvis_meeting）：对齐目标/验收 + 领域流程闸门/红线 + 接口契约 → 决议写统一黑板（jarvis_board）\n6. 各角色独自思考/干活（关键决策 jarvis_think_deep）→ 所有问题/发现/阻塞写黑板\n7. 黑板有未决阻塞/分歧/接口变更 → 二次会（cycle）+ jarvis_review 裁决（吃 thinkA/thinkB + requirement）→ 循环到黑板收敛\n8. 【CEO 时刻盯人换人】CEO 是团队成员且持续在岗，不是建完就空闲——它时刻监控每个员工的阶段成果（成果质量/任务完成度/问题上行健康度/角色契合度/深度分），多角度发现能力不行 → 换人：标记离任(写依据) → remove_member 安全终止 → 归档 .jarvis/cards/ 历史 → 重蒸馏该岗位更合适的真实大神 → jarvis_distill 校验 → 新成员上岗补位；其他岗位通力协作（开会/黑板/依赖/升级齐全）\n9. 问题上行：技术绕不开/无法抉择 → 禁止跳过 → jarvis_escalate 带 风险细节+已尝试+决策请求 上报 → 写黑板 → CEO 闭环\n10. 收口会（close）：对照领域闸门逐项验收 → 交付报告（Jarvis 向客户汇报）\n11. 沉淀到项目：角色卡/原型/流程/组件/项目细节/经验 读写 <项目>/.jarvis/ —— 下次需求先查记忆直接复用（阶段零）\n（铁律：插件无预置角色卡/领域模板（领域无关）；捕捉 HOW 而非 WHAT；证据不足宁 60 分诚实不要 90 分编造；真实情况优先于角色卡；需求本质优先于一切；流程缺失 = 客户提 bug 的温床。）`,
+    content: `已收到需求[${text.slice(0, 120)}]（建议建队等级 ${hit.suggestion}）。\nJarvis 流程启动（Jarvis=主面板/对客户沟通；CEO=团队内角色。先查记忆 → 蒸馏 → 建队 → CEO 盯人换人 → 交付，单一 /jarvis 入口）：\n0. 【先查项目记忆库】先查 <项目>/.jarvis/：prototypes(真实人物原型)+cards(虚拟人物卡)+process(流程)+project.md(项目细节)+board(进度)+lessons(经验) → 有就直接读取继续（不用重分析源码）；没有才从零蒸馏\n1. 需求本质回归：先重述"为谁解决什么、怎样算成功"（可判定标准），未清晰前不开工\n2. 定领域流程：jarvis_process 按本需求定流程（阶段/闸门/红线/必须角色/会议触点）——插件无预设，可参考本项目沉淀（按本次需求修订）\n3. 【蒸馏 CEO 角色卡】CEO 是团队内角色，不是主面板——web 查证该领域真实大佬（长访谈/一手文章/决策记录优先，避开知乎/公众号/百度百科）→ 存 prototypes/ → **先 jarvis_distill_guide 提炼独有 HOW（决策触发词/独特取舍/领域黑话/反直觉/认知变化轨迹/失效边界 + 7品味原则 + 来源分级 + 验证锚点）→ 再写六段式 CEO 卡** → jarvis_distill 证据链硬闸 + jarvis_fidelity 保真度审计 双验 → 作为团队成员注入\n4. 定子角色 → 逐个 同样【distill_guide 提炼 HOW → 写卡 → distill 校验】+ 保真度审计双验（蒸馏方向：${hit.distillDirections[0]}）→ jarvis_collab 设计协同（四要素+每角色自己的协同段）\n5. kickoff 全员会（jarvis_meeting）：对齐目标/验收 + 领域流程闸门/红线 + 接口契约 → 决议写统一黑板（jarvis_board）\n6. 各角色独自思考/干活（关键决策 jarvis_think_deep）→ 所有问题/发现/阻塞写黑板\n7. 黑板有未决阻塞/分歧/接口变更 → 二次会（cycle）+ jarvis_review 裁决（吃 thinkA/thinkB + requirement）→ 循环到黑板收敛\n8. 【CEO 时刻盯人换人】CEO 是团队成员且持续在岗——用 jarvis_perf 多角度评估每个员工（成果质量/任务完成度/问题上行健康度[高频信号异常立即触发]/角色契合度/深度分），连续 2 次不达标 → 换人：离任(写依据) → remove_member → 归档 .jarvis/cards/ 历史 → jarvis_distill_guide 重提炼+重蒸馏更合适的真实大神 → distill 校验 → 新成员补位；其他岗位通力协作（开会/黑板/依赖/升级齐全）\n9. 问题上行：技术绕不开/无法抉择 → 禁止跳过 → jarvis_escalate 带 风险细节+已尝试+决策请求 上报 → 写黑板 → CEO 闭环\n10. 【交付版本管理】用 jarvis_release 与甲方契约化交付：new_version 打版本快照（冻结旧版/变更开新版）→ checklist 生成交付清单（需求本质逐条→交付物→自测，甲方逐条确认）→ status 版本状态（待确认/已确认/已否决+确认时限，超时默认通过或挂起）→ communication 记录与甲方沟通结论（只记结论入 project.md）。乙方永远能说清"交付了什么、等什么确认"，防"需求永远改/无法自证"\n11. 收口会（close）：对照领域闸门逐项验收 + 交付清单 → 交付报告（Jarvis 向客户汇报，客户确认即完成）\n12. 沉淀到项目：角色卡/原型/流程/组件/项目细节/沟通记录/经验 读写 <项目>/.jarvis/ —— 下次需求先查记忆直接复用（阶段零）\n（铁律：插件无预置角色卡/领域模板（领域无关）；捕捉 HOW 而非 WHAT；证据不足宁 60 分诚实不要 90 分编造；真实情况优先于角色卡；需求本质优先于一切；流程缺失 = 客户提 bug 的温床。）`,
   }
 }
 
