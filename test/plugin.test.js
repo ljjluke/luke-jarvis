@@ -365,12 +365,36 @@ test('jarvis_think_deep：输出七段对抗式思考任务单（ponder 轻量�
   assert.ok(r.respondAs.includes('JSON'), '要求结构化回复')
 })
 
-test('jarvis_think_deep：stakes=high 强制更强对抗（反方≥3+可谬自评）', async () => {
+// ── 判别守卫：角色卡方法论(howText)真实注入 medium/low，A/B 产出可区分（防"人物卡方法论零进入产出"缺陷复发）──
+
+test('jarvis_think_deep：medium/low 卡方法论注入（howText）→ A/B 产出可区分', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
+  const cardA = '身份定位：企业软件架构师。思维模型：演进式架构、先看不可逆决策。核心方法论：重构三步法、默认先单体。'
+  const cardB = '身份定位：钢铁厂车间主任。思维模型：炉前思维、温度曲线。核心方法论：检修宁可慢不可抢。'
+  for (const stakes of ['medium', 'low']) {
+    const a = await def.handler({ question: '是否迁移到云上？', roleCard: cardA, stakes })
+    const b = await def.handler({ question: '是否迁移到云上？', roleCard: cardB, stakes })
+    assert.ok(a.perspective.includes('演进式架构'), `[${stakes}] A 卡方法论进 perspective`)
+    assert.ok(b.perspective.includes('炉前思维'), `[${stakes}] B 卡方法论进 perspective`)
+    assert.ok(a.perspective !== b.perspective, `[${stakes}] perspective 可区分`)
+    assert.ok(a.conclusion.includes('演进式架构') && b.conclusion.includes('炉前思维'), `[${stakes}] conclusion 也注入方法论`)
+  }
+})
+
+test('jarvis_think_deep：stakes=high 引导加载 ponder 十阶段（B13 接入，含角色卡注入画像+衔接契约+skip 显式声明）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
   const r = await def.handler({ question: '是否接入第三方支付？', roleCard: '身份定位：风控负责人。', stakes: 'high' })
-  assert.ok(r.counter.includes('至少 3 条'), '高赌注反方≥3')
-  assert.ok(r.failure.includes('至少 2 种'), '高赌注失效推演×2')
-  assert.ok(r.conclusion.includes('最可能因为什么错'), '高赌注可谬自评')
+  assert.ok(r.ponderGuide.includes('加载 ponder'), 'high 必须引导加载 ponder 技能')
+  assert.ok(r.ponderGuide.includes('人物视角'), '角色卡六段式注入 ponder 画像')
+  assert.ok(r.ponderGuide.includes('roleCard'), '角色卡全文作为画像源')
+  const stages = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']
+  assert.ok(stages.every((s) => r.ponderGuide.includes(s)), '十阶段全含')
+  assert.ok(r.ponderGuide.includes('counter←'), '衔接契约 counter 映射')
+  assert.ok(r.ponderGuide.includes('run_id'), 'run_id 溯源防贴标签')
+  assert.ok(r.ponderGuide.includes('skipReason'), '跳过 ponder 必须显式声明 skipReason')
+  assert.ok(r.ponderGuide.includes('可谬自评'), '高赌注可谬自评经 ponder synthesis 保留')
+  assert.ok(r.ponderGuide.includes('PONDER_DATA_DIR'), 'FIX-1a：per-run 隔离（PONDER_DATA_DIR 独立数据目录）')
+  assert.ok(r.ponderGuide.includes('ponder-runs'), 'FIX-1a：run 目录映射 .jarvis/ponder-runs/<run_id>/')
 })
 
 test('jarvis_think_deep：stakes=low 轻量对抗（反方≥1）', async () => {
@@ -411,6 +435,21 @@ test('jarvis_review：think 为非法 JSON → 明确提示格式错误', async 
   const def = TOOLS.find((t) => t.name === 'jarvis_review')
   const r = await def.handler({ issue: 'x', sideA: 'a', sideB: 'b', thinkA: '不是JSON{{{', thinkB: null })
   assert.ok(r.analysis.includes('不是合法 JSON'), '提示格式错误')
+})
+
+test('jarvis_review：高赌注 think 含 run_id → 标注 ponder 溯源；缺 run_id → 标记贴标签风险（FIX-2 防贴标签）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  // 含 run_id：可溯源
+  const r1 = await def.handler({
+    issue: 'x', sideA: 'a', sideB: 'b',
+    thinkA: JSON.stringify({ counter: ['当X时不成立'], realityCheck: ['核对Y'], confidence: 'high', runId: 'run_abc123' }),
+    thinkB: JSON.stringify({ counter: ['当Z时不成立'], realityCheck: ['核对W'], confidence: 'medium' }),
+  })
+  assert.ok(r1.analysis.includes('run_abc123'), '含 run_id 标注 ponder 溯源')
+  assert.ok(r1.analysis.includes('可溯源'), '标注可溯源')
+  // 缺 run_id：贴标签风险标记
+  assert.ok(r1.analysis.includes('无 run_id'), '缺 run_id 标记贴标签风险')
+  assert.ok(r1.analysis.includes('贴标签'), '明确提示贴标签风险')
 })
 
 // ── 领域流程（CEO 决定流程：插件无领域预设，永远现场定制）──

@@ -103,6 +103,11 @@
 # `skill-filesystem` contributes local-root discovery for agents on this preset, and
 # `tool-skill` gives them the catalog and loader; the merged catalog also
 # carries whatever the deployment registered globally (repository plugins).
+# ── ponder 接入（B13）──
+# 数字员工子 agent 通过 tool-skill 可真实加载 ponder 技能（DSH 平台级十阶段推理
+# 管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→
+# synthesis）。jarvis_think_deep stakes=high 时引导加载 ponder 并把角色卡六段式
+# 作为"人物视角"注入画像；low/medium 保留轻量七段控成本。
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
 
