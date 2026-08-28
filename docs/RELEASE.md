@@ -6,7 +6,7 @@
    - `src/host/plugin.js`（14 工具 + /jarvis 命令：project/store/process/distill/review/essence/escalate/capability/think/think_deep/fidelity/collab/meeting/board，铁律内嵌）
    - `src/client/plugin.js`
    - `preset/`（jarvis-org 预设：persona + 铁律 + 工具行）
-   - `skills/（jarvis-boss 唯一入口：老板协议+蒸馏方法论+项目记忆库+两层架构）
+   - `skills/（jarvis 唯一入口：老板协议+蒸馏方法论+项目记忆库+两层架构）
    - **无 `roles/` 静态卡目录**（领域无关设计：插件不携带任何角色卡/领域模板，领域内容来自「项目沉淀 .jarvis/ + 现场蒸馏」）
 
 2. **上架**：
@@ -21,7 +21,7 @@
 ```bash
 # 1) 预设与技能落位
 ls ~/.dsh/.agent-presets/jarvis-org/agent.cordis.yml   # 存在
-ls ~/.dsh/skills/jarvis-boss/SKILL.md                   # 存在
+ls ~/.dsh/skills/jarvis/SKILL.md                   # 存在
 
 # 2) 核心插件代码语法自检（Node）
 node --check src/host/plugin.js && echo HOST-OK
@@ -41,7 +41,7 @@ bash scripts/selfcheck.sh
 ## 四、打包前检查项（对照）
 
 - [ ] 无 `roles/` 静态卡目录；`package.json` `files` 不含 `roles`
-- [ ] `skills/jarvis-boss.md` 为唯一技能入口（含蒸馏方法论/项目记忆库/两层架构/单入口）
+- [ ] `skills/jarvis.md` 为唯一技能入口（含蒸馏方法论/项目记忆库/两层架构/单入口）
 - [ ] `src/host/plugin.js` 内 distill 校验含 source/六段式/协同架构/防冒名/我的协同 硬闸
 - [ ] `jarvis_process` 无领域预设（DOMAIN_PROCESS 已移除）；`identifyIndustry` 无行业关键词
 - [ ] README 含"使用前必读（防 bug 铁律）"+"故障排查表"

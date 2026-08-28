@@ -22,7 +22,7 @@ grep -q "DOMAIN_PROCESS" src/host/plugin.js && { echo "   FAIL: jarvis_process �
 grep -qE "黄峥|巴菲特" src/host/plugin.js && { echo "   FAIL: identifyIndustry 仍有领域关键词"; exit 1; } || echo "   identifyIndustry 无行业关键词: OK"
 
 echo "== 5) 铁律落位（防 bug 核心） =="
-R=$(grep -l "现场蒸馏\|项目沉淀\|真实情况优先" src/host/plugin.js skills/jarvis-boss.md preset/agent.cordis.yml README.md 2>/dev/null | wc -l)
+R=$(grep -l "现场蒸馏\|项目沉淀\|真实情况优先" src/host/plugin.js skills/jarvis.md preset/agent.cordis.yml README.md 2>/dev/null | wc -l)
 [ "$R" -ge 3 ] && echo "   铁律已内嵌(≥3 处文件): $R" || { echo "   铁律缺失: $R"; exit 1; }
 
 echo "== 6) distill 校验四检查（source/六段式/协同架构/防冒名） =="
