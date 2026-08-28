@@ -8,7 +8,6 @@
     ".": "./src/host/plugin.js",
     "./client": "./src/client/plugin.js",
     "./host": "./src/host/plugin.js",
-    "./distill": "./src/host/distill.js",
     "./package.json": "./package.json"
   },
   "dsh": {

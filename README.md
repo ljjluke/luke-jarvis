@@ -83,3 +83,8 @@ cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
 
 - 本产物只提供**领域无关的工作机制**（蒸馏校验/协同/会议/黑板/问题上行/能力补足/需求本质审计），不携带任何具体人物/行业模板。具体领域知识由 CEO 现场蒸馏并按项目沉淀。
 - 角色卡必须经由 `jarvis_distill` 校验且含 `source` + 防冒名声明后才可使用；沉淀在项目 `.jarvis/cards/`。
+## 文档
+
+- `docs/ARCHITECTURE.md` — 执行架构图（与代码逐条核对的真实流程：`/jarvis` 13 步回执、17 工具、技能阶段对应、防 bug 铁律）
+- `docs/RELEASE.md` — 发布与安装清单
+- `docs/PUSH.md` — 推送约定
