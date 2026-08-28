@@ -350,34 +350,31 @@ test('非 CEO 角色卡含「我的职责/依赖/升级」→ 通过', () => {
   assert.ok(!missing.some((m) => /我的协同|我的位置|我的依赖|我的升级/.test(m)), '分工明确应通过')
 })
 
-// ── 深度思考增强（角色卡 × ponder 轻量七段）──
+// ── 深度思考增强（角色卡 × ponder 满血十阶段，不阉割）──
 
-test('jarvis_think_deep：输出七段对抗式思考任务单（ponder 轻量化）', async () => {
+test('jarvis_think_deep：medium 也引导加载 ponder 满血十阶段（不阉割，非轻量七段）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
   const r = await def.handler({ question: '拼团要 2 人还是 3 人成团？', roleCard: '身份定位：产品增长负责人。', stakes: 'medium' })
-  assert.ok(r.premises.includes('前提'), '前提审视段')
-  assert.ok(r.perspective.includes('第一判断'), '视角展开段')
-  assert.ok(r.counter.includes('当X时不成立'), '反方攻击段')
-  assert.ok(r.failure.length > 0, '失效推演段')
-  assert.ok(r.realityCheck.includes('真实'), '真实优先核对段')
-  assert.ok(r.limits.includes('诚实边界'), '诚实边界段')
-  assert.ok(r.conclusion.includes('置信度'), '收敛结论段')
-  assert.ok(r.respondAs.includes('JSON'), '要求结构化回复')
+  assert.ok(r.ponderGuide.includes('加载 ponder'), 'medium 也须引导加载 ponder（满血）')
+  const stages = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']
+  assert.ok(stages.every((s) => r.ponderGuide.includes(s)), '十阶段全含（不阉割）')
+  assert.ok(r.ponderGuide.includes('不得跳过任何阶段'), '禁止跳阶段/轻量替代')
+  assert.ok(r.ponderGuide.includes('run_id'), 'run_id 溯源')
+  assert.ok(r.ponderGuide.includes('skipReason'), 'skip 显式声明')
 })
 
-// ── 判别守卫：角色卡方法论(howText)真实注入 medium/low，A/B 产出可区分（防"人物卡方法论零进入产出"缺陷复发）──
+// ── 判别守卫：角色卡方法论(howText)真实注入 ponder 引导，A/B 产出可区分（防"人物卡方法论零进入产出"缺陷复发）──
 
-test('jarvis_think_deep：medium/low 卡方法论注入（howText）→ A/B 产出可区分', async () => {
+test('jarvis_think_deep：medium/low 卡方法论注入（howText）→ A/B ponderGuide 可区分', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
   const cardA = '身份定位：企业软件架构师。思维模型：演进式架构、先看不可逆决策。核心方法论：重构三步法、默认先单体。'
   const cardB = '身份定位：钢铁厂车间主任。思维模型：炉前思维、温度曲线。核心方法论：检修宁可慢不可抢。'
   for (const stakes of ['medium', 'low']) {
     const a = await def.handler({ question: '是否迁移到云上？', roleCard: cardA, stakes })
     const b = await def.handler({ question: '是否迁移到云上？', roleCard: cardB, stakes })
-    assert.ok(a.perspective.includes('演进式架构'), `[${stakes}] A 卡方法论进 perspective`)
-    assert.ok(b.perspective.includes('炉前思维'), `[${stakes}] B 卡方法论进 perspective`)
-    assert.ok(a.perspective !== b.perspective, `[${stakes}] perspective 可区分`)
-    assert.ok(a.conclusion.includes('演进式架构') && b.conclusion.includes('炉前思维'), `[${stakes}] conclusion 也注入方法论`)
+    assert.ok(a.ponderGuide.includes('演进式架构'), `[${stakes}] A 卡方法论进 ponderGuide`)
+    assert.ok(b.ponderGuide.includes('炉前思维'), `[${stakes}] B 卡方法论进 ponderGuide`)
+    assert.ok(a.ponderGuide !== b.ponderGuide, `[${stakes}] ponderGuide 可区分`)
   }
 })
 
@@ -397,10 +394,13 @@ test('jarvis_think_deep：stakes=high 引导加载 ponder 十阶段（B13 接入
   assert.ok(r.ponderGuide.includes('ponder-runs'), 'FIX-1a：run 目录映射 .jarvis/ponder-runs/<run_id>/')
 })
 
-test('jarvis_think_deep：stakes=low 轻量对抗（反方≥1）', async () => {
+test('jarvis_think_deep：stakes=low 也走 ponder（精简 agent 规模但十阶段不跳）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
   const r = await def.handler({ question: '按钮文案用哪个？', roleCard: '身份定位：产品负责人。', stakes: 'low' })
-  assert.ok(r.counter.includes('至少 1 条'), '低赌注反方≥1')
+  assert.ok(r.ponderGuide.includes('精简各阶段内 agent 规模'), '低赌注精简 agent 规模')
+  assert.ok(r.ponderGuide.includes('不得跳过任何阶段'), '但不得跳阶段（满血不阉割）')
+  const stages = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']
+  assert.ok(stages.every((s) => r.ponderGuide.includes(s)), '十阶段全含')
 })
 
 test('jarvis_review：传入双方深度思考帧 → analysis 引用反方/真实核对', async () => {

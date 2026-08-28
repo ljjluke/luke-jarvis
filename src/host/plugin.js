@@ -808,7 +808,7 @@ export const TOOLS = [
   {
     name: 'jarvis_think_deep',
     description:
-      '角色深度思考器（ponder 入口引导器，防幻觉核心）：stakes=high 时引导角色真实加载 ponder 技能（DSH 平台级十阶段推理管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，子 agent 具备 skill 工具可加载）并把本角色卡六段式作为"人物视角"注入画像后跑完整流程，产出按衔接契约回填（counter←divergence/bagua/debate、realityCheck←interview/无知自检、confidence←converge/certainty、conclusion←synthesis、limits←epistemic_status）；stakes=medium/low 时保留轻量七段对抗式任务单（前提审视→视角展开→反方攻击→失效推演→真实优先核对→诚实边界→收敛结论）控成本。stakes 控制对抗深度：low=反方≥1，medium=反方≥2+失效推演，high=加载 ponder 十阶段+可谬自评。产出可直接喂给 jarvis_review 做分歧裁决的双方依据（thinkA/thinkB，含 run_id 溯源）。铁律不变：真实情况优先于角色卡；宁 60 分诚实不要 90 分编造；高赌注跳过 ponder 必须显式声明 skipReason（技能不可用/用户成本优先）并留痕，禁止静默降级。',
+      '角色深度思考器（ponder 满血入口引导器，防幻觉核心）：**每个角色的独立思考必须加载 ponder 技能跑完整十阶段**（DSH 平台级：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，资源分散在 explore/blindspots/solutions/simulate/debate/synthesis 技能全部可加载，子 agent 具备 skill 工具），step-guard init 开始本次 run，把本角色卡六段式作为"人物视角"注入画像后十阶段全量跑完，产出按衔接契约回填（counter←divergence/bagua/debate、realityCheck←interview/无知自检、confidence←converge/certainty、conclusion←synthesis、limits←epistemic_status）。**满血不阉割**：禁止只跑 interview+converge 两段或用轻量七段替代（那达不到思考效果）；低赌注（low）可精简各阶段内 agent 规模但不得跳过阶段。产出带 run_id 溯源，可直接喂给 jarvis_review 做分歧裁决双方依据（thinkA/thinkB）。铁律：真实情况优先于角色卡；宁 60 分诚实不要 90 分编造；跳过 ponder 必须显式声明 skipReason（技能不可用/用户成本优先）并留痕，禁止静默降级；web_search 受限时查证类阶段降级为知识库推演但标注"受限环境推演"。',
     parameters: {
       type: 'object',
       properties: {
@@ -854,38 +854,23 @@ export const TOOLS = [
       const cardRedline = extractHow('决策红线')
       const howBits = [cardModel, cardMethod, cardRedline].filter(Boolean)
       const howText = howBits.length ? howBits.join('；').slice(0, 200) : '（角色卡未提供方法论，按通用分析）'
-      // ── high 分支：ponder 入口引导（B13 接入，真实加载 ponder 十阶段，非仿制七段）──
-      if (stakes === 'high') {
-        return {
-          role: roleName,
-          stakes: 'high',
-          ponderGuide: `【${roleName} · 高赌注深度思考 · 必须加载 ponder 技能】\n本问题赌注为 high（重大决策/对外承诺），不得用轻量七段代替完整推理：\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.js init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.js 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）；\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；高赌注须含可谬自评（synthesis 阶段：这份结论最可能因为什么错？如果错改走什么方向——基于立场 A 最可能因 X 错+备选）；\n5. 把 run_id 与阶段产出溯源一并写入输出（供 jarvis_review 防贴标签校验）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级到七段，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","skipReason":"降级原因或空"}。`,
-          premises: `（high 分支已转 ponder 十阶段，本字段不适用——见 ponderGuide）`,
-          perspective: `（high 分支已转 ponder 十阶段——以「${roleName}」角色卡方法论注入画像驱动全程）`,
-          counter: `（high 分支已转 ponder 十阶段——由 divergence/bagua/debate 产出反方）`,
-          failure: `（high 分支已转 ponder 十阶段——由 simulate 推演产出失败路径）`,
-          realityCheck: `（high 分支已转 ponder 十阶段——由 interview 五诊+无知自检产出核对项）`,
-          limits: `（high 分支已转 ponder 十阶段——由各阶段 epistemic_status 汇总诚实边界）`,
-          conclusion: `（high 分支已转 ponder 十阶段——由 synthesis 产出收敛结论+可谬自评）`,
-          respondAs: `按 ponder 十阶段跑完后按衔接契约回填 JSON（见 ponderGuide 第 6 步）。`,
-        }
-      }
-      // ── medium/low 分支：保留轻量七段对抗式任务单（控成本，与改造前一致）──
-      const counterMin = stakes === 'low' ? 1 : 2
-      const failureN = stakes === 'low' ? 0 : 1
-      const failureReq = failureN >= 1 ? `写至少 ${failureN} 种"换场景/换数据/换时间"推演，指出最可能失败路径` : '简写一种"换场景"检查'
-      const selfRefute = stakes === 'high' ? '最后必须做可谬自评：我这份结论最可能因为什么错？如果错，改走什么方向？' : ''
+      // ── 满血 ponder 入口引导（B13 · 满血版：所有 stakes 都加载 ponder 十阶段，不阉割）──
+      // high=完整十阶段含可谬自评；medium/low=同十阶段框架、精简各阶段 agent 规模（控成本但不得跳过阶段/不得用轻量七段替代）
+      const depthNote = stakes === 'high'
+        ? '本问题赌注为 high（重大决策/对外承诺）：必须加载 ponder 完整十阶段 + synthesis 含可谬自评（这份结论最可能因为什么错？如果错改走什么方向——基于立场 A 最可能因 X 错+备选）。'
+        : `本问题赌注为 ${stakes}：仍须加载 ponder 十阶段框架（满血不阉割），可精简各阶段内 agent 规模（如 bagua 8 维抽 4 维、debate 立论 3 个减为 2 个）控成本，但【不得跳过任何阶段、不得用轻量七段替代】——跳阶段=没达到思考效果。`
       return {
         role: roleName,
         stakes,
-        premises: `列出问题「${q.slice(0, 60)}」隐含的 2-3 个前提（如：需求真存在？数据可真？时间够？竞争对手真没有？），并标出哪个前提未经验证——未验证的前提先写"待核对"，不许直接当成立。`,
-        perspective: `以「${roleName}」身份，**必须引用你角色卡中的独有方法论**【${howText}】给出你对本题的第一判断：我会怎么看、第一步做什么——判断要体现这套方法论（如适用），不是通用分析师思考。注意：这只是第一判断，下面几步会攻击它。`,
-        counter: `写至少 ${counterMin} 条"当X时不成立"的反方攻击逐一质询第一判断（如：当数据口径不同时不成立；当对手也这样做时不成立；当用户真实行为与假设不符时不成立）。`,
-        failure: `${failureReq}。`,
-        realityCheck: `列出 2-3 个必须先核对的真实项（真实数据/代码/复现/历史记录/用户实证），明确标注：没核对前，禁止把判断写成结论——这是铁律（真实情况优先于角色卡）。`,
-        limits: `写诚实边界：信息截止时间？本题哪些是推测成分？作为「${roleName}」你做不到什么/不能断言什么？`,
-        conclusion: `${selfRefute}\n吸收以上攻击与核对后，**以「${roleName}」的角色卡方法论【${howText}】为准绳**收敛保留结论 + 置信度（low/medium/high）+ 需要向谁确认或升级（同事/CEO/jarvis_review）——结论必须体现这套方法论的选择（如"按此方法论，我宁可…也不要…"），不是通用结论。`,
-        respondAs: `按顺序完成上面七段思考，最后以 JSON 输出：{"premises":[未验证前提清单],"perspective":"我的第一判断","counter":["当X时不成立…"],"failure":"失败路径","realityCheck":["先核对…"],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","escalateTo":"向谁升级"}。`,
+        ponderGuide: `【${roleName} · ${stakes} 赌注深度思考 · 必须加载 ponder 技能（满血版）】\n${depthNote}\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.js init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.js 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）——${stakes !== 'high' ? '各阶段 agent 规模按低赌注精简（如 bagua 4 维/辩论 2 立论）但阶段一个不少' : '阶段与 agent 规模全量' }；\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；${stakes === 'high' ? 'high 须含可谬自评（见上）。' : ''}\n5. 把 run_id 与阶段产出溯源一并写入输出（供 jarvis_review 防贴标签校验——有 run_id 才算真跑过 ponder）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）降级为知识库推演但标注"受限环境推演"。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","skipReason":"降级原因或空"}。`,
+        premises: `（已转 ponder 十阶段，本字段不适用——见 ponderGuide）`,
+        perspective: `（已转 ponder 十阶段——以「${roleName}」角色卡方法论【${howText}】注入画像驱动全程）`,
+        counter: `（已转 ponder 十阶段——由 divergence/bagua/debate 产出反方）`,
+        failure: `（已转 ponder 十阶段——由 simulate 推演产出失败路径）`,
+        realityCheck: `（已转 ponder 十阶段——由 interview 五诊+无知自检产出核对项）`,
+        limits: `（已转 ponder 十阶段——由各阶段 epistemic_status 汇总诚实边界）`,
+        conclusion: `（已转 ponder 十阶段——由 synthesis 产出收敛结论${stakes === 'high' ? '+可谬自评' : ''}）`,
+        respondAs: `按 ponder 十阶段跑完后按衔接契约回填 JSON（见 ponderGuide 第 6 步）。`,
       }
     },
   },

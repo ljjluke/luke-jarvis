@@ -103,11 +103,16 @@
 # `skill-filesystem` contributes local-root discovery for agents on this preset, and
 # `tool-skill` gives them the catalog and loader; the merged catalog also
 # carries whatever the deployment registered globally (repository plugins).
-# ── ponder 接入（B13）──
+# ── ponder 接入（B13 · 满血版，不阉割）──
 # 数字员工子 agent 通过 tool-skill 可真实加载 ponder 技能（DSH 平台级十阶段推理
 # 管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→
-# synthesis）。jarvis_think_deep stakes=high 时引导加载 ponder 并把角色卡六段式
-# 作为"人物视角"注入画像；low/medium 保留轻量七段控成本。
+# synthesis，资源分散在 explore/blindspots/solutions/simulate/debate/synthesis 技能，
+# 全部可加载）。【铁律】每个角色的独立思考必须用 ponder 满血版：任何关键决策
+# （选型/定价/风控规则/对外承诺/高赌注方案/分歧裁决）先跑 ponder 完整十阶段
+# （step-guard init → 十阶段全量 → 产出带 run_id），把角色卡六段式作为"人物视角"
+# 注入画像，产出按衔接契约喂 jarvis_review。禁止阉割（只跑 interview+converge 两段
+# = 没达到思考效果）；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）
+# 降级为成员知识库推演但必须标注"受限环境推演"，不得静默冒充已查证。
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
 

@@ -101,13 +101,14 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 
 > 黑板 = `<workspace>/.jarvis/board.json`（CEO 维护，全员可读写，随项目记忆库持久化）；会议 = agent_teams 全员的 send_message 广播 + 成员直连讨论。
 
-## 角色思考协议（防幻觉，关键决策必做）
+## 角色思考协议（防幻觉，**每个角色满血 ponder 必用**）
 
-- 每个成员收到任务后，对**关键决策**（选型/定价/风控规则/对外承诺/高赌注方案）先跑 `jarvis_think_deep`：**stakes=high（重大决策/对外承诺）时须加载 ponder 技能**（DSH 平台级十阶段推理管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，skill 工具已注册可加载）跑完整流程，**并把本角色卡六段式作为"人物视角"注入画像**（确保十阶段以该人物方法论驱动，不是通用分析师思考），产出按衔接契约喂 `jarvis_review`（含 run_id 溯源）；**low/medium 保留轻量七段控成本**（前提审视→视角展开→反方攻击→失效推演→真实优先核对→诚实边界→收敛结论，stakes 按赌注给：high=反方≥3+可谬自评[注：high 已转 ponder]、medium=反方≥2、low=反方≥1）。
+- **每个成员收到任务后，对关键决策（选型/定价/风控规则/对外承诺/高赌注方案/分歧裁决）必须先跑 ponder 满血版**：用 `skill` 工具加载 ponder 技能（DSH 平台级十阶段推理管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，资源分散在 explore/blindspots/solutions/simulate/debate/synthesis 技能，全部可加载），**step-guard init 开始本次 run → 十阶段全量跑完**（子 agent 全部返回才进下一步），**把本角色卡六段式作为"人物视角"注入画像**（确保十阶段以该人物方法论驱动，不是通用分析师思考），产出按衔接契约喂 `jarvis_review`（含 run_id 溯源）。
+- **满血不阉割**：禁止只跑 interview+converge 两段或跳过八卦镜/辩论等阶段——那达不到思考效果；任何角色的独立思考产出（counter/realityCheck/conclusion）必须可溯源到 ponder 十阶段（run_id + 阶段产出摘录）。
 - 产出是结构化 JSON（含 `counter/realityCheck/confidence`），**不是一句结论**——推理链必须可见。
-- 成员之间有分歧（如产品 vs 风控、测试 vs 研发）→ 各自先 `jarvis_think_deep`，把双方思考帧喂给 `jarvis_review` 裁决（传 `thinkA/thinkB` + **必传 requirement**）。裁决优先级铁律：**需求本质 > 真实情况 > 用户需求 > 专业判断**。谁没提供思考帧只亮结论，CEO 要打回让其补齐——防一面之词。
+- 成员之间有分歧（如产品 vs 风控、测试 vs 研发）→ 各自先跑 ponder，把双方思考帧喂给 `jarvis_review` 裁决（传 `thinkA/thinkB` + **必传 requirement**）。裁决优先级铁律：**需求本质 > 真实情况 > 用户需求 > 专业判断**。谁没提供思考帧只亮结论，CEO 要打回让其补齐——防一面之词。
 - **每一条重要决策定稿前跑 `jarvis_essence` 四查**（回归本质/防迎合/防幻觉/真实优先），PASS 才进黑板/发布；迎合=打回，编造=一票否决。这是老板不可让渡的闸门。
-- 深度思考 ≠ 慢：低赌注小事跳过或只做轻量版；只有高赌注（stakes=high）才全量对抗（加载 ponder 十阶段）。绝不允许"为了显得认真"让每个问题都跑全套。
+- **深度思考 ≠ 慢，但满血不阉割**：低赌注小事可跑精简轮次（十阶段内控制 agent 规模），但**不得跳过阶段或用轻量七段替代**；绝不允许"为了显得认真"贴 ponder 标签（有 run_id 才算真跑）。
 - **受限环境降级声明（web_search 不可用）**：ponder 的查证类阶段（bagua 8 维引源、divergence 查资料）在无 web 环境下降级为基于成员知识库推演——产出必须标注"受限环境推演"来源，不得静默冒充已查证；决策风险随 stakes 告知用户。
 
 ## 问题上行铁律（不许跳过问题，防客户提 bug）
