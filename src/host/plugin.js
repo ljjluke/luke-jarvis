@@ -1165,12 +1165,15 @@ export const TOOLS = [
   {
     name: 'jarvis_release',
     description:
-      '交付版本管理器（乙方与甲方的契约机制，防"需求永远改/无法自证"）：vibe 模式+甲方确认才算完成+验收随时可调 → 乙方必须靠"版本快照+交付清单+沟通留痕"自证。①new_version=打新版本（v1.0/v1.1…，冻结旧版，变更开新版承接）；②checklist=生成交付清单（需求本质逐条→对应交付物→自测结果，甲方可逐条确认）；③status=版本状态（待确认/已确认/已否决，含确认时限：超时默认通过或明确挂起）；④communication=记录与甲方的沟通结论（问题/答复/时间，只记结论不记过程）。铁律：乙方永远能说清"交付了什么、等什么确认"；版本是内部记账不打扰甲方；清单是逐条对应不是模板。',
+      '交付版本管理器（乙方与甲方的契约机制，防"需求永远改/无法自证"，**领域通用的版本管理铁律——任何领域交付物都要版本化**）：vibe 模式+甲方确认才算完成+验收随时可调 → 乙方必须靠"版本快照+交付清单+沟通留痕"自证。①new_version=打新版本（v1.0/v1.1…，冻结旧版，变更开新版承接）；②checklist=生成交付清单（需求本质逐条→对应交付物→自测结果，甲方可逐条确认）；③status=版本状态（待确认/已确认/已否决，含确认时限：超时默认通过或明确挂起）；④communication=记录与甲方的沟通结论（问题/答复/时间，只记结论不记过程）；⑤**rollback=回滚到历史版本（企业级必备：改错/决策失误可 undo——prevVersions 里选一个已冻结版本回滚，当前版标记为"已回滚"，旧版重新激活为当前版，回滚动作留痕：谁/何时/为什么）**。铁律：乙方永远能说清"交付了什么、等什么确认"；版本是内部记账不打扰甲方；清单是逐条对应不是模板；**任何领域（软件/方案/流程/卡/黑板/交付物）的交付都走版本化，改错必须能回滚**。',
     parameters: {
       type: 'object',
       properties: {
-        mode: { type: 'string', description: 'new_version 打新版本 / checklist 生成交付清单 / status 版本状态 / communication 记录甲方沟通' },
-        version: { type: 'string', description: '版本号（如 v1.0），new_version 必填' },
+        mode: { type: 'string', description: 'new_version 打新版本 / checklist 生成交付清单 / status 版本状态 / communication 记录甲方沟通 / rollback 回滚到历史版本' },
+        version: { type: 'string', description: '版本号（如 v1.0），new_version 必填；rollback 用=当前版本号' },
+        rollbackTo: { type: 'string', description: 'rollback 用：要回滚到的历史版本号（如 v1.0）' },
+        rollbackReason: { type: 'string', description: 'rollback 用：回滚原因（改错/决策失误/甲方否决），必填留痕' },
+        prevVersions: { type: 'string', description: '已有版本状态 JSON（status/rollback 用），如 [{"version":"v1.0","state":"已确认"}]' },
         requirement: { type: 'string', description: '原始需求/需求本质（checklist 用，逐条对应）' },
         items: { type: 'string', description: '交付物清单 JSON 数组（checklist 用）' },
         selfTest: { type: 'string', description: '自测结果（checklist 用，每条交付物的验证证据）' },
@@ -1230,6 +1233,27 @@ export const TOOLS = [
         const log = `[${new Date().toISOString().slice(0, 16)}] 问甲方：${q.slice(0, 80)}${a ? ` → 甲方答：${a.slice(0, 80)}` : '（待甲方答复）'}`
         verdict = `沟通留痕已记录：${log}。写入 project.md（只记结论）。`
         return { version: version || '?', log, verdict }
+      }
+      if (mode === 'rollback') {
+        // ── 回滚到历史版本（企业级版本管理：改错/决策失误可 undo）──
+        const cur = String(args.version ?? '').trim()
+        const target = String(args.rollbackTo ?? '').trim()
+        const reason = String(args.rollbackReason ?? '').trim()
+        let prev = []
+        try { prev = JSON.parse(String(args.prevVersions ?? '[]')) } catch { prev = [] }
+        if (!cur || !target) {
+          return { version: cur || '?', status: 'rollback 失败', verdict: '⚠️ rollback 需要 version（当前版）+ rollbackTo（回滚目标版）' }
+        }
+        if (!reason) {
+          return { version: cur, status: 'rollback 失败', verdict: '⚠️ rollback 必须带 rollbackReason（回滚原因：改错/决策失误/甲方否决）——无原因不回滚，留痕是铁律' }
+        }
+        const targetExists = prev.some((v) => v.version === target)
+        if (!targetExists && prev.length) {
+          return { version: cur, status: 'rollback 失败', verdict: `⚠️ 回滚目标 ${target} 不在已有版本清单（${prev.map((v) => v.version).join(', ')}）——先 status 确认版本清单` }
+        }
+        const log = `[${new Date().toISOString().slice(0, 16)}] 回滚：${cur} → ${target}（原因：${reason.slice(0, 60)}）——当前版标记"已回滚"（冻结），${target}重新激活为当前版；此动作留痕可追溯。`
+        verdict = `✅ 已回滚：${cur} → ${target}（原因：${reason.slice(0, 60)}）。${target}重新激活为当前版；${cur}冻结为"已回滚"历史。回滚动作已留痕（时间/原因/目标）。任何领域的交付改错都能这样 undo。`
+        return { version: cur, status: `已回滚到 ${target}`, rollbackLog: log, verdict }
       }
       return { version: version || '?', status: '未知模式（new_version/checklist/status/communication）', verdict: '请指定 mode' }
     },

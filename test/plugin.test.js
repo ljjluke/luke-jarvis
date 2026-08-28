@@ -697,3 +697,17 @@ test('jarvis_perf：阶段结果符合要求→达标；到期未完成→才不
   const two = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: 't2', quality: '0', completion: '0', escalation: '1', fit: '1', depth: '100', history: JSON.stringify([{ ok: false }, { ok: false }]) })
   assert.ok(two.action.includes('换人'), '连续 2 次不达标→换人')
 })
+
+// ── 企业级版本管理：回滚机制（任何领域交付改错可 undo）──
+
+test('jarvis_release：rollback 回滚到历史版本（留痕+校验）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const prev = JSON.stringify([{ version: 'v1.0', state: '已确认' }, { version: 'v1.1', state: '已确认' }, { version: 'v1.2', state: '待确认' }])
+  const ok = await def.handler({ mode: 'rollback', version: 'v1.2', rollbackTo: 'v1.1', rollbackReason: '甲方否决', prevVersions: prev })
+  assert.ok(ok.status.includes('已回滚到 v1.1'), '回滚成功')
+  assert.ok(ok.verdict.includes('留痕'), '回滚动作留痕')
+  const noReason = await def.handler({ mode: 'rollback', version: 'v1.2', rollbackTo: 'v1.1', prevVersions: prev })
+  assert.ok(noReason.verdict.includes('必须带 rollbackReason'), '缺原因拒绝回滚')
+  const badTarget = await def.handler({ mode: 'rollback', version: 'v1.2', rollbackTo: 'v9.9', rollbackReason: 'x', prevVersions: prev })
+  assert.ok(badTarget.verdict.includes('不在已有版本清单'), '回滚目标不存在拒绝')
+})
