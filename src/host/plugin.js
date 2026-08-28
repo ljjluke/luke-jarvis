@@ -1331,6 +1331,148 @@ export const TOOLS = [
       return { items, openItems, blockers, needsMeeting, reason, summary }
     },
   },
+
+  {
+    name: 'jarvis_clarify',
+    description:
+      '需求澄清引导器（REFORM-CLARIFY 机制实现，领域无关）：用户需求模糊时，CEO 以专业角度分析用户需求并引导用户回答问题（不是干等/代为澄清）。模式：①analyze=CEO 专业分析先行——把模糊需求按行业常识/同类需求模式/可行域翻译成 5 角度候选问题（P1 场景/P2 现状/P3 痛点/P4 期望/P5 验收），返回候选问题清单+模糊度判定；②trigger=蒸馏触发判定（机械可判 T1-T5：T1 5 角度中≥2 个候选问题为空或仅含无具体名词追问（"再说说/展开讲讲"不计，须含对象/场景/行业词才算数）、T2 无同类卡与原型、T3 ≥2 角度命中行业术语但引不出行业依据（规范名/source/同类案例出处）、T4 用户回答超 CEO 专业范围、T5 单人 3 轮未收敛——任一触发=建议现场蒸馏该需求领域真实大佬（软件→软件大佬、制造→制造大佬，领域由需求决定插件无预设），六段式卡过 jarvis_distill 校验后双人进场）；③ask=三阶提问（开放→聚焦→确认，每轮≤2 问，遵守 jarvis.md 阶段一"一次只问 1-2 个问题"）生成引导话术；④duo=双人协作方案 A 判据（同刻一人主问：用户回答前主问者 from≤1 可数，补充消息须标注"补充"；CEO 域=P5 验收+与交付相关的 P2 子集[频率/负责人/时限]，大佬域=P1-P4 场景/细节/专业盲区，防重复=问题含场景/现状/痛点/期望/验收关键词即同域）；⑤confirm=澄清完成判定（需求本质重述三段式[为谁/解决什么/怎样算成功可判定]+假设分级[已确认/推断待确认]，经用户确认=完成，缺一禁止进拆解）。铁律：推断不得冒充用户已确认；用户拒绝/失联=连续 2 轮无有效回答→按 CEO 推断+显式标注继续（3 轮=挂起）；澄清产出过 B16 黑板翻译/B22 可行性闸/B15 分层（标注为黑板决议目标态）；web_search 受限时蒸馏降级=curl 验证 source+标注推演。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'analyze 专业分析+候选问题 / trigger 蒸馏触发判定 / ask 三阶提问话术 / duo 双人协作判据 / confirm 澄清完成判定（默认 analyze）' },
+        requirement: { type: 'string', description: '用户原始需求（可模糊，必填）' },
+        industry: { type: 'string', description: 'CEO 判断的领域（可选，领域由需求决定插件无预设）' },
+        candidates: { type: 'string', description: 'analyze 产出的 5 角度候选问题 JSON 或文本（trigger/ask 用）' },
+        roleCards: { type: 'string', description: '双人协作：CEO 卡 + 蒸馏大佬卡清单 JSON（duo 用）' },
+        round: { type: 'string', description: '当前澄清轮次（ask/duo 用）' },
+        userAnswers: { type: 'string', description: '用户已回答内容 JSON（confirm 用：判定假设分级与完成）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          essence: { type: 'string', description: '需求本质判定' },
+          candidates: { type: 'array', items: { type: 'string' }, description: '5 角度候选问题' },
+          vague: { type: 'boolean', description: '需求是否模糊（需澄清）' },
+          trigger: { type: 'string', description: '触发判定：不触发/T1-T5 触发/需蒸馏' },
+          triggerDetail: { type: 'string' },
+          questions: { type: 'array', items: { type: 'string' }, description: '本轮引导话术' },
+          duoCheck: { type: 'string', description: '双人协作方案 A 判据核对结果' },
+          confirm: { type: 'string', description: '澄清完成判定' },
+          verdict: { type: 'string' },
+        },
+        required: ['verdict'],
+      },
+      render: (r) =>
+        `【需求澄清 · ${r.mode ?? 'analyze'}】\n本质：${r.essence}\n模糊度：${r.vague ? '⚠️ 模糊需澄清' : '✅ 可判定'}\n${r.candidates?.length ? '候选问题：\n  ' + r.candidates.map((c) => '· ' + c).join('\n  ') : ''}${r.trigger ? '\n触发：' + r.trigger : ''}${r.questions?.length ? '\n本轮话术：\n  ' + r.questions.map((q) => '· ' + q).join('\n  ') : ''}${r.duoCheck ? '\n双人判据：' + r.duoCheck : ''}${r.confirm ? '\n完成判定：' + r.confirm : ''}\n裁决：${r.verdict}`,
+    },
+    handler: async (args) => {
+      const mode = String(args.mode ?? 'analyze').trim()
+      const req = String(args.requirement ?? '').trim()
+      const industry = String(args.industry ?? '').trim()
+      // 仅 analyze/trigger 需要 requirement；ask/duo/confirm 可无（duo 只要 roleCards，confirm 只要 userAnswers）
+      if (!req && (mode === 'analyze' || mode === 'trigger')) return { verdict: '⚠️ 缺 requirement：analyze/trigger 必须先有用户原始需求（可模糊）' }
+      // ── 需求本质判定（领域无关：为谁解决什么、怎样算成功可判定）──
+      const hasWho = /为谁|用户|谁|受众|客户|员工|患者|学生/.test(req)
+      const hasWhat = /解决|做|建|实现|想要|需要|自动化|系统|工具|流程/.test(req)
+      const hasSuccess = /成功|验收|指标|衡量|多少|怎样算|达标|效率|减少|提升/.test(req)
+      const vague = !(hasWho && hasWhat && hasSuccess)
+      if (mode === 'analyze') {
+        // ── CEO 专业分析先行：5 角度候选问题（领域无关话术，P 编号）──
+        const cand = [
+          `【P1 场景】你提到想解决「${req.slice(0, 60)}」，具体在什么场景下遇到这个问题？（谁在用、什么时候发生）`,
+          `【P2 现状】现在你们是怎么做的？（当前流程/手工方式/现有工具）哪里最费劲？`,
+          `【P3 痛点】这个过程里最让你头疼的是哪一步？（最花时间/最易出错/最烦）`,
+          `【P4 期望】你期望它做到什么程度？（理想结果/想要的效果）`,
+          `【P5 验收】如果做成了，你拿什么判断成功？（指标/完成标准/多少时间内）`,
+        ]
+        return {
+          essence: `为谁解决什么：${req.slice(0, 120)}${industry ? `（领域：${industry}）` : ''}。模糊度判定：${vague ? '⚠️ 需求模糊——缺少' + [hasWho?'':'为谁(受众)',hasWhat?'':'解决什么(动作/对象)',hasSuccess?'':'怎样算成功(指标/验收)'].filter(Boolean).join('/') + '，需按 5 角度引导用户澄清' : '✅ 三要素齐备，可进拆解'}`,
+          candidates: cand,
+          vague,
+          verdict: vague
+            ? `需求模糊 → 按 5 角度候选问题引导用户回答（每轮≤2 问，先开放后聚焦，最后确认式）；用户回答后跑 trigger 判定是否需蒸馏行业大佬`
+            : `需求可判定 → 无需澄清，直接进需求本质回归+拆解`,
+        }
+      }
+      if (mode === 'trigger') {
+        // ── 蒸馏触发判定（机械可判 T1-T5，领域无关）──
+        const candText = String(args.candidates ?? '')
+        const cands = candText.split('\n').map((s) => s.trim()).filter(Boolean)
+        // T1：5 角度中候选问题为空或仅含无具体名词追问的角度≥2（"再说说/展开讲讲"不计，须含对象/场景/行业词）
+        const generic = /再说说|展开讲讲|具体说说|详细说说|还有吗/.test(candText)
+        const emptyCount = cands.filter((c) => !c || c.length < 4).length
+        const t1 = emptyCount >= 2 || (generic && cands.length < 3)
+        // T3：命中行业术语但引不出依据（行业词/黑话/规范名——扩大识别：OEE/TPM/点检/GAAP/合规/排期/审批等）
+        const industryTerms = /术语|规范|标准|合规|行业|体系|审批|检验|认证|OEE|TPM|点检|GAAP|IFRS|排期|产能|良率|周转|随访|依从|排课|课时|检定|安全规程|SOP|KPI|ROI|EMR|CRM|ERP/.test(req)
+        // canCite 只测"已给出的具体依据"（"依据…/按…规范/参考…/…出处/…source"），不含候选问题话术里的"完成标准/验收标准"字样
+        const canCite = /(依据|按|参考|根据|引用|查)[^\n]{0,20}(规范|标准|规程|source|出处|案例)|(规范名|标准号|出处|source|案例)[：:]\s*\S+/.test(String(args.candidates ?? ''))
+        const t3 = industryTerms && !canCite
+        const t4 = /超出|不会|不懂|不知道.*专业|领域外/.test(req) || /专业.*(术语|知识)/.test(req)
+        const triggered = t1 || t3 || t4
+        return {
+          trigger: triggered ? (t1 ? 'T1 触发' : t3 ? 'T3 触发' : 'T4 触发') : '不触发',
+          triggerDetail: triggered
+            ? `CEO 对「${req.slice(0, 60)}」的${t1 ? '5 角度候选问题≥2 个引不出（含具体名词的）追问' : t3 ? '行业术语命中但引不出行业依据（规范名/source）' : '用户回答超出专业范围'}——建议现场蒸馏该需求领域真实大佬（${industry || '领域由需求决定'}：软件→软件大佬/制造→制造大佬/金融→金融大佬…，插件无预设），六段式卡过 jarvis_distill 校验后双人进场`
+            : `CEO 专业分析足以覆盖，无需蒸馏大佬，继续引导`,
+          verdict: triggered ? `触发蒸馏 → 现场 web 蒸馏「${industry || '该需求领域'}」真实权威（curl 验证 source，web_search 受限时降级标注推演）→ jarvis_distill 校验 → 双人协作` : `不触发 → CEO 单人三阶引导（开放→聚焦→确认）`,
+        }
+      }
+      if (mode === 'ask') {
+        // ── 三阶提问话术（开放→聚焦→确认，每轮≤2 问）──
+        const round = Number(args.round ?? 1)
+        const cands = String(args.candidates ?? '')
+          .split('\n').map((s) => s.trim()).filter(Boolean)
+        let questions = []
+        if (round <= 1) {
+          // 第 1 阶开放式：让用户展开（P1 场景 + P2 现状 各取一句）
+          questions = [cands[0] || `你提到想解决「${req.slice(0, 50)}」，能说说在什么场景下遇到、现在怎么做的吗？`]
+          if (cands[1]) questions.push(cands[1])
+        } else if (round === 2) {
+          // 第 2 阶聚焦式：追最痛一点 + 期望边界
+          questions = [`你刚才提到最头疼的是哪一步？能举个具体例子吗？`]
+          if (cands[3]) questions.push(cands[3])
+        } else {
+          // 第 3 阶确认式：需求本质重述确认（P5 验收）
+          questions = [`如果做成了，你拿什么判断成功？（完成标准/指标/时限）`]
+          if (cands[4]) questions.push(cands[4])
+        }
+        questions = questions.slice(0, 2) // 每轮≤2 问（遵守 jarvis.md 阶段一）
+        return {
+          questions,
+          verdict: `第 ${round} 轮 · ${round === 1 ? '开放式（让用户展开）' : round === 2 ? '聚焦式（追痛点/期望）' : '确认式（钉验收标准）'}——用户回答后继续下一轮或跑 confirm`,
+        }
+      }
+      if (mode === 'duo') {
+        // ── 双人协作方案 A 判据（同刻一人主问）──
+        const cards = String(args.roleCards ?? '')
+        const hasCeo = /CEO|ceo/.test(cards) || cards.includes('CEO')
+        const hasExpert = cards.split('\n').length >= 2 || /大佬|专家/.test(cards)
+        const r = Number(args.round ?? 1)
+        const mainAsker = r % 2 === 1 ? '蒸馏大佬' : 'CEO' // 奇数轮大佬先主问，偶数轮 CEO 主问
+        return {
+          duoCheck: `方案 A 判据：同刻一人主问（用户回答前主问者 from≤1，对话记录可数）；本轮（第 ${r} 轮）主问者=${mainAsker}；补充消息须标注"补充"（无标注=违规抢问）${hasCeo && hasExpert ? '' : '；⚠️ 双人进场需 CEO 卡 + 蒸馏大佬卡（roleCards）'}`,
+          verdict: `双人分工：CEO 域=P5 验收+与交付相关的 P2 子集（频率/负责人/时限）；大佬域=P1-P4 场景/细节/专业盲区。防重复=问题含场景/现状/痛点/期望/验收关键词即同域，后问者降级为具体化追问`,
+        }
+      }
+      if (mode === 'confirm') {
+        // ── 澄清完成判定（需求本质重述三段式 + 假设分级）──
+        const answers = String(args.userAnswers ?? '')
+        const aLen = answers.trim().length
+        const hasConfirm = /确认|可以|对|是的|没错|行/.test(answers) || aLen >= 20
+        const done = aLen >= 15 && hasConfirm
+        return {
+          confirm: done
+            ? `✅ 澄清完成：需求本质重述（为谁=${/用户|员工|患者|客户|学生/.test(answers) ? '已明确' : '待补'} / 解决什么=${aLen >= 15 ? '已明确' : '待补'} / 怎样算成功=${/指标|衡量|达标|多少|效率/.test(answers) ? '已明确' : '待补'}）经用户确认 → 可进拆解`
+            : `⏳ 未完成：${aLen < 15 ? '用户回答不足（需继续引导）' : '未获用户确认'}——缺一禁止进拆解；用户拒绝/失联=连续 2 轮无有效回答→按 CEO 推断+显式标注继续（3 轮=挂起）`,
+          verdict: done ? '澄清完成 → 产出过 B16 黑板翻译（转目标/验收/边界）+ B22 可行性闸（不可行前置反馈）+ B15 分层（标注黑板决议目标态）' : '继续澄清',
+        }
+      }
+      return { verdict: '未知模式（analyze/trigger/ask/duo/confirm）' }
+    },
+  },
 ]
 
 /** 需求分级（纯逻辑，供 jarvis_project 工具与 /jarvis 命令共用）。
