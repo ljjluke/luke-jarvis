@@ -24,7 +24,7 @@ let allOk = true
 step('0. /jarvis 入口（命令回执含完整 CEO 协议）', async () => {
   const r = jarvisCommand('做一个下沉市场的拼团电商系统，2人团24h成团')
   allOk = ok('命令回执无行业预设（领域无关）', !r.content.includes('行业识别：电商')) && allOk
-  allOk = ok('回执包含证据链+保真度+协同+沉淀指令', r.content.includes('证据链') && r.content.includes('保真度') && r.content.includes('协同') && r.content.includes('jarvis_process') && r.content.includes('.jarvis/')) && allOk
+  allOk = ok('回执包含证据链+保真度+协同+蒸馏引导+沉淀指令', r.content.includes('证据链') && r.content.includes('保真度') && r.content.includes('协同') && r.content.includes('distill_guide') && r.content.includes('.jarvis/')) && allOk
   allOk = ok('回执包含女娲式铁律', r.content.includes('宁 60 分诚实')) && allOk
 })
 
@@ -205,6 +205,6 @@ step('7. 问题上行→黑板阻塞→二次会闭环；能力补足组件化',
 // ── 汇总 ─────────────────────────────────────────────────
 step('汇总', () => {
   console.log(allOk ? '\n🎉 端到端全流程通过：入口→识别→蒸馏(防迎合)→保真度→协同(防串行)→深度思考→裁决→问题上行→能力补足→黑板闭环→可建队' : '\n❌ 存在未通过项，见上方 ❌')
-  console.log('流程完整性：13 个工具 + /jarvis 命令，各环节均有硬闸，链路闭环。')
+  console.log('流程完整性：15 个工具 + /jarvis 命令，各环节均有硬闸，链路闭环。')
   process.exit(allOk ? 0 : 1)
 })

@@ -92,6 +92,29 @@ test('jarvis_distill：空洞卡 → ok=false（深度闸拦截，不是只看�
   assert.ok(r.depthScore !== undefined && r.depthScore < 60, `给出低深度分 ${r.depthScore}`)
 })
 
+// ── 蒸馏独特性引导（借鉴 distilly 24k★，捕捉 HOW 而非套模板）──
+
+test('jarvis_distill_guide：输出品味原则/来源分级/黑名单/提炼步骤/验证锚点', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
+  const r = await def.handler({ role: 'CEO', material: '某访谈原文…', industry: '电商' })
+  assert.ok(r.tastePrinciples.length >= 5, '7 品味原则（长文>碎片/争议>共识/变化>固定/一手>二手/失败>成功）')
+  assert.ok(r.sourceHierarchy.length >= 4, '来源分级（一手>长访谈>决策>二手）')
+  assert.ok(r.sourceBlacklist.some((x) => x.includes('知乎')), '黑名单含知乎')
+  assert.ok(r.sourceRecommended.some((x) => x.includes('晚点')), '推荐源含晚点/36氪')
+  assert.ok(r.steps.some((x) => x.includes('决策触发词')), '抓决策触发词')
+  assert.ok(r.steps.some((x) => x.includes('认知变化轨迹')), '抓认知变化轨迹')
+  assert.ok(r.validationAnchors.includes('已知答案测试'), '验证锚点：已知答案测试')
+  assert.ok(r.antiGeneric.includes('防通用话术'), '防通用话术')
+  assert.ok(r.respondAs.includes('howFingerprints'), '结构化输出要求')
+})
+
+test('jarvis_distill_guide：未提供素材 → 提示先查真实权威（不许凭印象编）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
+  const r = await def.handler({ role: '风控' })
+  assert.ok(r.sourceCheck.includes('不许凭印象编'), '提示不可编造')
+  assert.ok(r.sourceCheck.includes('web_search'), '提示用 web_search 查证')
+})
+
 test('jarvis_fidelity：命中黑名单源 → 标记问题', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_fidelity')
   const bad = GOOD_CEO_CARD + '\n补充来源：知乎某回答'
@@ -423,16 +446,29 @@ test('jarvis_process：overrideStages 增删（CEO 有权改流程）', async ()
 
 // ── 项目沉淀（领域无关的"项目资产仓库"，角色卡沉淀在项目里）──
 
-test('jarvis_store：scaffold 输出项目沉淀目录结构（不携带任何静态卡）', async () => {
+test('jarvis_store：scaffold 输出项目记忆库目录结构（含原型/项目细节，不携带任何静态卡）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_store')
   const r = await def.handler({ mode: 'scaffold' })
-  assert.ok(r.structure.some((s) => s.includes('cards/')), '沉淀目录含 cards/')
-  assert.ok(r.structure.some((s) => s.includes('process-')), '沉淀目录含流程文件')
-  assert.ok(r.structure.some((s) => s.includes('components.json')), '含组件清单')
+  assert.ok(r.structure.some((s) => s.includes('cards/')), '记忆库含 cards/（虚拟人物卡）')
+  assert.ok(r.structure.some((s) => s.includes('prototypes/')), '记忆库含 prototypes/（真实人物原型）')
+  assert.ok(r.structure.some((s) => s.includes('project.md')), '记忆库含 project.md（项目细节快照）')
+  assert.ok(r.structure.some((s) => s.includes('lessons.md')), '记忆库含 lessons.md（进度经验）')
   assert.ok(r.reuseRule.includes('插件无静态卡'), '复用规则声明插件无卡')
 })
 
-test('jarvis_store：本项目沉淀可复用（须校验+修订），跨项目/插件禁止', async () => {
+test('jarvis_store：check 阶段零——有记忆直接继续（不用重分析源码），无记忆从零蒸馏', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  // 有记忆（prototypes+cards+project.md）
+  const has = await def.handler({ mode: 'check', existingDirs: '["prototypes","cards"]', cards: '研发,产品增长', prototypes: '黄峥', projectMd: 'true' })
+  assert.ok(has.verdict.includes('已有记忆库'), '有记忆 → 直接继续')
+  assert.ok(has.reuseRule.includes('不用重新分析源码'), '明确不用重分析源码')
+  // 无记忆 → 从零蒸馏
+  const none = await def.handler({ mode: 'check' })
+  assert.ok(none.verdict.includes('无记忆'), '无记忆 → 从零开始')
+  assert.ok(none.reuseRule.includes('从零'), '提示从零开始')
+})
+
+test('jarvis_store：本项目记忆可复用（须校验+修订），跨项目/插件禁止', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_store')
   // 本项目沉淀中存在"研发"卡 → 可复用起点
   const local = await def.handler({ mode: 'reuse', itemType: 'card', name: '研发', existingCards: JSON.stringify([{ role: '研发', file: 'cards/研发.md' }]) })
@@ -444,11 +480,17 @@ test('jarvis_store：本项目沉淀可复用（须校验+修订），跨项目/
   assert.ok(cross.reuseRule.includes('跨项目/插件禁止'), '跨项目/外部禁止复用')
 })
 
-test('jarvis_store：save 给出项目内落盘路径（非插件资产）', async () => {
+test('jarvis_store：save 按类型落盘（prototype→prototypes/、card→cards/、project→project.md、lesson→lessons.md）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_store')
-  const r = await def.handler({ mode: 'save', itemType: 'card', name: '产品增长', projectDir: '/x/proj/.jarvis/' })
-  assert.ok(r.savePath.includes('cards/产品增长.md'), '角色卡落盘 cards/')
-  assert.ok(r.verdict.includes('项目沉淀，非插件资产'), '明确是项目资产')
+  const proto = await def.handler({ mode: 'save', itemType: 'prototype', name: '黄峥', projectDir: '/x/proj/.jarvis/' })
+  assert.ok(proto.savePath.includes('prototypes/黄峥.md'), '真实人物原型落盘 prototypes/')
+  const card = await def.handler({ mode: 'save', itemType: 'card', name: '产品增长', projectDir: '/x/proj/.jarvis/' })
+  assert.ok(card.savePath.includes('cards/产品增长.md'), '虚拟人物卡落盘 cards/')
+  assert.ok(card.verdict.includes('项目记忆库'), '明确是项目记忆库')
+  const proj = await def.handler({ mode: 'save', itemType: 'project', name: 'project', projectDir: '/x/proj/.jarvis/' })
+  assert.ok(proj.savePath.includes('project.md'), '项目细节快照落盘 project.md')
+  const les = await def.handler({ mode: 'save', itemType: 'lesson', name: 'lesson', projectDir: '/x/proj/.jarvis/' })
+  assert.ok(les.savePath.includes('lesson.md'), '进度经验落盘 lesson.md')
 })
 
 // ── 统一黑板（会议驱动协作的状态中枢）──

@@ -190,6 +190,54 @@ export function assessCardDepth(card, isCeo) {
   return { score, issues, filled, hasHow, dimsCovered, hasBoundary, hasVerifyTrace, verdict }
 }
 
+/** 蒸馏独特性引导器（蒸馏能力核心：借鉴 distilly 24k★ 方法论，引导捕捉"这个大佬独有的 HOW"）。
+ * 蒸馏最强的卡 = 方法论里能看出"这是谁在想"：独有的决策触发词、独特取舍、领域黑话、
+ * 反直觉原则、认知变化轨迹——而不是"先分析再执行"这种任何人都能写的通用话术。
+ * 融合 distilly 的 7 品味原则 + 来源分级 + 认知时间线 + 决策启发式 + 验证锚点。
+ */
+export function distillGuide(role, material, industry) {
+  const src = String(material ?? '').length
+  return {
+    role,
+    industry: industry || '（CEO 判断）',
+    purpose: '从真实素材提炼「这个大佬独有的思考方式（HOW）」，不是填六段式模板。',
+    tastePrinciples: [
+      '长文 > 碎片（一篇文章的思维结构 > 50 条推文）',
+      '争议 > 共识（被争论的立场比被一致夸赞的更能暴露独特性）',
+      '变化 > 固定（他改主意的地方比始终如一的地方更有信息量）',
+      '一手 > 二手（本人的话 > 别人的转述）',
+      '讲过程 > 传记（怎么谈做事过程 > 人生故事）',
+      '重复模式 > 单句金句（跨 5 个情境反复出现的模式 > 一句爆款）',
+      '失败讨论 > 成功叙事（怎么讲栽过的跟头 > 胜利复盘）',
+    ],
+    sourceHierarchy: [
+      '一手著作/长文/Newsletter（最高权重）',
+      '长访谈/播客 30min+（含时间戳）',
+      '有据可查的决策与转折点（案例/公开记录）',
+      '短视频/短文/问答',
+      '他人分析/传记（仅用于定位一手源，不作独立证据）',
+      '二手转述（只用来找源头）',
+    ],
+    sourceBlacklist: ['知乎（匿名/道听途说）', '微信公众号（二手洗稿）', '百度百科（不可靠/过时）', '搜狐/网易/腾讯自动聚合', 'SEO 内容农场', 'AI 生成的传记页', 'Listicle（"X 的 10 堂课"除非直引一手）'],
+    sourceRecommended: ['B站长视频/访谈', '小宇宙播客完整集', '36氪/晚点LatePost/财新/极客公园/虎嗅', '认证微博原发（非转发/粉号）', '正规出版物', 'Youtube 长访谈(Fridman/Ferriss 等)', '个人博客/Substack', 'TED/大会完整视频+转录'],
+    steps: [
+      '① 抓决策触发词：从素材里找出他/她"遇到什么情况，第一反应做什么"的固定句式（如"先看现金流，再谈增长"）——独有 HOW 的指纹',
+      '② 抓独特取舍：找出"宁可 A 也不要 B"式偏好（如"宁可慢一点也要自己掌控供应链"）——他与别人的分野',
+      '③ 抓领域黑话/专有概念：他自创或用得独特的词（如"有效GMV""第一性原理拆解"）——他看世界的独特坐标系',
+      '④ 抓反直觉原则：他做过的"看起来反常识但坚持"的决策——最能体现真本事',
+      '⑤ 抓认知变化轨迹：他"从 A 观点变成 B 观点"的时刻（比始终如一更能揭示思考演进）——写成认知时间线而非生平',
+      '⑥ 抓失效边界：他自己承认"这个方法在什么情况不适用"——真实方法的边界感',
+    ],
+    decisionHeuristics: '提炼决策启发式：他面对不确定性时的默认动作（如"先最小验证再放大""先假设对方是善意的"）——是可执行的 if-then 规则，不是泛泛原则。',
+    validationAnchors: '写卡后用两个锚点自检：①已知答案测试（拿他真实的公开决策，看卡里的方法论能否复现他的选择）；②边界测试（拿一个他没遇到过的新问题，看卡里能否给出像他会给的答案）。两条都过 → 卡才真"像他"。',
+    antiGeneric: '⚠️ 防通用话术：如果方法论能被任何管理者套用（"先分析再执行""以结果为导向"），说明没捕捉到独特性——打回重提炼。',
+    sourceCheck: src
+      ? `素材已提供（${src} 字符）：从中逐条找上面 6 类证据，每条标注"出自素材哪段/哪个出处"，并给素材质量分级（一手/二手）。`
+      : '⚠️ 未提供素材：先用 web_search 查该领域真实权威（长访谈/一手文章/决策记录优先，避开黑名单源），把原文摘进来再提炼——不许凭印象编。',
+    respondAs: `输出蒸馏作业：{"role":"${role || '?'}","howFingerprints":[{"trigger":"遇到X时→先做Y","source":"出自素材哪段"}],"tradeoffs":["宁可A不要B"],"jargon":["独有概念"],"counterIntuitive":["反直觉决策"],"cognitionTimeline":["A观点→B观点的变化时刻"],"failureBoundary":["不适用场景"],"decisionHeuristics":["if-then 规则"],"knownAnswerTest":["拿真实决策验证卡的方法论能否复现"],"draftCard":"基于以上提炼的六段式卡草稿(待 jarvis_distill 校验)"}。`,
+  }
+}
+
 /** 四个模型工具定义（ToolDefinition 形态，供 tools.register） */
 export const TOOLS = [
   {
@@ -233,15 +281,19 @@ export const TOOLS = [
   {
     name: 'jarvis_store',
     description:
-      '项目沉淀管理（领域无关的"项目资产仓库"）：角色卡/领域流程/组件清单/黑板/经验都沉淀在**项目自己的** <workspace>/.jarvis/ 里——因为项目就是这些角色做的，他们的经验在项目里，后续需求可复用。本工具：①scaffold=输出项目沉淀目录结构（cards/、process-<需求>.json、components.json、board.json、lessons.md）；②reuse=复用校验（本项目沉淀的卡可复用，但必须过 jarvis_distill 校验 + 按新需求修订；跨项目/插件/他人沉淀 = 禁止复用，必须重新现场蒸馏）；③save=给出写入路径与格式（角色卡/流程/组件清单各自落盘位置）。插件本身不携带任何角色卡与领域模板。',
+      '项目记忆库管理（领域无关的"项目长期记忆"）：prototypes(真实人物原型资料)/cards(虚拟人物卡)/process(流程)/components(组件)/project.md(项目细节快照)/board(黑板)/lessons(进度经验) 都沉淀在**项目自己的** <workspace>/.jarvis/ 里——AI 识别到本项目直接读这套记忆继续工作，不用重分析源码。模式：①check=阶段零判定（有记忆→直接读取复用继续；无记忆→从零蒸馏并建立记忆库）；②scaffold=输出记忆库目录结构；③reuse=复用校验（本项目沉淀可复用但须过 jarvis_distill 校验+按新需求修订；跨项目/插件禁止）；④save=按类型写入对应目录（prototype→prototypes/、card→cards/、project→project.md、lesson→lessons.md、process/components→json）。插件本身不携带任何角色卡与领域模板。',
     parameters: {
       type: 'object',
       properties: {
-        mode: { type: 'string', description: 'scaffold 初始化结构 / reuse 复用校验 / save 写入沉淀（默认 scaffold）' },
-        projectDir: { type: 'string', description: '项目沉淀根目录（默认 <workspace>/.jarvis/）' },
-        itemType: { type: 'string', description: '沉淀类型：card=角色卡 / process=领域流程 / component=组件清单 / lesson=经验（save/reuse 用）' },
+        mode: { type: 'string', description: 'check 查记忆库判定 / scaffold 初始化结构 / reuse 复用校验 / save 写入记忆（默认 scaffold）' },
+        projectDir: { type: 'string', description: '项目记忆库根目录（默认 <workspace>/.jarvis/）' },
+        itemType: { type: 'string', description: '沉淀类型：prototype=真实人物原型 / card=虚拟人物卡 / process=领域流程 / component=组件 / project=项目细节快照 / lesson=进度经验（save 用）' },
         name: { type: 'string', description: '角色名或流程/组件名' },
         existingCards: { type: 'string', description: '本项目已沉淀角色卡清单 JSON，如 [{"role":"研发","file":"cards/研发.md"}]（reuse 校验用）' },
+        existingDirs: { type: 'string', description: '本项目 .jarvis/ 已有目录清单 JSON（check 判定用）' },
+        cards: { type: 'string', description: '已存在的角色卡名，逗号分隔（check 用）' },
+        prototypes: { type: 'string', description: '已存在的真实人物原型名，逗号分隔（check 用）' },
+        projectMd: { type: 'string', description: 'project.md 是否存在（true/false，check 用）' },
       },
     },
     output: {
@@ -265,17 +317,35 @@ export const TOOLS = [
       const itemType = String(args.itemType ?? '').trim()
       const name = String(args.name ?? '').trim()
       const existingCards = String(args.existingCards ?? '').trim()
+      const existingDirs = String(args.existingDirs ?? '').trim() // 已有沉淀目录清单 JSON（check 用）
       const structure = [
-        `${projectDir}cards/            —— 本项目蒸馏的角色卡（每张卡一个 .md，含六段式+source+防冒名）`,
-        `${projectDir}process-*.json    —— CEO 定稿的领域流程（阶段/闸门/红线/必须角色/会议触点）`,
-        `${projectDir}components.json   —— 能力补足自研/引入的组件清单（名字/功能/用法/维护者）`,
-        `${projectDir}board.json        —— 统一黑板（会议驱动协作的状态）`,
-        `${projectDir}lessons.md        —— 项目经验教训（复盘沉淀，防重复踩坑）`,
+        `${projectDir}prototypes/      —— 真实人物信息资料（原型）：每个真实大佬的原始素材（访谈/著作/决策记录/URL），是蒸馏的证据源，AI 识别到本项目直接读取`,
+        `${projectDir}cards/           —— 虚拟人物卡（工作能力细节）：蒸馏出的六段式角色卡（思维模型/方法论/红线/协同），含深度分`,
+        `${projectDir}process-*.json   —— 领域流程：CEO 定稿的阶段/闸门/红线/必须角色/会议触点`,
+        `${projectDir}components.json  —— 组件清单：能力补足自研/引入的组件（名字/功能/用法/维护者）`,
+        `${projectDir}board.json       —— 统一黑板：会议驱动协作的状态/未决项/决议`,
+        `${projectDir}project.md       —— 项目细节快照：需求本质/验收标准/接口契约/进度/关键决策——AI 读到即可继续，不用重分析源码`,
+        `${projectDir}lessons.md       —— 当前项目进度经验总结：踩坑/教训/适配度记录，防重复`,
       ]
       let reuseRule = ''
       let verdict = ''
       let savePath = ''
-      if (mode === 'reuse') {
+      if (mode === 'check') {
+        // 阶段零：先查项目沉淀——有经验直接继续，没有才从零蒸馏
+        const hasJarvis = !!(existingDirs && existingDirs.trim() !== '[]' && existingDirs.trim() !== '')
+        const cards = String(args.cards ?? '').trim()
+        const proto = String(args.prototypes ?? '').trim()
+        const hasProject = String(args.projectMd ?? '').trim()
+        if (hasJarvis || cards || proto || hasProject) {
+          reuseRule =
+            '【有记忆 → 直接继续】本项目 .jarvis/ 已存在完整记忆：prototypes(真实人物原型) + cards(虚拟人物卡) + process(流程) + project.md(项目细节) + board(黑板) + lessons(进度经验)。AI 识别到本项目直接读取这套记忆即可继续工作（卡须过 jarvis_distill 校验+按新需求修订），**不用重新分析源码**——项目细节/progress 已记录。'
+          verdict = `阶段零判定：项目已有记忆库${cards ? '（cards: ' + cards + '）' : ''}${proto ? '（prototypes: ' + proto + '）' : ''} → 读取复用继续，不从零蒸馏。`
+        } else {
+          reuseRule =
+            '【无记忆 → 从零开始】本项目 .jarvis/ 不存在或为空：走标准建队流程——需求本质回归 → 定领域流程 → web 查证真实人物原型(存 prototypes/) → 现场蒸馏 CEO 卡(存 cards/) → 定子角色 → 逐个蒸馏 → 协同 → 建队，并把 project.md/lessons 持续更新。'
+          verdict = '阶段零判定：项目无记忆 → 从零蒸馏 CEO 起，建立项目记忆库。'
+        }
+      } else if (mode === 'reuse') {
         const typeName = itemType || '沉淀'
         const isLocal = existingCards && name && existingCards.includes(name)
         if (isLocal) {
@@ -291,12 +361,13 @@ export const TOOLS = [
           verdict = `${name || typeName} 不在本项目沉淀清单 → 禁止复用（除非是本项目已沉淀且通过校验+修订），跨项目/外部来源必须重新现场蒸馏。`
         }
       } else if (mode === 'save') {
-        const ext = itemType === 'card' ? '.md' : itemType === 'lesson' ? '.md' : '.json'
-        const dir = itemType === 'card' ? 'cards/' : itemType === 'process' ? '' : ''
+        // 类型 → 目录/扩展名：prototype=真实人物原型，card=虚拟人物卡，project=项目细节快照，lesson=进度经验，其余 json
+        const ext = itemType === 'card' || itemType === 'prototype' || itemType === 'project' || itemType === 'lesson' ? '.md' : '.json'
+        const dir = itemType === 'card' ? 'cards/' : itemType === 'prototype' ? 'prototypes/' : itemType === 'project' ? '' : itemType === 'lesson' ? '' : ''
         savePath = `${projectDir}${dir}${(name || itemType || 'item').replace(/[\\/:*?"<>|]/g, '_')}${ext}`
         reuseRule =
-          '写入后即成为本项目沉淀：后续本项目需求可复用（须校验+修订）；跨项目不共享。'
-        verdict = `写入 ${savePath}（项目沉淀，非插件资产）。`
+          '写入后即成为本项目记忆库：后续本项目需求直接读取复用（卡须过 jarvis_distill 校验+按新需求修订）；跨项目不共享。'
+        verdict = `写入 ${savePath}（项目记忆库，非插件资产）——AI 识别到本项目直接读它继续，不用重分析源码。`
       } else {
         reuseRule =
           '插件无静态卡/无领域模板（领域无关）。角色卡与流程只能来自：① 本项目 .jarvis/ 沉淀（可复用起点）；② 现场 web 蒸馏（新需求/跨项目必走）。'
@@ -427,6 +498,49 @@ export const TOOLS = [
         depthIssues: depth.issues,
         verdict: `卡合格（结构+深度 ${depth.score}/100）：六段式${isCeo ? '+协同架构' : ''}+source+防冒名，方法论含 HOW、证据链维度齐全、有查证痕迹。注入后员工只借鉴其思考框架，真实判断必须基于实际数据/代码/复现。`,
       }
+    },
+  },
+
+  {
+    name: 'jarvis_distill_guide',
+    description:
+      '蒸馏独特性引导器（蒸馏能力核心，先于 jarvis_distill 用）：在写卡前，CEO 用它从真实素材里提炼"这个大佬独有的 HOW"——决策触发词/独特取舍/领域黑话/反直觉原则/认知变化轨迹/失效边界，并做来源分级（一手/二手/黑名单）与验证锚点（已知答案测试/边界测试）。借鉴 distilly(24k★) 方法论：7 品味原则（长文>碎片、争议>共识、变化>固定、一手>二手、讲过程>传记、重复模式>金句、失败>成功）+ 决策启发式 + 认知时间线。先提炼 HOW 再写卡，卡过 jarvis_distill 校验——蒸馏才强，不是套模板。',
+    parameters: {
+      type: 'object',
+      properties: {
+        role: { type: 'string', description: '要蒸馏的角色名（如 CEO/产品增长/风控）' },
+        material: { type: 'string', description: '该领域真实权威的原始素材（访谈原文/著作摘录/决策记录；可从 web_search 摘）' },
+        industry: { type: 'string', description: 'CEO 判断的领域（可选标记）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          role: { type: 'string' },
+          purpose: { type: 'string' },
+          tastePrinciples: { type: 'array', items: { type: 'string' } },
+          sourceHierarchy: { type: 'array', items: { type: 'string' } },
+          sourceBlacklist: { type: 'array', items: { type: 'string' } },
+          sourceRecommended: { type: 'array', items: { type: 'string' } },
+          steps: { type: 'array', items: { type: 'string' } },
+          decisionHeuristics: { type: 'string' },
+          validationAnchors: { type: 'string' },
+          antiGeneric: { type: 'string' },
+          sourceCheck: { type: 'string' },
+          respondAs: { type: 'string' },
+        },
+        required: ['purpose', 'steps', 'respondAs'],
+      },
+      render: (r) =>
+        `【${r.role ?? '角色'} 蒸馏引导 · 捕捉独有 HOW】\n目的：${r.purpose}\n品味原则：${(r.tastePrinciples || []).map((x) => '  · ' + x).join('\n')}\n来源分级：${(r.sourceHierarchy || []).map((x) => '  · ' + x).join('\n')}\n黑名单源：${(r.sourceBlacklist || []).join('、')}\n推荐源：${(r.sourceRecommended || []).join('、')}\n步骤：${(r.steps || []).map((x) => '  ' + x).join('\n')}\n决策启发式：${r.decisionHeuristics}\n验证锚点：${r.validationAnchors}\n防通用：${r.antiGeneric}\n${r.sourceCheck}\n响应格式：${r.respondAs}`,
+    },
+    handler: async (args) => {
+      const role = String(args.role ?? '').trim()
+      const material = String(args.material ?? '').trim()
+      const industry = String(args.industry ?? '').trim()
+      return distillGuide(role, material, industry)
     },
   },
 
@@ -1080,7 +1194,7 @@ export function jarvisCommand(requirement) {
   if (!text) return { content: '用法：/jarvis <需求描述>（可模糊）' }
   const hit = identifyIndustry(text)
   return {
-    content: `已收到需求[${text.slice(0, 120)}]（建议建队等级 ${hit.suggestion}）。\nCEO 流程启动（领域无关机制 + 项目沉淀）：\n1. 需求本质回归：先重述"为谁解决什么、怎样算成功"（可判定标准），未清晰前不开工\n2. 定领域流程：CEO 用 jarvis_process 定本需求流程（阶段/闸门/红线/必须角色/会议触点）——插件不预设领域，先看本项目 .jarvis/process-*.json 沉淀可参考，按本次需求特性现场定制\n3. 现场蒸馏 CEO 卡（绝不复制插件/他人的卡）→ jarvis_distill 证据链硬闸 + jarvis_fidelity 保真度双验\n4. 定子角色 → 逐个现场蒸馏+双验（蒸馏方向：${hit.distillDirections[0]}）→ jarvis_collab 设计协同（四要素+每角色自己的协同段）\n5. kickoff 全员会（jarvis_meeting）：对齐目标/验收 + 领域流程闸门/红线 + 接口契约 → 决议写统一黑板（jarvis_board）\n6. 各角色独自思考/干活（关键决策 jarvis_think_deep）→ 所有问题/发现/阻塞写黑板\n7. 黑板有未决阻塞/分歧/接口变更 → CEO 发起二次会（cycle）对齐并 jarvis_review 裁决（吃 thinkA/thinkB + requirement，需求本质优先）→ 循环到黑板收敛\n8. 收口会（close）：对照领域闸门逐项验收 → 交付报告\n9. 问题上行：技术绕不开/无法抉择 → 禁止跳过 → jarvis_escalate 带 风险细节+已尝试+决策请求 上报 → 写黑板 → CEO 闭环\n10. 沉淀到项目：角色卡/领域流程/组件清单/黑板书 读写 <项目>/.jarvis/ —— 本项目角色做的项目，经验沉淀在本项目，后续需求可复用本项目沉淀（须过校验+按新需求修订）\n（铁律：插件无预置角色卡/领域模板（领域无关）；捕捉 HOW 而非 WHAT；证据不足宁 60 分诚实不要 90 分编造；真实情况优先于角色卡；需求本质优先于一切；流程缺失 = 客户提 bug 的温床。）`,
+    content: `已收到需求[${text.slice(0, 120)}]（建议建队等级 ${hit.suggestion}）。\nJarvis 流程启动（Jarvis=主面板/对客户沟通；CEO=团队内角色。先查记忆 → 蒸馏 → 建队 → CEO 盯人换人 → 交付，单一 /jarvis 入口）：\n0. 【先查项目记忆库】先查 <项目>/.jarvis/：prototypes(真实人物原型)+cards(虚拟人物卡)+process(流程)+project.md(项目细节)+board(进度)+lessons(经验) → 有就直接读取继续（不用重分析源码）；没有才从零蒸馏\n1. 需求本质回归：先重述"为谁解决什么、怎样算成功"（可判定标准），未清晰前不开工\n2. 定领域流程：jarvis_process 按本需求定流程（阶段/闸门/红线/必须角色/会议触点）——插件无预设，可参考本项目沉淀（按本次需求修订）\n3. 【蒸馏 CEO 角色卡】CEO 是团队内角色，不是主面板——web 查证该领域真实大佬（长访谈/一手文章/决策记录优先，避开知乎/公众号/百度百科）→ 存 prototypes/ → **先 jarvis_distill_guide 提炼独有 HOW（决策触发词/独特取舍/领域黑话/反直觉/认知变化轨迹/失效边界 + 7品味原则 + 来源分级 + 验证锚点）→ 再写六段式 CEO 卡** → jarvis_distill 证据链硬闸 + jarvis_fidelity 保真度审计 双验 → 作为团队成员注入\n4. 定子角色 → 逐个 同样【distill_guide 提炼 HOW → 写卡 → distill 校验】+ 保真度审计双验（蒸馏方向：${hit.distillDirections[0]}）→ jarvis_collab 设计协同（四要素+每角色自己的协同段）\n5. kickoff 全员会（jarvis_meeting）：对齐目标/验收 + 领域流程闸门/红线 + 接口契约 → 决议写统一黑板（jarvis_board）\n6. 各角色独自思考/干活（关键决策 jarvis_think_deep）→ 所有问题/发现/阻塞写黑板\n7. 黑板有未决阻塞/分歧/接口变更 → 二次会（cycle）+ jarvis_review 裁决（吃 thinkA/thinkB + requirement）→ 循环到黑板收敛\n8. 【CEO 时刻盯人换人】CEO 是团队成员且持续在岗，不是建完就空闲——它时刻监控每个员工的阶段成果（成果质量/任务完成度/问题上行健康度/角色契合度/深度分），多角度发现能力不行 → 换人：标记离任(写依据) → remove_member 安全终止 → 归档 .jarvis/cards/ 历史 → 重蒸馏该岗位更合适的真实大神 → jarvis_distill 校验 → 新成员上岗补位；其他岗位通力协作（开会/黑板/依赖/升级齐全）\n9. 问题上行：技术绕不开/无法抉择 → 禁止跳过 → jarvis_escalate 带 风险细节+已尝试+决策请求 上报 → 写黑板 → CEO 闭环\n10. 收口会（close）：对照领域闸门逐项验收 → 交付报告（Jarvis 向客户汇报）\n11. 沉淀到项目：角色卡/原型/流程/组件/项目细节/经验 读写 <项目>/.jarvis/ —— 下次需求先查记忆直接复用（阶段零）\n（铁律：插件无预置角色卡/领域模板（领域无关）；捕捉 HOW 而非 WHAT；证据不足宁 60 分诚实不要 90 分编造；真实情况优先于角色卡；需求本质优先于一切；流程缺失 = 客户提 bug 的温床。）`,
   }
 }
 
