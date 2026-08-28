@@ -1013,13 +1013,15 @@ export const TOOLS = [
   {
     name: 'jarvis_perf',
     description:
-      '员工绩效评估器（CEO 时刻盯人的量化工具）：多角度评估员工能力——①成果质量（产出被打回几次/过验收标准没）；②任务完成度（负责任务持续未完成/超时）；③问题上行健康度（过度上报=没判断力，长期不上报=在闷着，高频信号加权）；④角色卡契合度（产出与蒸馏卡方法论是否符合）；⑤深度分（角色卡 distill 深度分）。判定规则：连续 2 次评估不达标 → 建议换人（走离任→重蒸馏补位流程）；高频信号异常（问题上行异常）→ 立即触发评估，不等 2 次。不武断：每次评估写"哪项不足+依据"，留痕可追溯。',
+      '员工绩效评估器（CEO 时刻盯人的量化工具，含阶段性完成度考核）：多角度评估员工能力——①成果质量（产出被打回几次/过验收标准没）；②任务完成度（负责任务持续未完成/超时）；③问题上行健康度（过度上报=没判断力，长期不上报=在闷着，高频信号加权）；④角色卡契合度（产出与蒸馏卡方法论是否符合）；⑤深度分（角色卡 distill 深度分）。**阶段性考核（防 0 产出误判）**：必须传 stageStatus——pending（阶段未到/任务未分配）= 判定"待考核"，不计 0 产出、不累计不达标、不触发换人；assigned/in_progress = 按阶段结果考核（阶段完成度是否符合要求）；due（阶段到期未完成）= 才算不达标。判定规则：阶段结果不符合要求才计不达标；连续 2 次不达标 → 建议换人（走离任→重蒸馏补位流程）；高频信号异常（问题上行异常）→ 立即触发评估，不等 2 次。不武断：每次评估写"哪项不足+依据"，留痕可追溯。',
     parameters: {
       type: 'object',
       properties: {
         role: { type: 'string', description: '被评估的员工角色名（必填）' },
-        quality: { type: 'string', description: '成果质量信号：0-2（0=多次打回/不过验收，1=偶有小问题，2=稳定达标）' },
-        completion: { type: 'string', description: '任务完成度信号：0-2（0=持续未完成/超时，1=部分延迟，2=稳定按时）' },
+        stageStatus: { type: 'string', description: '阶段状态（必填）：pending=阶段未到/任务未分配（判待考核，不计0产出）/ assigned=已分配任务（按阶段结果考核）/ in_progress=进行中（按阶段性产出考核）/ due=阶段到期（到期未完成才计不达标）' },
+        stageRequirement: { type: 'string', description: '本阶段要求（验收标准/产出定义），评估"阶段性结果是否符合要求"的基准' },
+        quality: { type: 'string', description: '成果质量信号：0-2（0=多次打回/不过验收，1=偶有小问题，2=稳定达标）；阶段未到可省略' },
+        completion: { type: 'string', description: '阶段完成度信号：0-2（0=阶段到期未完成，1=部分完成/延迟，2=按时完成符合要求）；pending 时忽略' },
         escalation: { type: 'string', description: '问题上行健康度信号：0-2（0=过度上报或长期不上报，1=偶有异常，2=健康（及时且合理））' },
         fit: { type: 'string', description: '角色卡契合度信号：0-2（0=产出与卡方法论明显不符，1=部分符合，2=契合）' },
         depth: { type: 'string', description: '角色卡深度分（jarvis_distill 输出，0-100）' },
@@ -1031,42 +1033,59 @@ export const TOOLS = [
         type: 'object',
         additionalProperties: false,
         properties: {
-          ok: { type: 'boolean', description: '本次是否达标' },
-          score: { type: 'number', description: '综合分 0-100' },
+          ok: { type: 'boolean', description: '本次是否达标（pending=null 待考核）' },
+          score: { type: 'number', description: '综合分 0-100（pending 时=null）' },
           signals: { type: 'object', description: '各信号明细' },
-          strikes: { type: 'number', description: '连续不达标次数' },
-          action: { type: 'string', description: '建议动作：继续观察/补强/换人' },
+          strikes: { type: 'number', description: '连续不达标次数（pending 不累计）' },
+          action: { type: 'string', description: '建议动作：待考核/继续观察/补强/换人' },
           verdict: { type: 'string' },
         },
         required: ['ok', 'score', 'action', 'verdict'],
       },
-      render: (r) => `【绩效评估 · ${r.role ?? '?'}】综合 ${r.score}/100 → ${r.action}\n${r.verdict}`,
+      render: (r) => `【绩效评估 · ${r.role ?? '?'}】${r.action}\n${r.verdict}`,
     },
     handler: async (args) => {
       const role = String(args.role ?? '').trim()
+      const stageStatus = String(args.stageStatus ?? 'in_progress').trim()
+      const stageRequirement = String(args.stageRequirement ?? '').trim()
       const num = (v, d = 1) => { const n = Number(v); return Number.isFinite(n) ? n : d }
       const quality = num(args.quality, 1)
       const completion = num(args.completion, 1)
       const escalation = num(args.escalation, 1)
       const fit = num(args.fit, 1)
       const depth = num(args.depth, 0)
+      let history = []
+      try { history = JSON.parse(String(args.history ?? '[]')) } catch { history = [] }
+      // ── 阶段性考核：阶段未到/任务未分配 = 待考核，不计 0 产出、不累计不达标、不触发换人 ──
+      if (stageStatus === 'pending') {
+        return {
+          ok: null,
+          score: null,
+          signals: { stageStatus, stageRequirement, note: '阶段未到/任务未分配' },
+          strikes: 0,
+          action: '待考核（阶段未到，不计 0 产出）',
+          verdict: `${role} 当前阶段未到/任务未分配（stageStatus=pending）——按阶段性考核规则判定"待考核"：不因 0 产出扣分、不累计不达标、不触发换人。待其阶段任务分配/到期后再评估"阶段性结果是否符合要求（${stageRequirement || '本阶段验收标准'}）"。`,
+        }
+      }
+      // ── 阶段已分配/进行中/到期：按阶段性结果考核 ──
+      // completion 语义：due（到期未完成）才算不达标；assigned/in_progress 看阶段性产出是否符合要求
+      const isDue = stageStatus === 'due'
       // 信号权重：问题上行健康度高频加权（异常即触发）
       const weighted = quality * 0.25 + completion * 0.2 + escalation * 0.3 + fit * 0.15 + Math.min(2, depth / 50) * 0.1
       const score = Math.round(weighted * 50) // 0-2 → 0-100
-      let history = []
-      try { history = JSON.parse(String(args.history ?? '[]')) } catch { history = [] }
-      const okThis = score >= 60 && escalation > 0 // 问题上行=0（异常）视为不达标，高优先级
+      // 阶段性结果是否符合要求：completion 达标（≥1）+ 成果质量达标（≥1）
+      const stageOk = completion >= 1 && quality >= 1
+      const okThis = score >= 60 && escalation > 0 && stageOk // 阶段结果不符合要求 = 不达标
       // 高频信号异常 → 立即记一次不达标（不等 2 次）
       const isTriggered = escalation === 0
-      const strikes = isTriggered ? 1 : okThis ? 0 : (history.filter((h) => h.ok === false).length + 1)
       const totalStrikes = okThis ? 0 : (history.filter((h) => h.ok === false).length + (isTriggered ? 1 : 1))
       const action = !okThis && (isTriggered || totalStrikes >= 2)
         ? '换人（走 离任→重蒸馏补位 流程）'
-        : !okThis ? '补强观察（本次不达标，暂不换）' : '继续（达标）'
+        : !okThis ? '补强观察（阶段结果不符合要求，本次不达标）' : '继续（阶段结果符合要求，达标）'
       const verdict = role
-        ? `${role} 综合 ${score}/100（成果${quality}/完成${completion}/上行${escalation}/契合${fit}/深度${depth}）。${action}。依据已留痕。`
+        ? `${role} 阶段状态=${stageStatus}，阶段要求=${stageRequirement || '（未注明）'}。阶段结果${stageOk ? '符合要求' : '不符合要求'}（完成度${completion}/质量${quality}），综合 ${score}/100（成果${quality}/完成${completion}/上行${escalation}/契合${fit}/深度${depth}）。${action}。依据已留痕。`
         : `缺 role 参数。`
-      return { ok: okThis, score, signals: { quality, completion, escalation, fit, depth }, strikes: totalStrikes, action, verdict }
+      return { ok: okThis, score, signals: { stageStatus, stageRequirement, quality, completion, escalation, fit, depth }, strikes: totalStrikes, action, verdict }
     },
   },
 

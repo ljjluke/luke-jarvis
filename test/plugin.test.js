@@ -675,3 +675,25 @@ test('jarvis_clarify：三阶提问 + 方案 A 双人判据 + 澄清完成判定
   const cf = await def.handler({ mode: 'confirm', userAnswers: '用户是员工，周报难写，希望自动汇总，成功=5分钟发出领导看到具体成果' })
   assert.ok(cf.confirm.includes('澄清完成'), '需求本质重述确认后完成')
 })
+
+// ── 阶段性完成度考核（防 0 产出误判）：pending=待考核不计0产出 / due=到期未完成才不达标 ──
+
+test('jarvis_perf：阶段未到/任务未分配（pending）→ 待考核，不计 0 产出不触发换人', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', stageStatus: 'pending', stageRequirement: 't2 架构评审' })
+  assert.strictEqual(r.ok, null, 'pending 待考核（不判达标/不达标）')
+  assert.strictEqual(r.score, null, 'pending 无综合分（不计 0 产出）')
+  assert.strictEqual(r.strikes, 0, 'pending 不累计不达标')
+  assert.ok(r.action.includes('待考核'), '判定为待考核')
+})
+
+test('jarvis_perf：阶段结果符合要求→达标；到期未完成→才不达标；连续 2 次→换人', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const ok = await def.handler({ role: '研发', stageStatus: 'in_progress', stageRequirement: 't2', quality: '2', completion: '2', escalation: '2', fit: '2', depth: '100' })
+  assert.strictEqual(ok.ok, true, '阶段结果符合要求→达标')
+  const due = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: 't2', quality: '0', completion: '0', escalation: '1', fit: '1', depth: '100' })
+  assert.strictEqual(due.ok, false, '到期未完成→不达标')
+  assert.ok(due.action.includes('补强观察'), '首次不达标=补强观察非换人')
+  const two = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: 't2', quality: '0', completion: '0', escalation: '1', fit: '1', depth: '100', history: JSON.stringify([{ ok: false }, { ok: false }]) })
+  assert.ok(two.action.includes('换人'), '连续 2 次不达标→换人')
+})
