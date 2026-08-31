@@ -34,6 +34,10 @@ const EVIDENCE_SECTIONS = [
  */
 const COLLAB_FOUR = ['位置', '依赖', '介入时机', '协同方式']
 
+import { execSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+const _require = createRequire(import.meta.url)
+
 /** 全局协作健康检查：依赖图是否闭环/孤立/有升级路径。 */
 export function checkCollabHealth(collabText, roleCount) {
   const issues = []
@@ -772,6 +776,94 @@ export const TOOLS = [
           '自研要求：① 独立 npm 包/插件（cordis apply + tools.register）；② 配套防回归单测（node --test）+ 文档；③ 安装后写入组件清单（名字/功能/用法/维护者）；④ 绝不把自研逻辑硬塞进角色卡或临时脚本（那不可复用）。',
         honestNote: '诚实边界：没有就是没有——不许假装会、不许硬凑、不许编造"找到了高 star 插件"；宁缺毋滥（用真实能力或如实声明能力不足并上报）。',
         respondAs: `完成评估后以 JSON 输出：{"gap":"缺口判定","path":"REUSE|MARKET|BUILD","decision":"最终路径","evidence":["验证证据(真实存在/star/可安装)或'无法验证'"],"buildPlan":"若 BUILD：插件名/功能/安装方式/复用点"}。`,
+      }
+    },
+  },
+
+  {
+    name: 'jarvis_update',
+    description:
+      '插件版本检测器（回答"我能不能升级"）：对比 本地 package.json version vs GitHub 远程最新 release tag（git ls-remote --tags origin），判断是否有新版本；有新版本输出 升级内容摘要（读 CHANGELOG.md 最新条目）+ 升级步骤（解包覆盖 node_modules + 重启生效）。用法：本地版本取 require(process.cwd()/package.json)，远程取 git ls-remote。诚实：网络/git 不可用则如实报告"无法检测"，不编造版本号。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'check 检测是否有新版本（默认）；detail 详情（含 CHANGELOG 摘要）' },
+        remoteUrl: { type: 'string', description: '远程仓库 URL（默认 https://github.com/ljjluke/luke-jarvis.git）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          localVersion: { type: 'string' },
+          remoteVersion: { type: 'string' },
+          hasUpdate: { type: 'boolean' },
+          changelog: { type: 'string' },
+          upgradeStep: { type: 'string' },
+          verdict: { type: 'string' },
+        },
+        required: ['localVersion', 'verdict'],
+      },
+      render: (r) =>
+        `【版本检测】本地 ${r.localVersion} vs 远程 ${r.remoteVersion ?? '?'}${r.hasUpdate ? ' ⬆️ 有新版本' : ' ✅ 已是最新'}\n${r.changelog ? '变更摘要：' + r.changelog.slice(0, 120) + '\n' : ''}${r.upgradeStep ? '升级：' + r.upgradeStep + '\n' : ''}判定：${r.verdict}`,
+    },
+    handler: async (args) => {
+      const path = _require('node:path')
+      const fs = _require('node:fs')
+      const remoteUrl = String(args.remoteUrl ?? 'https://github.com/ljjluke/luke-jarvis.git')
+      let localVersion = '0.2.0'
+      try {
+        const pkgPath = path.join(process.cwd(), 'package.json')
+        if (fs.existsSync(pkgPath)) {
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+          if (pkg.version) localVersion = String(pkg.version)
+        }
+      } catch { /* 保持默认 */ }
+      // 远程最新版本：git ls-remote --tags
+      let remoteVersion = ''
+      let remoteError = ''
+      try {
+        const out = execSync(`git ls-remote --tags ${remoteUrl}`, { timeout: 20000, encoding: 'utf8' })
+        // 取形如 v0.2.0 的最高语义版本 tag（排除 ^{} 与非 v 前缀）
+        const tags = out.split('\n').map((l) => l.trim().split(/\s+/)[1]).filter((t) => t && t.startsWith('refs/tags/v'))
+          .map((t) => t.replace('refs/tags/', '')).filter((t) => !t.endsWith('^{}'))
+        const semver = tags.map((t) => t.replace(/^v/, '')).filter((t) => /^\d+\.\d+\.\d+/.test(t))
+          .sort((a, b) => { const pa = a.split('.').map(Number); const pb = b.split('.').map(Number); return (pa[0] - pb[0]) || (pa[1] - pb[1]) || (pa[2] - pb[2]) })
+        remoteVersion = semver.length ? 'v' + semver[semver.length - 1] : ''
+      } catch (e) {
+        remoteError = String(e.message || e).slice(0, 80)
+      }
+      const parse = (v) => String(v || '').replace(/^v/, '').split('.').map(Number)
+      let hasUpdate = false
+      if (remoteVersion) {
+        const l = parse(localVersion); const r = parse(remoteVersion)
+        hasUpdate = (l[0] !== r[0] ? r[0] > l[0] : l[1] !== r[1] ? r[1] > l[1] : r[2] > l[2])
+      }
+      // 变更摘要：读 CHANGELOG 最新版本块
+      const changelog = (() => {
+        try {
+          const repo = path.join(process.cwd(), 'CHANGELOG.md')
+          if (!fs.existsSync(repo)) return ''
+          const s = fs.readFileSync(repo, 'utf8')
+          const blocks = s.split(/^## /m)
+          return blocks.length > 1 ? (blocks[1] || '').slice(0, 300) : ''
+        } catch { return '' }
+      })()
+      const verdict = remoteError
+        ? `无法连接远程（${remoteError}）——未能确认是否有新版本，请稍后重试或手动查看 https://github.com/ljjluke/luke-jarvis/releases`
+        : !remoteVersion
+          ? '远程无 v 前缀语义版本 tag（可能首次发布未打 tag）——请用 CHANGELOG 判断'
+          : hasUpdate
+            ? `有新版本 ${remoteVersion}（本地 ${localVersion}）：按 UPGRADE 文档升级（解包覆盖 node_modules/luke-jarvis + 重启 dsh web）。`
+            : `已是本地最新 ${localVersion}（远程 ${remoteVersion}）：无需升级。`
+      return {
+        localVersion,
+        remoteVersion: remoteVersion || undefined,
+        hasUpdate,
+        changelog: changelog || undefined,
+        upgradeStep: hasUpdate ? 'docs/UPGRADE-*.md：解包 → 覆盖 ~/.dsh/profiles/web/node_modules/luke-jarvis/ → 重启 dsh web' : undefined,
+        verdict,
       }
     },
   },

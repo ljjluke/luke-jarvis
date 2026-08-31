@@ -2,7 +2,16 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.1] - 2026-08-28
+
+### 新增
+
+- **jarvis_update（第 19 个工具）**：插件版本检测器——对比本地 package.json version vs GitHub 远程最新 release tag（git ls-remote），判断是否有新版本；有新版本输出 CHANGELOG 摘要 + 升级步骤（解包覆盖 node_modules + 重启 dsh web）。网络/git 不可用时如实报告"无法检测"，不编造版本号。
+- **员工卡强化协议**：每个员工卡必须拥有"这位真实大佬自己的思维"——以人物视角独立思考（不迎合用户/角色卡/会议从众），关键决策以人物视角跑 ponder 满血十阶段；`jarvis_essence` 检出迎合即打回。
+- **空闲积累业务深度**：员工未分配任务/等待时不空转——读 `.jarvis/project.md`+board+lessons 吃透业务，多跑 ponder 对职责相关未决问题预演，产出"我的业务理解"写黑板；发现依赖未明主动对齐。
+
 ## [0.2.0] - 2026-08-28
+
 
 ### 新增
 
@@ -50,5 +59,6 @@
 - `docs/ARCHITECTURE.md`：与代码逐条核对的真实执行架构（13 步回执 / 18 工具 / 技能阶段对应 / 铁律）
 - `docs/RELEASE.md` / `docs/PUSH.md` / `docs/UPGRADE-20260828.md`
 
+[0.2.1]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.0
 <!-- [0.1.0]: 初始发布（本仓库第一个带 tag 的发布为 v0.2.0；0.1.0 为无 tag 的历史起点） -->

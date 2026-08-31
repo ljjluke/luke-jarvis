@@ -711,3 +711,20 @@ test('jarvis_release：rollback 回滚到历史版本（留痕+校验）', async
   const badTarget = await def.handler({ mode: 'rollback', version: 'v1.2', rollbackTo: 'v9.9', rollbackReason: 'x', prevVersions: prev })
   assert.ok(badTarget.verdict.includes('不在已有版本清单'), '回滚目标不存在拒绝')
 })
+
+// ── 版本检测（回答"能否升级"）──
+
+test('jarvis_update：无法连远程时如实报告（不编造版本号）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_update')
+  const r = await def.handler({ remoteUrl: 'https://invalid-host.invalid/luke-jarvis.git', mode: 'check' })
+  assert.ok(r.localVersion, '有本地版本')
+  assert.ok(r.verdict.includes('无法连接远程') || r.verdict.includes('未能确认'), '如实报告连接失败')
+})
+
+test('jarvis_update：有本地版本且输出范围完整', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_update')
+  const r = await def.handler({})
+  assert.ok(r.localVersion === '0.2.0', '本地版本读取正确')
+  assert.ok('hasUpdate' in r, '有更新判定字段')
+  assert.ok('verdict' in r, '有判定结论')
+})
