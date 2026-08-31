@@ -36,7 +36,56 @@ const COLLAB_FOUR = ['位置', '依赖', '介入时机', '协同方式']
 
 import { execSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 const _require = createRequire(import.meta.url)
+/** 归一化 output.schema：根级/嵌套 required:[...] 数组 → 逐属性 required:true（value schema DSL）。
+ * 递归处理嵌套对象节点；required 已按属性内联时原样返回。 */
+function normalizeOutputSchema(node) {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return node
+  const out = { ...node }
+  if (out.type === 'object' && !Object.prototype.hasOwnProperty.call(out, 'additionalProperties')) {
+    out.additionalProperties = false
+  }
+  if (Array.isArray(out.required)) {
+    const required = out.required
+    delete out.required
+    if (out.properties && typeof out.properties === 'object') {
+      const props = {}
+      for (const [k, v] of Object.entries(out.properties)) {
+        props[k] = required.includes(k) ? { ...v, required: true } : normalizeOutputSchema(v)
+      }
+      out.properties = props
+    }
+  }
+  if (out.properties && typeof out.properties === 'object') {
+    const props = {}
+    for (const [k, v] of Object.entries(out.properties)) props[k] = normalizeOutputSchema(v)
+    out.properties = props
+  }
+  if (out.items && typeof out.items === 'object') out.items = normalizeOutputSchema(out.items)
+  return out
+}
+
+/** 归一化 parameters：完整 schema 风格 {type:'object',properties:{...},required:[...]}
+ *  → dsh-tools 0.1.2 期望的隐式属性表风格 {name:{type,description,required}}。
+ * 已是属性表风格（无 type:'object' 外壳）时原样返回。 */
+function normalizeParameters(spec) {
+  if (spec && typeof spec === 'object' && spec.type === 'object' && spec.properties && typeof spec.properties === 'object') {
+    const required = Array.isArray(spec.required) ? spec.required : []
+    const out = {}
+    for (const [k, v] of Object.entries(spec.properties)) {
+      const p = { ...v }
+      if (required.includes(k)) p.required = true
+      if (p.type === 'object' && !Object.prototype.hasOwnProperty.call(p, 'additionalProperties')) {
+        p.additionalProperties = false
+      }
+      out[k] = p
+    }
+    return out
+  }
+  return spec
+}
+
 
 /** 全局协作健康检查：依赖图是否闭环/孤立/有升级路径。 */
 export function checkCollabHealth(collabText, roleCount) {
@@ -907,6 +956,7 @@ export const TOOLS = [
         question: { type: 'string', description: '需要深度思考的问题' },
         roleCard: { type: 'string', description: '该员工的角色卡（六段式+协同段）' },
         stakes: { type: 'string', description: '赌注 high/medium/low（默认 medium）：high=重大决策/对外承诺，medium=常规关键决策，low=可逆小事' },
+        force: { type: 'boolean', description: '强制模式（默认 false）：true=本问题为角色第一次分析需求——必须真实加载 ponder 跑完整十阶段并返回 run_id，不得跳过/贴标签；强制模式下产出必须含 runId（或显式 skipReason），否则视为未完成' },
       },
       required: ['question'],
     },
@@ -935,6 +985,11 @@ export const TOOLS = [
       const q = String(args.question ?? '').trim()
       const card = String(args.roleCard ?? '').trim()
       const stakes = String(args.stakes ?? 'medium')
+      const force = Boolean(args.force)
+      // ── 强制模式：角色第一次分析需求必须真实跑 ponder，产出须含 runId 否则未完成 ──
+      const forceNote = force
+        ? '\n【强制 · 第一次分析需求】本问题是你（该角色）对本次需求的第一立场分析，**必须真实加载 ponder 技能跑完整十阶段**：step-guard init → 十阶段全量 → 产出带回传的 runId。**产出违反强制 = 未完成**（无 runId 且无显式 skipReason 视为贴标签，CEO 打回重跑）。'
+        : ''
       const roleName = (card.match(/身份定位[:：]\s*([^，。\n]+)/) || [])[1] || '该角色'
       // ── 角色卡方法论提取（主面板修复：让卡的方法论真实进入思考产出，medium/low 同 high 生效）──
       const extractHow = (label) => {
@@ -954,7 +1009,7 @@ export const TOOLS = [
       return {
         role: roleName,
         stakes,
-        ponderGuide: `【${roleName} · ${stakes} 赌注深度思考 · 必须加载 ponder 技能（满血版）】\n${depthNote}\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.js init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.js 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）——${stakes !== 'high' ? '各阶段 agent 规模按低赌注精简（如 bagua 4 维/辩论 2 立论）但阶段一个不少' : '阶段与 agent 规模全量' }；\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；${stakes === 'high' ? 'high 须含可谬自评（见上）。' : ''}\n5. 把 run_id 与阶段产出溯源一并写入输出（供 jarvis_review 防贴标签校验——有 run_id 才算真跑过 ponder）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）降级为知识库推演但标注"受限环境推演"。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","skipReason":"降级原因或空"}。`,
+        ponderGuide: `【${roleName} · ${stakes} 赌注深度思考 · 必须加载 ponder 技能（满血版）】\n${depthNote}${forceNote}\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.js init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.js 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）——${stakes !== 'high' ? '各阶段 agent 规模按低赌注精简（如 bagua 4 维/辩论 2 立论）但阶段一个不少' : '阶段与 agent 规模全量' }；\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；${stakes === 'high' ? 'high 须含可谬自评（见上）。' : ''}\n5. 把 run_id 与阶段产出溯源一并写入输出（供 jarvis_review 防贴标签校验——有 run_id 才算真跑过 ponder）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）降级为知识库推演但标注"受限环境推演"。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","skipReason":"降级原因或空"}。`,
         premises: `（已转 ponder 十阶段，本字段不适用——见 ponderGuide）`,
         perspective: `（已转 ponder 十阶段——以「${roleName}」角色卡方法论【${howText}】注入画像驱动全程）`,
         counter: `（已转 ponder 十阶段——由 divergence/bagua/debate 产出反方）`,
@@ -1398,16 +1453,17 @@ export const TOOLS = [
         .split(/\n/)
         .map((s) => s.trim())
         .filter(Boolean)
-      const TYPE_SET = ['问题', '发现', '决策', '风险', '阻塞', '接口变更']
+      const TYPE_SET = ['问题', '发现', '决策', '风险', '阻塞', '接口变更', '资源需求']
       for (const raw of adds) {
         let type = '', content = raw
-        const m = raw.match(/^\s*(问题|发现|决策|风险|阻塞|接口变更)\s*[:：|]\s*(.+)$/)
+        const m = raw.match(/^\s*(问题|发现|决策|风险|阻塞|接口变更|资源需求)\s*[:：|]\s*(.+)$/)
         if (m) {
           type = m[1]
           content = m[2]
         } else {
-          // 按内容推断类型
-          if (/阻塞|卡住|无法(继续|进行)|pending/.test(content)) type = '阻塞'
+          // 按内容推断类型（资源需求优先：角色需要资源必须先上黑板，防幻觉跳过步骤）
+          if (/需要|缺少|缺|无.*(资源|数据|文件|权限|API|素材|工具|账号|密钥|接口文档|样例|数据源|凭证|配置)/.test(content) || /资源|数据源|凭证|配置|密钥/.test(content)) type = '资源需求'
+          else if (/阻塞|卡住|无法(继续|进行)|pending/.test(content)) type = '阻塞'
           else if (/接口|契约|字段|协议/.test(content)) type = '接口变更'
           else if (/决定|选择|拍板|方案是/.test(content)) type = '决策'
           else if (/风险|担心|隐患/.test(content)) type = '风险'
@@ -1620,21 +1676,40 @@ export function jarvisCommand(requirement) {
   }
 }
 
+// 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
+export const inject = ['tools']
+
 export default {
+  inject,
   apply(ctx) {
-    const tools = ctx.get('tools')
-    if (tools && typeof tools.register === 'function') {
+    // 1) 模型工具：tools 已注入（ctx.tools 就绪）；对无注入能力的宿主/测试环境降级 ctx.get
+    const toolsSvc =
+      (ctx && ctx.tools) || (typeof ctx.get === 'function' ? ctx.get('tools') : undefined)
+    if (toolsSvc && typeof toolsSvc.register === 'function') {
       for (const def of TOOLS) {
-        ctx.effect(() => tools.register({ ...def }))
+        const { handler, ...rest } = def
+        ctx.effect(() =>
+          toolsSvc.register(
+            defineTool({
+              ...rest,
+              parameters: normalizeParameters(rest.parameters),
+              output: {
+                schema: normalizeOutputSchema(rest.output && rest.output.schema),
+                render: rest.output && rest.output.render,
+              },
+              execute: handler,
+            }),
+          ),
+        )
       }
     } else {
       console.error('[luke-jarvis] tools 服务不可用，模型工具未注册')
     }
 
-    const commands = ctx.get('commands')
-    if (commands && typeof commands.register === 'function') {
+    // 2) /jarvis 命令：commands 为可选服务——优先懒注入（就绪后自动注册），无 inject 能力时降级 get
+    const registerJarvisCommand = (commandCtx) => {
       ctx.effect(() =>
-        commands.register({
+        commandCtx.register({
           name: 'jarvis',
           description: '贾维斯数字员工公司（领域无关）：需求分级 → CEO 定领域流程(jarvis_process) → 现场蒸馏角色卡(jarvis_distill 校验) → 项目沉淀(jarvis_store) → 协同(jarvis_collab) → kickoff 会 → 独思(think_deep) → 黑板(board) → 按需二次会(review+essence) → 问题上行(escalate) → 能力补足(capability) → 收口',
           usage: '/jarvis <需求描述>',
@@ -1644,51 +1719,82 @@ export default {
           },
         }),
       )
+    }
+    if (typeof ctx.inject === 'function') {
+      ctx.inject(['commands'], registerJarvisCommand)
     } else {
-      console.error('[luke-jarvis] commands 服务不可用，/jarvis 命令未注册')
+      const commands = typeof ctx.get === 'function' ? ctx.get('commands') : undefined
+      if (commands && typeof commands.register === 'function') registerJarvisCommand(commands)
+      else console.error('[luke-jarvis] commands 服务不可用，/jarvis 命令未注册')
     }
 
     // ── Client RPC：读黑板（web 面板用）──
     // 仅当当前会话工作区存在 .jarvis/board.json 时返回内容，否则返回空（Client 不渲染）
     // 这样：用了 /jarvis 的会话（工作区有 .jarvis/）才有黑板面板，其他会话不显示 = 不入侵。
-    if (globalThis.harness && typeof globalThis.harness.handle === 'function') {
-      const fsSvc = ctx.get('fs')
-      ctx.effect(
-        () =>
-          globalThis.harness.handle('jarvis/board', async (args) => {
-            const sessionId = args && args.sessionId ? String(args.sessionId) : ''
-            try {
-              const cwd = process.cwd && process.cwd()
-              const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
-              if (!fsSvc || typeof fsSvc.readText !== 'function') {
-                return { items: [], error: 'fs 不可用' }
+    // harness 为全局服务，就绪时间不定：internal/service 事件 + 有界轮询兜底，注册一次后停止。
+    let boardRpcRegistered = false
+    const registerBoardRpc = () => {
+      if (boardRpcRegistered) return true
+      if (!globalThis.harness || typeof globalThis.harness.handle !== 'function') return false
+      try {
+        ctx.effect(
+          () =>
+            globalThis.harness.handle('jarvis/board', async (args) => {
+              const sessionId = args && args.sessionId ? String(args.sessionId) : ''
+              try {
+                const cwd = process.cwd && process.cwd()
+                const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
+                let fsSvc = null
+                try { fsSvc = ctx.get('fs') } catch { fsSvc = null }
+                if (!fsSvc || typeof fsSvc.readText !== 'function') {
+                  return { items: [], error: 'fs 不可用' }
+                }
+                const target = await fsSvc.resolve(boardPath)
+                if (!target) return { items: [], active: false, reason: 'no .jarvis' }
+                const text = await fsSvc.readText(target)
+                if (!text) return { items: [], active: false, reason: 'empty board' }
+                let data = null
+                try { data = JSON.parse(text) } catch { data = null }
+                if (!data || !Array.isArray(data.items)) return { items: [], active: true, reason: 'bad json' }
+                return {
+                  items: data.items.map((it) => ({
+                    id: String(it.id || ''),
+                    role: String(it.role || ''),
+                    type: String(it.type || '问题'),
+                    content: String(it.content || '').slice(0, 200),
+                    status: String(it.status || 'open'),
+                    essenceChecked: Boolean(it.essenceChecked),
+                  })),
+                  active: true,
+                  sessionId,
+                }
+              } catch (e) {
+                return { items: [], error: String(e && e.message ? e.message : e) }
               }
-              const target = await fsSvc.resolve(boardPath)
-              if (!target) return { items: [], active: false, reason: 'no .jarvis' }
-              const text = await fsSvc.readText(target)
-              if (!text) return { items: [], active: false, reason: 'empty board' }
-              let data = null
-              try { data = JSON.parse(text) } catch { data = null }
-              if (!data || !Array.isArray(data.items)) return { items: [], active: true, reason: 'bad json' }
-              return {
-                items: data.items.map((it) => ({
-                  id: String(it.id || ''),
-                  role: String(it.role || ''),
-                  type: String(it.type || '问题'),
-                  content: String(it.content || '').slice(0, 200),
-                  status: String(it.status || 'open'),
-                  essenceChecked: Boolean(it.essenceChecked),
-                })),
-                active: true,
-                sessionId,
-              }
-            } catch (e) {
-              return { items: [], error: String(e && e.message ? e.message : e) }
-            }
-          }),
-      )
-    } else {
-      console.error('[luke-jarvis] harness 不可用，黑板 RPC 未注册')
+            }),
+        )
+        boardRpcRegistered = true
+        return true
+      } catch {
+        return false
+      }
+    }
+    if (!registerBoardRpc()) {
+      let tries = 0
+      let timer = null
+      try {
+        ctx.on('internal/service', () => {
+          if (!boardRpcRegistered) registerBoardRpc()
+        })
+      } catch { /* 事件钩子不可用时靠轮询兜底 */ }
+      try {
+        timer = ctx.setInterval(() => {
+          tries += 1
+          if (registerBoardRpc() || tries >= 20) {
+            if (timer && typeof timer === 'function') timer()
+          }
+        }, 1500)
+      } catch { /* 定时器不可用时静默（黑板 RPC 为可选能力） */ }
     }
   },
 }

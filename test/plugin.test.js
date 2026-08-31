@@ -728,3 +728,27 @@ test('jarvis_update：有本地版本且输出范围完整', async () => {
   assert.ok('hasUpdate' in r, '有更新判定字段')
   assert.ok('verdict' in r, '有判定结论')
 })
+
+// ── 资源上报黑板铁律（需要资源先写黑板，防幻觉跳过步骤）──
+
+test('jarvis_board：资源需求类型（显式+推断，优先于阻塞）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  const r1 = await def.handler({ add: '资源需求：需要用户提供内部数据样例', role: '研发' })
+  assert.strictEqual(r1.items[0].type, '资源需求', '显式资源需求')
+  const r2 = await def.handler({ add: '缺少用户内部数据源，无法继续', role: '测试' })
+  assert.strictEqual(r2.items[0].type, '资源需求', '缺资源推断为资源需求（优先于阻塞）')
+  const r3 = await def.handler({ add: '卡住了，等待上游接口', role: '研发' })
+  assert.strictEqual(r3.items[0].type, '阻塞', '纯阻塞仍为阻塞')
+})
+
+// ── 强制执行：第一次分析需求必须跑 ponder（force=true）──
+
+test('jarvis_think_deep：force=true 强制第一次分析需求跑 ponder（必须返回 run_id，违反=未完成）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
+  const r = await def.handler({ question: '是否需要建报销审批系统？', roleCard: '身份定位：产品经理。思维模型：先验证价值。', stakes: 'medium', force: true })
+  assert.ok(r.ponderGuide.includes('强制 · 第一次分析需求'), 'force 强制提示')
+  assert.ok(r.ponderGuide.includes('runId'), '必须返回 run_id')
+  assert.ok(r.ponderGuide.includes('违反强制'), '违反强制=未完成')
+  const r2 = await def.handler({ question: '测试', roleCard: '身份定位：测试。', stakes: 'low' })
+  assert.ok(!r2.ponderGuide.includes('强制 · 第一次分析'), '非 force 不强调强制')
+})
