@@ -2,7 +2,15 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.2] - 2026-08-28
+
+### 新增
+
+- **web 黑板面板（Client 半边）**：会话头部"📋 黑板"按钮 + 浮层展示 `.jarvis/board.json` 的未决项/阻塞/决策（15s 自动刷新，Host RPC `jarvis/board` 读取）。**仅当前会话工作区存在 .jarvis/（用了 /jarvis）才显示**——不入侵其他会话/插件。
+- `dsh.client` 声明：bundle 的 client 半边接入 web clientModules 扫描（此前 client 半边为空，web 无渲染）。
+
 ## [0.2.1] - 2026-08-28
+
 
 ### 新增
 
@@ -59,6 +67,7 @@
 - `docs/ARCHITECTURE.md`：与代码逐条核对的真实执行架构（13 步回执 / 18 工具 / 技能阶段对应 / 铁律）
 - `docs/RELEASE.md` / `docs/PUSH.md` / `docs/UPGRADE-20260828.md`
 
+[0.2.2]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.0
 <!-- [0.1.0]: 初始发布（本仓库第一个带 tag 的发布为 v0.2.0；0.1.0 为无 tag 的历史起点） -->

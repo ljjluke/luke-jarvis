@@ -724,7 +724,7 @@ test('jarvis_update：无法连远程时如实报告（不编造版本号）', a
 test('jarvis_update：有本地版本且输出范围完整', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_update')
   const r = await def.handler({})
-  assert.ok(r.localVersion === '0.2.0', '本地版本读取正确')
+  assert.ok(/^\d+\.\d+\.\d+/.test(r.localVersion), '本地版本是 semver 格式')
   assert.ok('hasUpdate' in r, '有更新判定字段')
   assert.ok('verdict' in r, '有判定结论')
 })

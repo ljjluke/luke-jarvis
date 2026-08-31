@@ -1647,5 +1647,48 @@ export default {
     } else {
       console.error('[luke-jarvis] commands 服务不可用，/jarvis 命令未注册')
     }
+
+    // ── Client RPC：读黑板（web 面板用）──
+    // 仅当当前会话工作区存在 .jarvis/board.json 时返回内容，否则返回空（Client 不渲染）
+    // 这样：用了 /jarvis 的会话（工作区有 .jarvis/）才有黑板面板，其他会话不显示 = 不入侵。
+    if (globalThis.harness && typeof globalThis.harness.handle === 'function') {
+      const fsSvc = ctx.get('fs')
+      ctx.effect(
+        () =>
+          globalThis.harness.handle('jarvis/board', async (args) => {
+            const sessionId = args && args.sessionId ? String(args.sessionId) : ''
+            try {
+              const cwd = process.cwd && process.cwd()
+              const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
+              if (!fsSvc || typeof fsSvc.readText !== 'function') {
+                return { items: [], error: 'fs 不可用' }
+              }
+              const target = await fsSvc.resolve(boardPath)
+              if (!target) return { items: [], active: false, reason: 'no .jarvis' }
+              const text = await fsSvc.readText(target)
+              if (!text) return { items: [], active: false, reason: 'empty board' }
+              let data = null
+              try { data = JSON.parse(text) } catch { data = null }
+              if (!data || !Array.isArray(data.items)) return { items: [], active: true, reason: 'bad json' }
+              return {
+                items: data.items.map((it) => ({
+                  id: String(it.id || ''),
+                  role: String(it.role || ''),
+                  type: String(it.type || '问题'),
+                  content: String(it.content || '').slice(0, 200),
+                  status: String(it.status || 'open'),
+                  essenceChecked: Boolean(it.essenceChecked),
+                })),
+                active: true,
+                sessionId,
+              }
+            } catch (e) {
+              return { items: [], error: String(e && e.message ? e.message : e) }
+            }
+          }),
+      )
+    } else {
+      console.error('[luke-jarvis] harness 不可用，黑板 RPC 未注册')
+    }
   },
 }

@@ -1,6 +1,6 @@
 {
   "name": "luke-jarvis",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "贾维斯数字员工公司（领域无关的操作系统）：需求分级 → CEO 定领域流程 → 现场蒸馏角色卡(六段式+证据链+防冒名) → 项目沉淀(.jarvis/ 可复用) → 协同/会议/黑板/问题上行/能力补足。插件不携带任何静态角色卡与领域模板——卡与流程沉淀在项目里。含可执行 /jarvis 命令。",
   "type": "module",
   "main": "src/host/plugin.js",
@@ -16,7 +16,8 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
-    }
+    },
+    "client": "./src/client/plugin.js"
   },
   "license": "BSD-3-Clause",
   "files": [
