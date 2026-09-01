@@ -1,0 +1,124 @@
+{
+  "name": "score",
+  "label": "方案评分",
+  "stepGoal": "用8维度框架对每个幸存方案评分",
+  "prompt": "对每个幸存方案，从8个维度独立评分(0-10)，每方案起一个 agent。\n\nF1 可行性: 方案在现实条件下能不能落地？\nF2 基础: 方案依赖什么前提条件？这些条件成立吗？\nF3 应变: 方案遇到变化时有没有弹性？\nF4 穿透: 方案能不能真正解决问题，还是浮于表面？\nF5 风险: 方案最大的风险是什么？风险可控吗？\nF6 资源: 方案需要什么资源？资源可得性如何？\nF7 边界: 方案有没有触碰不可逾越的限制？\nF8 综合收益: 方案的综合收益是否大于成本？\n\n收集所有评分后汇总对比。\n\n**先验自检(可选,门控触发)**: 评分靠一套先验框架(8个维度+各维度权重+聚合方式+隐含的\"好\"的定义),这套框架在评分前就被给定从不被质疑。若出现以下情况则触发先验自检——质疑评分工具本身而非继续用它的结果:①幸存方案分数接近排名对权重微小变动敏感(说明权重在决定结果而非方案差异)②分数高但与领域直觉背离(尺子与对象不匹配)③某维度在本case无法被任何可观察经验锚点赋值(空转范畴)④权重的来源case类型与当前不同(越界使用)。触发后:枚举先验框架(维度集/权重/聚合/\"好\"的定义)→逐项问删掉后判断是否坍塌(何以必要)→对保留项找经验锚点找不到则标空转范畴(何以可能)→标权重越界使用→输出框架通过/部分失效改用/整体不适配暂停重判。⛔只在评分合法性可疑时触发,多数case的评分框架是适配的不做。⛔只动评分工具不动用户问题(那是问题消解的活)。方法见 engine/transcendental-audit.md。\n\n**对总分最高方案做归因(门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏):level=high才做,level=low跳过abduction留空对象)**: 它拿到这个高分,最可能是因为什么?穷举归因直到下一个原因的信息增量不足以改变排名。不是凑3个——列出所有能独立解释高分的原因（每个须具体可证伪），然后按解释力排序。3个以内如果就穷尽了，诚实停止(每个原因必须是具体可被证伪的归因,如\"因假设了X成立\"/\"因在某维度上恰好契合\",不接受\"综合表现好\"这类废话)。再写反事实排名:⛔若这3个原因中任一个不成立,它该从第1落到第几?必须具体到落点名次,编不出说明归因是马后炮。⛔反事实假设须是可信的(如\"若时间预算假设崩塌\"),不接受稻草人反事实(如\"若房产必涨且随时可变现\"这种几乎不可能的假设凑落点名次)。归因只解释\"它为什么得这个分\",不否定方案本身(那是方案辩证运动的活)。用自然语言,不出现溯因/归因等术语。",
+  "args": [
+    "survivors",
+    "stake"
+  ],
+  "schema": {
+    "type": "array",
+    "items": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "scores": {
+          "type": "object",
+          "properties": {
+            "feasibility": {
+              "type": "number"
+            },
+            "foundation": {
+              "type": "number"
+            },
+            "resilience": {
+              "type": "number"
+            },
+            "penetration": {
+              "type": "number"
+            },
+            "risk": {
+              "type": "number"
+            },
+            "resource": {
+              "type": "number"
+            },
+            "boundary": {
+              "type": "number"
+            },
+            "value": {
+              "type": "number"
+            }
+          }
+        },
+        "total": {
+          "type": "number",
+          "description": "综合评分"
+        },
+        "key_finding": {
+          "type": "string"
+        },
+        "abduction": {
+          "type": "object",
+          "description": "对最高分方案的归因(高赌注问题才有;可逆小事留空对象)",
+          "properties": {
+            "reasons": {
+              "type": "array",
+              "description": "它拿高分的3个最可能原因(须具体可证伪,不接受\"综合好\"废话)",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "counterfactual_rank": {
+              "type": "string",
+              "description": "若原因不成立,它该从第1落到第几(须具体落点名次)"
+            }
+          }
+        },
+        "transcendental_audit": {
+          "type": "object",
+          "description": "先验自检（仅当评分合法性可疑时才填；多数case留空对象）",
+          "properties": {
+            "priori_framework": {
+              "type": "string",
+              "description": "枚举的先验框架：维度集/权重/聚合方式/隐含的好定义"
+            },
+            "failed_items": {
+              "type": "array",
+              "description": "本case失效的维度/权重：标空转范畴(无经验锚点)或越界使用(来源case类型不匹配)",
+              "items": {
+                "type": "string"
+              }
+            },
+            "verdict": {
+              "type": "string",
+              "enum": [
+                "passed",
+                "partial_replaced",
+                "framework_mismatch"
+              ],
+              "description": "框架通过/部分失效改用/整体不适配暂停重判"
+            },
+            "adjustment": {
+              "type": "string",
+              "description": "若partial_replaced：本case改用什么评分口径及经验依据；其他verdict填说明"
+            }
+          }
+        },
+        "certainty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "该项结论确定性，0-1；依据证据强度和未验证假设校准"
+        }
+      },
+      "required": [
+        "name",
+        "scores",
+        "total",
+        "certainty"
+      ]
+    },
+    "required": [],
+    "minItems": 3
+  },
+  "engine_ref": [
+    "engine/transcendental-audit.md",
+    "engine/mcts-simulate.md"
+  ]
+}

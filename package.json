@@ -6,9 +6,9 @@
   "main": "src/host/plugin.js",
   "exports": {
     ".": "./src/host/plugin.js",
-    "./client": "./src/client/plugin.js",
     "./host": "./src/host/plugin.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./src/client/plugin.js"
   },
   "dsh": {
     "engines": {
@@ -17,7 +17,10 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
-    "client": "./src/client/plugin.js"
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
   },
   "license": "BSD-3-Clause",
   "files": [

@@ -1,0 +1,221 @@
+{
+  "name": "synthesis",
+  "label": "综合",
+  "stepGoal": "最终结论+风险+未决事项",
+  "engine_ref": [
+    "engine/synthesis.md",
+    "engine/mcts-converge.md",
+    "engine/working-stance.md",
+    "engine/error-pattern.md",
+    "engine/otherness.md",
+    "engine/preference-structure.md",
+    "references/development/multi-discipline-audit.md"
+  ],
+  "tool_ref": [
+    "scripts/synthesis_guard.js all"
+  ],
+  "prompt": "整合辩论结果和推演数据,输出:\n1. 最终结论 — 推荐哪个方案及理由(需回扣用户画像,说明为什么适合这个具体用户)\n2. 推理链 — 从发散→八卦镜→方案→推演→辩论的决策路径摘要\n3. 主要风险 — 推荐方案面临的最大风险及应对\n4. 待确认事项 — 需要用户自己判断的问题清单\n5. 结论自反(高赌注问题才做,可逆小事跳过) — 见下方\n6. 可谬标注(高赌注问题才做,与结论自反同门控,可逆小事跳过) — 见下方\n7. 不可同化项(高赌注问题才做,与结论自反同门控,可逆小事跳过) — 见下方\n\n**结论自反(门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏):level=low跳过本段深度动作直接出结论,综合步骤本身仍执行产出conclusion/reasoning/risk,绝不跳过综合步骤)**:\n  a. 质疑账本收敛: 汇总本管线4处质疑(神思前提审视的伪前提/八卦镜key_finding/辩论攻击薄弱点/推演失效条件),收敛到top3最关键质疑,不全量罗列\n  b. 逐条回应: 这3个质疑如何影响了最终结论(某质疑未影响则说明为何可忽略)\n  c. 共享前提: 所有幸存方案共享了哪个未被质疑的前提——⛔必须给出至少一个,不允许回答\"没有\",即使看似无害也要写出,并说明为何在当前决策中可接受\n  内部自检反者道之动(不展示标签):当前倾向是否在不断强化中接近过拟合——若已是第三次以类似理由(同一维度/同一依据)倾向同一方向,触发反向校验:这个倾向最可能因什么理由被推翻?若反向校验找不出可信推翻理由说明倾向稳固,若找出可信推翻理由则标记为可谬的最可能错点。方法见 engine/error-pattern.md(学习信号价值分级+反者道之动饱和反转)。\n  对外输出用自然语言,不出现辩证法/悬置/反者道之动等哲学术语\n\n**可谬标注(门控同结论自反,门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏))**:\n  ⛔**基于立场(本步核心)**: 可谬标注必须基于立场谱系的最终倾向——\"框架最终倾向A(见stance_pedigree.final_lean),A最可能因X不成立而错\"。不再是悬空的\"结论可能错在哪\"——先有立场,可谬才有锚点。若stance_pedigree为空(可逆小事跳过立场),可谬也跳过。\n  在此基础上:⛔必须给出一个具体的错点(如\"若推荐方案依赖的X假设不成立,结论就站不住\"),不接受\"可能不够全面\"这类万能废话。再给备选:若该错点真的发生,该改用什么方案或方向。可谬标注只标\"结论本身可能错在哪\",不重复结论自反(自反管共享前提,可谬管结论自身的失效点)。用自然语言,不出现可谬论等术语。\n  ⛔**互斥约束(防与结论自反重复)**: 可谬标注的\"最可能错点\"不得与结论自反里\"共享前提最弱那条\"为同一对象——真实case里两者会自然收敛到同一核心不确定性,但分两段重写是纯冗余。若你发现最可能错点恰好就是共享前提最弱那条,则可谬标注改为:只标注该前提的\"未实测状态\"(一句话),然后必须另找一个**不同对象**的失效点作为最可能错点(如方案执行层的某个判断、而非前提层的共享假设)。\n  ⛔**互斥约束(防与不可同化项重复)**: 可谬标注的\"最可能错点\"也不得与不可同化项的\"不可收编方\"为同一对象——真实case里两者会自然收敛到同一核心不确定性(如某群体利益),但可谬管方案内执行判断失效、他者管方案外不可代表者,层级不同不应重写。若发现最可能错点恰好就是\"某不可收编方的利益被忽略了\",可谬改为标注另一个方案内执行层判断,把\"不可代表\"留给不可同化项。判据:同对象才触发回避,不必显式硬扯到无关执行细节。\n\n**不可同化项(门控同结论自反,门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏))**:\n  现有辩证运动(发散互否合题/方案辩证合题/结论自反)全是\"同化方向\"——把对立收进合题消化掉。但有些对立不该被合题收编:一个利益/立场完全不被任何幸存方案代表的他者,合题收编它本身就是扭曲。检查有没有这种合题消化不掉的剩余项。\n  ⛔**极严门控(防变凑字段)**: 不是必出他者。只有同时满足三条件才标:①真他者(利益完全不被任何方案代表,不是\"另一个角度\"那叫发散);②合题尝试过且留硬剩余(不是\"暂时没找到合题\",是\"任何合题都会扭曲它\");③具体理由(⛔必须写出\"为什么任何合题都会扭曲它\",❌不接受\"有点矛盾先挂着\")。找不到满足三条件的 → 留空对象,这是正常的,多数问题没有不可同化他者,硬凑比没有更糟。\n  若标出:引用哪个合题(发散互否/方案辩证/结论自反)登记的哪个对立,标哪一方不可被收编+具体理由+结论如何约束适用范围(如\"本结论不适用于Z群体\")。⛔引用不重写:引用合题已登记的对立,只标\"不可同化\"角度,不重写对立(判据:删对象描述只留角度标注仍通顺)。用自然语言,不出现他者/面容等术语。方法见 engine/otherness.md。\n\n⛔**以上两条互斥约束+极严门控有代码兜底(scripts/synthesis_guard.js)**: 综合产出会被自动校验——若可谬最可能错点与共享前提最弱/不可收编方撞同一核心名词,或他者非空但字段不全/reason含软话,会被标记VIOLATION。这是初筛(关键词重叠非语义级),但足以拦住明显重写和凑字段,别心存侥幸。\n\n**立场谱系(门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏))**: 综合是立场收口处。串联收敛→辩论→综合三阶段框架的倾向+转变原因,让最终结论回扣\"框架为什么走到这里\"而非只回扣用户画像。收敛阶段诞生立场(current_lean),辩论阶段可能改变它(stance_shift),综合收口为final_lean并喂给可谬标注做锚点。方法见 engine/working-stance.md。\n\n**偏好自省(门控同立场谱系,门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空对象,无stake字段(旧数据)默认按high(宁多不漏))**: 结论隐含什么偏好结构,换成不同偏好的人结论还成立吗。\n  a. 跨期偏好(时间贴现): 结论是否隐含当下偏见(现在付出未来受益的方案被低估)?是否隐含可预期的偏好反转(计划时偏好长期、执行时反转短期)?若偏好反转可预期,好方案是否需要承诺机制锁定未来行为?\n  b. 动机取向(调节聚焦): 结论倾向促进聚焦(追收益/进步/错过机会敏感)还是预防聚焦(避损失/稳定/犯错敏感)?换成相反取向的人——追求最大收益的人 vs 追求最小风险的人——结论还站得住吗?若只对一种取向成立,说明结论绑定了特定动机取向。\n  c. 偏好稳定性: 换成不同时间情境(急/缓)或不同动机取向的人,结论是否翻转?若翻转,结论不是普适最优而是对当前偏好结构最优——诚实标注其偏好依赖。\n  ⛔ 不展示时间贴现/调节聚焦等方法论标签,用自然语言说这个结论假设了你是X取向的人。不重复立场谱系(谱系管框架倾向怎么走的,偏好自省管结论绑定了什么用户偏好)。方法见 engine/preference-structure.md。\n\n用户画像（五诊+约束+假设）: {{userProfile}}\n收敛与辩论阶段工作立场: {{workingStance}}\n\n结论自反方法见 engine/synthesis.md。言意差距检查见 engine/mcts-converge.md。输出语言：由你自行确保与用户提问语言一致，不依赖外部脚本检测。\n\n**结果闭环(outcome)**: 初次综合时 outcome 留空对象。用户后续确认、反驳或修正时，记录 confirmed/refuted/revised、原始反馈与可复用经验；只描述行为语义，不调用旧 knowledge outcome 或 MMA 命令。",
+  "args": [
+    "debate_summary",
+    "ranked",
+    "userProfile",
+    "workingStance",
+    "stake"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "conclusion": {
+        "type": "string",
+        "description": "最终结论"
+      },
+      "reasoning": {
+        "type": "string",
+        "description": "推理链"
+      },
+      "risk": {
+        "type": "string",
+        "description": "风险"
+      },
+      "pending_user_questions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "meta_questioning": {
+        "type": "object",
+        "description": "结论自反产出（高赌注问题才有；可逆小事留空对象）",
+        "properties": {
+          "top_challenges": {
+            "type": "array",
+            "description": "收敛后的最关键质疑，最多3条，不足3条则只写真质疑不准凑数",
+            "items": {
+              "type": "string"
+            }
+          },
+          "challenge_responses": {
+            "type": "array",
+            "description": "逐条回应每个质疑如何影响结论，须含具体修正(X→Y)或具体可忽略理由(因Z)，不接受'已纳入考量'走过场话",
+            "items": {
+              "type": "string"
+            }
+          },
+          "shared_premises": {
+            "type": "array",
+            "description": "所有幸存方案共享的未被质疑的前提（至少1个，强制产出）",
+            "items": {
+              "type": "object",
+              "properties": {
+                "premise": {
+                  "type": "string"
+                },
+                "acceptable": {
+                  "type": "boolean",
+                  "description": "当前决策中是否可接受"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "为何可接受/不可接受，须具体(可接受因X/不可接受但不可避开因Y)，不接受一句话带过"
+                }
+              },
+              "required": [
+                "premise",
+                "acceptable",
+                "reason"
+              ]
+            }
+          }
+        }
+      },
+      "fallibilism": {
+        "type": "object",
+        "description": "可谬标注（高赌注问题才有；可逆小事留空对象。⛔基于立场：须以stance_pedigree.final_lean为锚点）",
+        "properties": {
+          "likely_wrong_point": {
+            "type": "string",
+            "description": "框架最终倾向A（见stance_pedigree.final_lean），A最可能因X不成立而错——须具体可证伪，不接受\"可能不准确\"废话"
+          },
+          "fallback": {
+            "type": "string",
+            "description": "若该错点发生,该改用什么方案或方向"
+          }
+        }
+      },
+      "stance_pedigree": {
+        "type": "object",
+        "description": "立场谱系：收敛→辩论→综合三阶段倾向演化轨迹（高赌注问题必填；可逆小事留空对象）",
+        "properties": {
+          "stages": {
+            "type": "array",
+            "description": "各阶段框架的倾向+为何此倾向/为何转变",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string",
+                  "description": "阶段名（收敛/辩论/综合）"
+                },
+                "lean": {
+                  "type": "string",
+                  "description": "该阶段框架倾向什么"
+                },
+                "why": {
+                  "type": "string",
+                  "description": "为何此倾向（收敛:凭啥诞生;辩论:变/不变的依据;综合:为何收口至此）"
+                }
+              },
+              "required": [
+                "step",
+                "lean",
+                "why"
+              ]
+            }
+          },
+          "final_lean": {
+            "type": "string",
+            "description": "框架最终倾向（喂给fallibilism做可谬锚点）"
+          }
+        }
+      },
+      "otherness": {
+        "type": "object",
+        "description": "不可同化项（高赌注问题才有；可逆小事或找不到真他者时留空对象）",
+        "properties": {
+          "referenced_opposition": {
+            "type": "string",
+            "description": "引用哪个合题(发散互否/方案辩证/结论自反)登记的哪个对立"
+          },
+          "unassimilable_party": {
+            "type": "string",
+            "description": "该对立中哪一方不可被合题收编"
+          },
+          "reason": {
+            "type": "string",
+            "description": "为什么任何合题都会扭曲它(须具体,不接受\"有点矛盾\")"
+          },
+          "applicability_constraint": {
+            "type": "string",
+            "description": "结论如何约束适用范围(如\"本结论不适用于Z群体\")"
+          }
+        }
+      },
+      "preference": {
+        "type": "object",
+        "description": "偏好自省(高赌注问题才有)。跨期偏好/动机取向/偏好稳定性。可逆小事(level=low)留空对象。方法见 engine/preference-structure.md",
+        "properties": {
+          "time_discounting": {
+            "type": "string",
+            "description": "跨期偏好:结论隐含什么时间贴现(当下偏见/偏好反转/是否需承诺机制)"
+          },
+          "regulatory_focus": {
+            "type": "string",
+            "description": "动机取向:结论倾向促进聚焦(追收益)还是预防聚焦(避损失),换成相反取向的人结论还站得住吗"
+          },
+          "stability": {
+            "type": "string",
+            "description": "偏好稳定性:换成不同时间情境或不同动机取向的人,结论还成立吗;若不成立说明结论绑定了特定偏好结构"
+          }
+        }
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      },
+      "outcome": {
+        "type": "object",
+        "description": "用户确认后的真实结果回写；初次综合时留空对象，后续反馈时填写以闭合学习回路",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "refuted",
+              "revised"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "description": "用户确认、反驳或修正的具体内容"
+          },
+          "lesson": {
+            "type": "string",
+            "description": "从真实结果提炼、供后续决策复用的经验"
+          }
+        },
+        "required": [
+          "status",
+          "feedback"
+        ]
+      }
+    },
+    "required": [
+      "conclusion",
+      "reasoning",
+      "risk",
+      "certainty"
+    ]
+  }
+}

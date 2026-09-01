@@ -1,0 +1,80 @@
+{
+  "name": "bagua",
+  "label": "八卦镜",
+  "stepGoal": "发现盲点，找出被忽略的视角",
+  "engine_ref": "engine/bagua.md",
+  "tool_ref": [
+    "scripts/mcts_compute.js hexagram-lookup"
+  ],
+  "prompt": "从8个维度审视问题，发现每个维度下用户可能没注意到的盲点。\n\nF1 驱动力: 真正驱动问题的是什么？有没有被忽略的推动力？\nF2 基础: 有哪些潜在的基础条件被忽略了？\nF3 变化: 哪些变化因素被低估或忽视了？\nF4 渗透: 问题的影响面可能比你以为的大在哪？\nF5 风险: 最大的隐藏风险是什么？大家都忽略了什么？\nF6 依附: 表面问题下藏着什么深层因素？\nF7 边界: 被忽略的边界或限制是什么？\nF8 平衡: 哪些相关方的视角没有被考虑到？\n\n每个维度穷举盲点直到无新角度。不是\"至少2个交差\"——持续深挖，每挖出一个后自问：还有没有不同于已发现的、另一个角度的盲点？有就继续，没有才停。⛔角度不同是硬约束：不能同一个盲点换说法凑数。不需要评分，只需要揭示被忽略的视角。\n\n**查资料时必须覆盖以下五个维度**:\n① 中国古文化思想 — 相关古典哲学/文化视角\n② 每日最新信息 — 最新的技术发布、行业动态\n③ 学术论文 — 对应领域的论文、研究\n④ 专家观点 — 领域公认专家的意见\n⑤ 领域最新动态 — 该领域当下的最新进展\n查实时平台数据（GitHub、YouTube、B站、RSS、任意网页）优先用 agent-reach 暴露的平台能力；通用搜索用 WebSearch。每个盲点至少引用2个以上维度的来源。每个维度必须由独立 specialist 处理。\n\n用户画像（五诊+约束+假设）: {{userProfile}}",
+  "args": [
+    "consensus",
+    "userProfile"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "dimensions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "blindspot": {
+              "type": "string",
+              "description": "盲点发现"
+            },
+            "insight": {
+              "type": "string",
+              "description": "这个盲点为什么重要"
+            }
+          },
+          "required": [
+            "name",
+            "blindspot",
+            "insight"
+          ]
+        },
+        "minItems": 8
+      },
+      "key_finding": {
+        "type": "string",
+        "description": "最关键的盲点"
+      },
+      "reasoning_dynamics": {
+        "type": "object",
+        "description": "推理动态（可选，记录8维度排查过程中的关键转折，供下游步骤感知思考过程而非仅看结论）",
+        "properties": {
+          "key_turning_points": {
+            "type": "array",
+            "description": "推理过程中的关键转折点（如：F5风险维度发现颠覆了F1驱动力的假设）",
+            "items": {
+              "type": "string"
+            }
+          },
+          "divergence_pattern": {
+            "type": "string",
+            "description": "8维度间的分歧模式（如：F1/F2指向增长但F5/F7指向收缩，3维度与主流矛盾）"
+          },
+          "confidence_nuance": {
+            "type": "string",
+            "description": "确定性细节（如：整体盲点明确但F4渗透维度缺乏数据支撑；或某维度盲点依赖未验证假设）"
+          }
+        }
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      }
+    },
+    "required": [
+      "dimensions",
+      "key_finding",
+      "certainty"
+    ]
+  }
+}

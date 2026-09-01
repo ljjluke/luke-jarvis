@@ -1,0 +1,161 @@
+{
+  "name": "shensi",
+  "label": "神思",
+  "stepGoal": "跳出常规思维，找到不一样的角度",
+  "engine_ref": [
+    "engine/mcts-constraint.md",
+    "engine/shensi.md",
+    "engine/mcts-predictive.md",
+    "engine/socratic-ignorance.md",
+    "engine/dissolve-frame.md",
+    "engine/prospect-theory.md"
+  ],
+  "prompt": "按六步法思考（内部使用，不输出过程标签）:\n0. 前提审视: ⛔先产出stake字段(赌注判定,必填,先于premises)。用硬判据(任一满足即高赌注:不可逆/高成本/涉及他人/长期影响半年以上)，不是凭感觉判；判不清按高赌注处理(宁可多做不可漏做)；用户郑重来问即默认高赌注。真正的可逆小事极少(须同时:可逆+无成本+无他人影响+无长期后果，如晚饭吃什么)。可逆小事(level=low)跳过前提审视(神思仍执行虚静→言意产出反直觉发现,仅premises留空数组,绝不跳过神思步骤本身);高赌注(level=high)才审视。⛔stake字段须先于premises产出。审视时列出需求隐含的3个核心前提（不说\"你陷入了X偏误\"，只说\"你的需求假设了X\"），对照常见陷阱（沉没成本/确认偏误/锚定/框架效应/可得性启发/幸存者偏差）。内部自检损失态度:审视时同时留意结论是否隐含损失厌恶(对损失比收益更敏感致过度保守)/参照点依赖(锚在某现状或 sunk cost 上评判)/概率权重扭曲(对小概率事件过度加权或对高概率事件权重不足)——这些不单独输出,融入前提审视的判断里。 方法见 engine/prospect-theory.md。内部自检道家日损:审视时同步觉察——当前判断中是否有应舍弃的旧假设/旧偏好/旧经验被误当成约束保留？若有则标注为冗余前提并在premises中记录(为道日损——真正重要的不是加更多分析而是删掉多余的前提)。涉及用户需求/真实情况的前提用 AskUserQuestion 让用户确认，用户否认的标为伪前提注入画像，用户坚持的标注存疑不强行推翻。系统只提示不判定。\n1. 虚静: 放下问题本身\n2. 神凝: 找出核心矛盾\n3. 神游: 自由联想\n4. 意象: 留意浮现的画面\n5. 言意: 连接回问题\n\n穷举反直觉发现直到无新角度。每产出一个后自问：还有没有不同于已发现的、另一个反直觉角度？有就继续，没有才停。⛔不是\"1个交差\"——一个真正反直觉的发现后面往往藏着第二个。**只输出结论，不输出思考过程标签（前提审视/虚静/神凝等）**，直接用自然语言表达发现。\n\n**问题消解(可选,门控触发)**: 若前提审视暴露出\"问题提法本身预设了未经验证的前提\"(不是事实前提错误,而是问题被某种语言形式/隐藏设定框定了),则进一步质疑问题本身——把问题改写为一组隐含前提的合取,找出被问题形式悄悄假定却从未上桌验证的前提,再用至少2种不同框架重新表述同一现实关切。若不同表述引向完全不同的解,说明原问题的\"无解\"可能是形式诱导的伪无解,输出消解后的新问题(须可被日常场景判定+会改变具体行动)。⛔只在前提审视暴露出问题框架预设时才填,多数问题(尤其首次出现矛盾、有明确解的)不触发,留空。⛔只拆问题框架,不保留被释放的异质项(那是综合阶段的活)。方法见 engine/dissolve-frame.md。\n\n**查资料时必须覆盖以下五个维度**:\n① 中国古文化思想 — 相关古典哲学/文化视角\n② 每日最新信息 — 最新的技术发布、行业动态\n③ 学术论文 — 对应领域的论文、研究\n④ 专家观点 — 领域公认专家的意见\n⑤ 领域最新动态 — 该领域当下的最新进展\n查实时平台数据（GitHub、YouTube、B站、RSS、任意网页等）按以下流程用 agent-reach，不要直接跳到 WebSearch：① 先 Bash 跑 `agent-reach doctor --json` 探活，找出 status 为 ok 的平台及其 active_backend；② 对可用平台，用 Read 工具读 agent-reach skill 的路由表拿具体命令（路径优先试 `~/.agents/skills/agent-reach/references/`，按平台选 search.md/web.md/video.md/dev.md/social.md/career.md）；③ 用拿到的命令查数据。⛔若 agent-reach 未安装、或无任何 status=ok 的渠道、或命令执行失败，才退回 WebSearch。反直觉发现至少引用2个以上维度的来源。前提审视方法见 engine/shensi.md 第零步，需求画像见 engine/mcts-constraint.md。\n\n需求打磨阶段补上的领域专业维度（苏格拉底无知自检产出，五诊探不到、通过无知追问补上的领域敏感信息，用于引导神思更专业地审视前提）: {{domainDimensions}}",
+  "args": [
+    "userRequest",
+    "userProfile",
+    "domainDimensions"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "premises": {
+        "type": "array",
+        "description": "前提审视产出（高赌注问题才有；可逆小事留空数组）",
+        "items": {
+          "type": "object",
+          "properties": {
+            "premise": {
+              "type": "string",
+              "description": "需求隐含的前提"
+            },
+            "trap_type": {
+              "type": "string",
+              "description": "对应陷阱类型（沉没成本/确认偏误/锚定/框架效应/可得性启发/幸存者偏差/无）"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "confirmed",
+                "rejected",
+                "doubted"
+              ],
+              "description": "confirmed=用户确认成立, rejected=用户否认(伪前提), doubted=用户坚持但存疑"
+            }
+          },
+          "required": [
+            "premise",
+            "trap_type",
+            "status"
+          ]
+        }
+      },
+      "counter_intuitive": {
+        "type": "string",
+        "description": "跳出常规的视角"
+      },
+      "insight": {
+        "type": "string",
+        "description": "洞察"
+      },
+      "frame_dissolution": {
+        "type": "object",
+        "description": "问题消解（仅当前提审视暴露出问题提法预设了未验证前提时才填；多数问题留空对象）",
+        "properties": {
+          "original_frame": {
+            "type": "string",
+            "description": "原问题被怎么框定的（含被悄悄假定的未验证前提）"
+          },
+          "unverified_premise": {
+            "type": "string",
+            "description": "问题形式预设了哪个从未上桌验证的前提"
+          },
+          "reformulations": {
+            "type": "array",
+            "description": "至少2种不同框架的重新表述",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          },
+          "dissolved_question": {
+            "type": "string",
+            "description": "消解后的新问题（须可被日常场景判定+会改变具体行动）"
+          }
+        }
+      },
+      "stake": {
+        "type": "object",
+        "description": "赌注判定(第0步产出,必填)。复用v1.18.37硬判据:任一命中即high。判不清按high(宁多不漏);用户郑重来问即默认high;真正可逆小事须同时:可逆+无成本+无他人影响+无长期后果。",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "high",
+              "low"
+            ],
+            "description": "high=高赌注(任一硬判据命中或判不清或用户郑重);low=可逆小事(须同时满足4条件)"
+          },
+          "criteria": {
+            "type": "object",
+            "description": "命中的硬判据(level=high时填命中的,low时留空对象)。'用户郑重'/'判不清'这种情况criteria可留空,level=high即可",
+            "properties": {
+              "irreversible": {
+                "type": "boolean",
+                "description": "不可逆"
+              },
+              "high_cost": {
+                "type": "boolean",
+                "description": "高成本"
+              },
+              "involves_others": {
+                "type": "boolean",
+                "description": "涉及他人"
+              },
+              "long_term": {
+                "type": "boolean",
+                "description": "长期影响半年以上"
+              }
+            }
+          }
+        },
+        "required": [
+          "level"
+        ]
+      },
+      "reasoning_dynamics": {
+        "type": "object",
+        "description": "推理动态（可选，记录推理过程中的关键转折，供下游步骤感知思考过程而非仅看结论）",
+        "properties": {
+          "key_turning_points": {
+            "type": "array",
+            "description": "推理过程中的关键转折点（如：最初倾向X，发现Y后转向Z）",
+            "items": {
+              "type": "string"
+            }
+          },
+          "divergence_pattern": {
+            "type": "string",
+            "description": "本步产出中的分歧模式（如：前提审视中2个前提互相矛盾）"
+          },
+          "confidence_nuance": {
+            "type": "string",
+            "description": "确定性细节（如：整体确定但某前提依赖用户确认；或反直觉发现虽强但缺乏数据支撑）"
+          }
+        }
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      }
+    },
+    "required": [
+      "counter_intuitive",
+      "insight",
+      "stake",
+      "certainty"
+    ]
+  }
+}

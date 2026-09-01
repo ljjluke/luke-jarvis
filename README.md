@@ -22,9 +22,10 @@
 |---|---|---|
 | Agent 预设 | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/` |
 | 技能（唯一入口） | `skills/jarvis.md`（两层架构+蒸馏方法论+项目记忆库+单入口） | `~/.dsh/skills/jarvis/SKILL.md` |
+| **ponder 满血技能（随包集成，无需单独装）** | `skills/ponder/`（SKILL.md+scripts+resources）+ `skills/ponder-stages/`（十阶段 9 json） | `~/.dsh/skills/ponder/` + `~/.dsh/skills/ponder-stages/` |
 | 核心插件（持久化源码） | `src/host/plugin.js`、`src/client/plugin.js` | 注册为核心插件（见下） |
 
-> 注：本仓库**不含**任何静态角色卡/领域模板目录（`roles/` 已移除）——领域内容全部来自「项目记忆库 `.jarvis/` + 现场蒸馏」。**技能只有 jarvis 一个入口**（蒸馏/沉淀/记忆库/两层架构全部并入），用户只交互 `/jarvis` 一个命令。
+> 注：本仓库**不含**任何静态角色卡/领域模板目录（`roles/` 已移除）——领域内容全部来自「项目记忆库 `.jarvis/` + 现场蒸馏」。**技能只有 jarvis 一个入口**（蒸馏/沉淀/记忆库/两层架构全部并入），用户只交互 `/jarvis` 一个命令。**ponder 满血版已随包集成**——装 jarvis 即自带 ponder 十阶段（角色用 skill 工具加载执行），无需单独安装 ponder。
 
 ### 方式 A：作为预设使用（推荐，无代码变更）
 
@@ -35,6 +36,11 @@ cp -r preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/jarvis-org
 # 2. 技能（唯一入口）
 mkdir -p ~/.dsh/skills/jarvis
 cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
+
+# 3. ponder 满血技能（随包集成：装 jarvis 即自带，角色可加载执行）
+mkdir -p ~/.dsh/skills/ponder ~/.dsh/skills/ponder-stages
+cp -r skills/ponder/* ~/.dsh/skills/ponder/
+cp -r skills/ponder-stages/* ~/.dsh/skills/ponder-stages/
 ```
 
 预设确保每次会话注入 Jarvis 老板 persona（含全部铁律）+ 工具行（bash/fs/skill/goal/subagent/web 等）。

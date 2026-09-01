@@ -1,0 +1,61 @@
+{
+  "name": "divergence",
+  "label": "发散",
+  "stepGoal": "6视角审视，覆盖不同维度",
+  "engine_ref": [
+    "engine/divergence.md",
+    "engine/mcts-diverge.md"
+  ],
+  "prompt": "从6种不同视角审视，每个视角穷举洞察直到该视角下无新发现。不是\"至少1个交差\"——深挖到\"再看也就这样了\"才停。角度不同是硬约束：不能同一个发现换说法凑数。\n\n视① 宏观全局: 站到最高处看整体格局、边界、系统结构\n视② 微观细节: 落到最细处看具体环节、细节中的矛盾\n视③ 时间压缩: 如果只有一天, 什么必须做?\n视④ 时间扩展: 长期看什么不变, 什么会变?\n视⑤ 顺其自然: 如果不干预, 事情会往哪里走?\n视⑥ 无我视角: 抛开个人立场, 系统最优解是什么?\n\n每个视角输出: 洞察 + 数据来源(凭什么这么说) + 假设(隐含的前提)。\n\n⛔六视配额防凑字段: 六视是框架核心必须全做(minItems:6),但若某视角的洞察与其他视角实质重复(同义换皮),不要硬凑——在该视角insight里直接标注\"此视与视X重叠:[说明为何仍单列/或承认无新增洞察]\",标注本身比硬挤一段套话更有价值。真实case里六视常有1-2视自然退化成同义重复,承认它比伪装出独立洞察更诚实。\n\n六视产出后做视角互否(见 engine/divergence.md Phase 1.5)，但读神思shensi.stake.level:level=low跳过互否,consensus直接综合六视;level=high/复杂问题才做——找出1-2对互相矛盾/对立的视角对(不要全配对会爆炸,宏观vs微观/短期vs长期等),让双方互相质疑对方哪里站不住(⛔质疑要具体说\"视B忽略X情况下Y不成立\",不说\"不够全面\"这类软话),再合题(找让对立消失的更高一层,或明确各自成立边界)。consensus须是互否后存活判断非简单汇总(若只是\"六视各有道理\"=互否没做)。互否只谈视角冲突如何化解,不上升到方案/结论层。\n\n**查资料时必须覆盖以下五个维度**:\n① 中国古文化思想 — 相关古典哲学/文化视角\n② 每日最新信息 — 最新的技术发布、行业动态\n③ 学术论文 — 对应领域的论文、研究\n④ 专家观点 — 领域公认专家的意见\n⑤ 领域最新动态 — 该领域当下的最新进展\n查实时平台数据（GitHub、YouTube、B站、RSS、任意网页）优先用 agent-reach 暴露的平台能力；通用搜索用 WebSearch。每视角至少引用2个以上维度的来源。完整六视框架见 engine/mcts-diverge.md\n\n用户画像（五诊+约束+假设）: {{userProfile}}",
+  "args": [
+    "shensi",
+    "userProfile"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "perspectives": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "insight": {
+              "type": "string"
+            },
+            "data_source": {
+              "type": "string"
+            },
+            "assumption": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "insight",
+            "data_source",
+            "assumption"
+          ]
+        },
+        "minItems": 6
+      },
+      "consensus": {
+        "type": "string",
+        "description": "六视互否撞击后存活的综合判断（非简单汇总；须体现视角对立如何被合题化解或划界）"
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      }
+    },
+    "required": [
+      "perspectives",
+      "consensus",
+      "certainty"
+    ]
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "name": "debate",
+  "label": "辩论",
+  "stepGoal": "结合用户需求，各方案互相反驳，排名推荐",
+  "engine_ref": [
+    "engine/debate.md",
+    "engine/mcts-converge.md",
+    "engine/working-stance.md",
+    "engine/counterfactual-thinking.md"
+  ],
+  "prompt": "辩论规则:\n1. 每方案起一个 agent 做立论（并行），全部返回后展示每个立论\n   **立论时必须结合用户需求和画像**，说明方案为什么适合这个具体用户场景\n2. 第二轮回合: 每方案起一个 agent 用其他所有方案的论点**攻击**该方案，评估它扛住攻击后还能得多少分。\n   **攻击时可用用户需求校验对方方案的假设是否成立**，例如推演时假设的团队/预算/条件是否与用户实际匹配\n\n**反向思维段升级为系统反事实排查**: 辩论的\"如果第二名胜出\"默认只做上行反事实（第二名怎么能赢），补做下行反事实（第一名怎么能输）——同时构建\"第一名在什么条件下失败\"和\"第二名在什么条件下更优\"。排查时注意可控性偏差（别只对可控事件做反事实而忽略不可控的市场/环境因素）和近因效应（推演中最后那步吸引反事实注意但最早的那步才是根因）。方法见 engine/counterfactual-thinking.md。\n3. 按抗压评分排名，输出综合推荐\n\n**立场演化(门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏))**: 辩论是攻防最激烈处,收敛阶段形成的立场最可能在此被改变。检查辩论攻防是否动摇了收敛阶段的工作立场——动摇则改倾向并记录哪个攻击/新证据怎样动摇了旧依据;不动摇则记录为何旧立场仍站得住(哪个攻击未命中要害)。⛔shifted=false 必须给\"为何不变\"的具体依据,不接受\"立场不变\"一句话带过。方法见 engine/working-stance.md。\n\n用户画像（五诊 + 约束 + 假设）: {{userProfile}}\n收敛阶段工作立场: {{workingStance}}\n\n每个方案必须由独立 specialist 处理。自检清单见 engine/mcts-converge.md",
+  "args": [
+    "simulations",
+    "userProfile",
+    "workingStance",
+    "stake"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "ranked": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "rank": {
+              "type": "number"
+            },
+            "name": {
+              "type": "string"
+            },
+            "pros": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "cons": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "rank",
+            "name",
+            "pros",
+            "cons"
+          ]
+        },
+        "minItems": 3
+      },
+      "debate_summary": {
+        "type": "string",
+        "description": "综合评述"
+      },
+      "stance_shift": {
+        "type": "object",
+        "description": "辩论后立场是否演化（高赌注问题必填；可逆小事留空对象）",
+        "properties": {
+          "shifted": {
+            "type": "boolean",
+            "description": "辩论攻防是否改变了收敛阶段的立场"
+          },
+          "from_to": {
+            "type": "string",
+            "description": "若shifted=true: 从X倾向改到Y倾向+哪个攻击/新证据怎样动摇了旧依据;若shifted=false: 留空"
+          },
+          "why_not": {
+            "type": "string",
+            "description": "若shifted=false: 为何旧立场仍站得住(哪个攻击未命中要害);若shifted=true: 留空"
+          }
+        },
+        "required": [
+          "shifted"
+        ]
+      },
+      "reasoning_dynamics": {
+        "type": "object",
+        "description": "推理动态（可选，记录辩论攻防过程中的关键转折，供综合步骤感知思考过程而非仅看排名）",
+        "properties": {
+          "key_turning_points": {
+            "type": "array",
+            "description": "辩论过程中的关键转折点（如：方案A被方案C的X论点击中后排名下滑；方案B从第3升至第2）",
+            "items": {
+              "type": "string"
+            }
+          },
+          "divergence_pattern": {
+            "type": "string",
+            "description": "辩论中的分歧模式（如：2个方案在风险维度上对立严重但收益维度共识；或攻击集中在某1-2个维度）"
+          },
+          "confidence_nuance": {
+            "type": "string",
+            "description": "确定性细节（如：第1名与第2名分差极小说明排名不稳定；或某方案的攻击被成功防御但防御逻辑依赖假设）"
+          }
+        }
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      }
+    },
+    "required": [
+      "ranked",
+      "debate_summary",
+      "certainty"
+    ]
+  }
+}
