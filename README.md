@@ -1,18 +1,39 @@
-> **luke-jarvis**：领域无关的「数字员工公司」操作系统——需求本质回归 → CEO 定领域流程 → 现场蒸馏角色卡 → 项目沉淀 → 会议驱动协作 → 收口交付。
-
 # luke-jarvis · 贾维斯数字员工公司
 
-为 DeepSeek Harness 编写的「数字员工公司」插件/预设。收到一个（可能很模糊的）自然语言需求 → 需求本质回归 → **CEO 定领域流程**（插件无领域预设）→ **现场 web 蒸馏该领域真实大佬**做 CEO → CEO 定子角色 → 逐个现场蒸馏+校验 → 设计协同架构 → 开会-独思-贾维斯公屏-按需再开会 的会议驱动协作 → 收口交付。**角色卡与领域流程沉淀在项目 `.jarvis/` 里（本项目角色做的，经验属于项目），插件不携带任何静态卡/领域模板。**
+> **版本：v0.2.2**（2026-09-01 ｜ 集成 ponder 满血版 + 企业级治理 + 领域无关动态团队）
+> 为 DeepSeek Harness 编写的「数字员工公司」操作系统——收到一个模糊需求，组建一支由**真实人物原型驱动的数字员工团队**，像真实公司一样开会、协作、变更评审、绩效换人、版本交付。
 
-## ⚠️ 使用前必读（防 bug 铁律，违反即缺陷）
+---
 
-1. **插件无卡、跨项目无卡**：每个角色卡的**唯一**合法来源 = ① 本项目沉淀 `<项目>/.jarvis/cards/`（本项目角色做过，可复用起点：须 `jarvis_distill` 校验 + 按新需求修订）；② 现场 web 蒸馏（新需求/跨项目：搜该领域真实权威，真实存在且公开可查证；搜不到可查证真人 = 不许造卡）。
-   - 流程：`jarvis_project` 分级（S/M/L）→ `jarvis_process` 定领域流程（只给设计清单，插件不预设领域）→ `jarvis_store` 看本项目沉淀 → `web_search` 搜真实权威 → 现场写六段式卡（CEO 卡含协同架构段，非 CEO 卡含"我的协同"段）→ `jarvis_distill` 校验通过 → 才作为 `role` 注入。
-2. **source 必须真实**：每张卡必须有本次 web 验证的真实出处；无出处不蒸馏。虚构人物/编造方法论 = 一票否决。
-3. **真实情况优先于角色卡**：角色卡是"这位大佬如何思考"的框架，不是结论模板。LLM 不得为迎合角色卡而扭曲对真实问题（代码/数据/复现/资源）的判断。
-4. **协同架构是 CEO 卡的一部分**：CEO 决定子角色后必须为每个角色定义 ①位置 ②依赖 ③介入时机 ④协同方式；非 CEO 卡必须含"我的协同"段（分工明确硬闸）。
-5. **不冒充署名**：任何交付物只写"借鉴其方法"，不写"某大师说/某大师认为"。
-6. **项目沉淀**：角色卡/领域流程/组件清单沉淀在 `<项目>/.jarvis/`（`cards/`、`process-*.json`、`components.json`、`board.json`、`lessons.md`），用 `jarvis_store` 管理；后续需求复用**本项目沉淀**（须校验+修订），不跨项目复用。
+## ✨ 两个核心亮点
+
+### 亮点一：每个角色 = 独立个体 + 真实人物 + ponder 满血 = 有自己思维的数字员工
+
+- **每个角色都是独立个体**，蒸馏自**该领域真实人物原型**（软件=软件大佬、制造=制造大佬…），不是 LLM 自造、不是套卡完成任务。
+- **ponder 满血十阶段已随包集成**——装 jarvis 即自带，无需单独安装。角色用 skill 工具加载 ponder，以自己的人物视角跑完整十阶段推理（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis），产出**这个人物基于真实情况会做的决定**，不是万能管理者套话。
+- **强制不阉割**：每个角色每个关键决策必须跑 ponder 满血（run_id 溯源，无 run_id=未思考=打回重跑）。
+
+### 亮点二：领域无关抽象层 + 按需求动态蒸馏真人大佬
+
+- **不预设任何领域/角色/流程**——抽象层框架（参考 ponder 同为纯抽象层），不绑定软件/金融/制造等任何行业。
+- 收到需求 → 按**领域 + 难度（S/M/L）动态分配团队**：软件需求蒸馏软件领域大佬做 CEO/子角色，制造需求蒸馏制造领域大佬——**领域由需求决定，插件无预设**。
+- 角色卡/流程/经验**沉淀在项目 `.jarvis/`**（本项目角色做过的经验），下次需求先查记忆复用，跨项目/插件不复制。
+
+---
+
+## 核心机制（像真实公司一样运转）
+
+| 真实公司 | luke-jarvis 对应 |
+|---|---|
+| CEO 带队 | CEO 角色（现场蒸馏领域带队大佬）带队+派活+盯人 |
+| HR/猎头 | 人事角色（现场蒸馏领域 HR 大佬）绩效换人+猎头补位 |
+| 绩效 | jarvis_perf 阶段化考核（防 0 产出误判，连续 2 次不达标才换人） |
+| 开会 | kickoff 全员会 → 独思 → 贾维斯公屏 → 按需二次会（全员评审） |
+| 需求变更 | 全员变更评审会：判断是否影响核心体系→影响=二次评估/不影响=追加任务 |
+| 版本合同 | jarvis_release：版本快照/清单/状态/回滚（改错可 undo） |
+| 企业治理 | 权限职责分离 / 风险登记册 / 数据分级 / 成本核算 / 书面交接 |
+
+---
 
 ## 安装
 
@@ -21,11 +42,9 @@
 | 组件 | 位置 | 安装到 |
 |---|---|---|
 | Agent 预设 | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/` |
-| 技能（唯一入口） | `skills/jarvis.md`（两层架构+蒸馏方法论+项目记忆库+单入口） | `~/.dsh/skills/jarvis/SKILL.md` |
-| **ponder 满血技能（随包集成，无需单独装）** | `skills/ponder/`（SKILL.md+scripts+resources）+ `skills/ponder-stages/`（十阶段 9 json） | `~/.dsh/skills/ponder/` + `~/.dsh/skills/ponder-stages/` |
-| 核心插件（持久化源码） | `src/host/plugin.js`、`src/client/plugin.js` | 注册为核心插件（见下） |
-
-> 注：本仓库**不含**任何静态角色卡/领域模板目录（`roles/` 已移除）——领域内容全部来自「项目记忆库 `.jarvis/` + 现场蒸馏」。**技能只有 jarvis 一个入口**（蒸馏/沉淀/记忆库/两层架构全部并入），用户只交互 `/jarvis` 一个命令。**ponder 满血版已随包集成**——装 jarvis 即自带 ponder 十阶段（角色用 skill 工具加载执行），无需单独安装 ponder。
+| 技能（唯一入口） | `skills/jarvis.md` | `~/.dsh/skills/jarvis/SKILL.md` |
+| **ponder 满血技能（随包集成，无需单独装）** | `skills/ponder/` + `skills/ponder-stages/` | `~/.dsh/skills/ponder/` + `~/.dsh/skills/ponder-stages/` |
+| 核心插件 | `src/host/plugin.js`、`src/client/plugin.js` | 注册为核心插件（见下） |
 
 ### 方式 A：作为预设使用（推荐，无代码变更）
 
@@ -37,31 +56,21 @@ cp -r preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/jarvis-org
 mkdir -p ~/.dsh/skills/jarvis
 cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
 
-# 3. ponder 满血技能（随包集成：装 jarvis 即自带，角色可加载执行）
+# 3. ponder 满血技能（随包集成：装 jarvis 即自带）
 mkdir -p ~/.dsh/skills/ponder ~/.dsh/skills/ponder-stages
 cp -r skills/ponder/* ~/.dsh/skills/ponder/
 cp -r skills/ponder-stages/* ~/.dsh/skills/ponder-stages/
 ```
 
-预设确保每次会话注入 Jarvis 老板 persona（含全部铁律）+ 工具行（bash/fs/skill/goal/subagent/web 等）。
+### 方式 B：真实插件包安装（核心工具 + /jarvis 命令）
 
-### 方式 B：启用核心工具（14 工具 + /jarvis 命令）—— 真实插件包安装
+本仓库是标准 Cordis 插件 npm 包（`package.json` 声明 `dsh.bundle.patch` → `cordis.patch.yml`，插件为 ESM 模块）。推荐 **npm bundle 持久化安装**（重启不丢）：
 
-本仓库是**标准 Cordis 插件 npm 包**：`package.json` 声明 `dsh.bundle.patch` → `cordis.patch.yml`，插件实现为 ESM 模块（`src/host/plugin.js` 导出默认插件，用 `ctx.get('tools')`/`ctx.get('commands')` 注册，未用运行时动态 harness）。两种安装路径：
+```bash
+pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
+```
 
-1. **npm bundle（推荐，持久化）**
-   ```bash
-   # 在 dsh web profile 目录（如 ~/.dsh/profiles/web）:
-   pnpm add luke-jarvis   # 或从本仓库本地安装: pnpm add file:../path/to/luke-jarvis
-   # 插件即通过 cordis.patch.yml 挂载，重启不丢失。
-   ```
-2. **preset 内插件行**：在预设/当前会话的 `agent.cordis.yml` 增加一行：
-   ```yaml
-   - id: jarvis-core
-     name: luke-jarvis
-   ```
-
-> 旧建议"cordis_define 动态加载"不再推荐（动态插件在 dsh web 重启后丢失，是客户最容易踩的坑）；本仓库以**持久化 bundle** 为主路径。发布/生产一律用 bundle。
+---
 
 ## 使用
 
@@ -69,28 +78,32 @@ cp -r skills/ponder-stages/* ~/.dsh/skills/ponder-stages/
 /jarvis 我要做一个下沉市场的拼团电商小程序，2 人团 + 24h 成团，怎么设计？
 ```
 
-- 期望行为：需求本质回归 → CEO 用 `jarvis_process` 按本需求定流程（电商场景 CEO 会定义风控/资金闸，但那是 CEO 现场定的，不是插件预设）→ `jarvis_store` 查本项目沉淀 → 现场 web 蒸馏 CEO + 子角色（产品增长/供应链/研发/风控/测试…）→ 逐个校验 + 沉淀 → 设计协同架构 → kickoff 会 → 独思/贾维斯公屏/按需二次会 → 收口交付报告。
-- 也可直接调用 `jarvis_project` → `jarvis_process` → `jarvis_store` → `jarvis_distill` → `jarvis_review` → `jarvis_think_deep` 手工编排。
+- 需求本质回归 → CEO 定领域流程（无预设）→ 查项目沉淀 → 现场蒸馏该领域 CEO/人事/子角色 → 全员 kickoff → 各角色 ponder 独立思考 → 贾维斯公屏协作 → 按需全员评审 → 收口交付。
+- 需求模糊时 CEO 专业引导（jarvis_clarify 5 角度），能力不足时蒸馏行业大佬双人协作。
 
-## 故障排查（防 bug 清单）
+---
+
+## 故障排查
 
 | 症状 | 原因 | 处理 |
 |---|---|---|
-| 员工 role 无效/表现怪异 | 角色卡未过 `jarvis_distill` 校验 / 复用了跨项目或插件示例卡 | 现场重新 web 蒸馏；校验通过再注入 |
-| 角色输出"某大师认为" | 违反防冒名 | 只写"借鉴其方法"；role 卡内必须含防冒名声明 |
-| 需求模糊无处下手 | 未先回归需求本质 | `ask_user_question` 一次 1-2 个关键问题，先定"为谁解决什么、怎样算成功" |
-| /jarvis 无响应 / 工具不存在 | 动态插件重启丢失 | 用 bundle 持久化安装（见安装方式 B） |
-| 团队角色间互相打架 | 缺协同架构 / 冲突未升级 | 每个 role 含协同段；分歧用 `jarvis_review`（吃 thinkA/thinkB + requirement），优先级=需求本质>真实情况>用户需求>专业判断 |
-| 员工不按真实情况判断 | 迎合角色卡 | 铁律 3：真实情况优先；`jarvis_think_deep` 强制七段对抗 + `jarvis_essence` 需求本质审计 |
-| 角色遇到绕不开的问题不吭声 | 缺问题上行 | `jarvis_escalate`（带风险细节+已尝试+决策请求）→ 写贾维斯公屏 → CEO 闭环 |
-| DSH 缺能力硬凑 | 缺能力补足 | `jarvis_capability` 三级路径：复用现有 → 市场高 star → 自研组件化 |
+| 角色输出"某大师认为" | 违反防冒名 | 只写"借鉴其方法" |
+| 角色没跑 ponder | 未强制 | 角色卡第一次分析必须 ponder（run_id 溯源，无则打回） |
+| 需求模糊无处下手 | 未澄清 | jarvis_clarify 引导，5 角度候选问题 |
+| 用户中途插话 | 需求变更 | 全员变更评审会：影响核心=二次评估 / 不影响=追加任务 |
+| 员工能力不行 | 绩效不达标 | jarvis_perf 阶段考核 → 人事猎头补位 |
+| /jarvis 无响应 | 动态插件丢失 | 用 bundle 持久化安装 |
+
+---
 
 ## 许可与引述
 
-- 本产物只提供**领域无关的工作机制**（蒸馏校验/协同/会议/贾维斯公屏/问题上行/能力补足/需求本质审计），不携带任何具体人物/行业模板。具体领域知识由 CEO 现场蒸馏并按项目沉淀。
-- 角色卡必须经由 `jarvis_distill` 校验且含 `source` + 防冒名声明后才可使用；沉淀在项目 `.jarvis/cards/`。
+- 本产物提供**领域无关的工作机制**（蒸馏校验/协同/会议/公屏/问题上行/能力补足/需求本质审计/ponder 集成），不携带任何具体人物/行业模板。
+- 角色卡借鉴真实人物公开方法论，只写"借鉴其方法"不冒充署名；沉淀在项目 `.jarvis/cards/`。
+
 ## 文档
 
-- `docs/ARCHITECTURE.md` — 执行架构图（与代码逐条核对的真实流程：`/jarvis` 13 步回执、17 工具、技能阶段对应、防 bug 铁律）
-- `docs/RELEASE.md` — 发布与安装清单
-- `docs/PUSH.md` — 推送约定
+- `docs/ARCHITECTURE.md` — 执行架构（与代码逐条核对）
+- `docs/REFORM-PLAN.md` — 数字员工公司改造方案（企业级治理）
+- `docs/REFORM-CLARIFY.md` — 需求澄清机制增强方案
+- `docs/UPGRADE-20260828.md` — 升级包说明
