@@ -42,7 +42,7 @@
 │    jarvis_review / jarvis_essence    裁决 + 本质四查             │
 │    jarvis_collab      协同设计（四要素）                         │
 │    jarvis_meeting     会议（kickoff/cycle/close）                │
-│    jarvis_board       统一黑板                                   │
+│    jarvis_board       统一贾维斯公屏                                   │
 │    jarvis_perf        绩效评估（5维 + 连续2次换人）               │
 │    jarvis_escalate    问题上行（风险三件套）                     │
 │    jarvis_capability  能力补足（市场→自研复用）
@@ -61,7 +61,7 @@
 │ ⑥ 项目记忆库  <项目>/.jarvis/（持久化，跨会话）                  │
 │    prototypes/ 真实人物原型    cards/ 虚拟人物卡                 │
 │    process-*.json 流程         components.json 组件             │
-│    board.json 黑板             project.md 项目细节+沟通留痕      │
+│    board.json 贾维斯公屏             project.md 项目细节+沟通留痕      │
 │    lessons.md 经验教训                                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -75,11 +75,11 @@
 | 2 | 定领域流程：阶段/闸门/红线/必须角色/会议触点（无预设，可参考本项目沉淀） | `jarvis_process` | 流程五要素 |
 | 3 | 蒸馏 CEO 角色卡（CEO 是团队内角色非主面板）：web 查证真实大佬 → 存 prototypes/ → distill_guide 提炼独有 HOW → 写六段式卡 → distill+保真度双验 → 注入 | `jarvis_distill_guide`+`jarvis_distill`+`jarvis_fidelity` | CEO 卡 |
 | 4 | 定子角色 → 逐个同样蒸馏+双验+协同设计（四要素+每角色协同段） | `jarvis_collab` | 子角色卡+协同 |
-| 5 | kickoff 全员会：对齐目标/验收+流程闸门+接口契约 → 决议写黑板 | `jarvis_meeting`(kickoff)+`jarvis_board` | 决议/契约 |
-| 6 | 各角色独思/干活（关键决策 think_deep）→ 问题/发现/阻塞写黑板 | `jarvis_think_deep`+`jarvis_board` | 黑板条目 |
-| 7 | 黑板未决阻塞/分歧/接口变更 → 二次会对齐+`jarvis_review` 裁决（吃 thinkA/thinkB+requirement）→ 循环到收敛 | `jarvis_meeting`(cycle)+`jarvis_review`+`jarvis_essence` | 裁决 |
+| 5 | kickoff 全员会：对齐目标/验收+流程闸门+接口契约 → 决议写贾维斯公屏 | `jarvis_meeting`(kickoff)+`jarvis_board` | 决议/契约 |
+| 6 | 各角色独思/干活（关键决策 think_deep）→ 问题/发现/阻塞写贾维斯公屏 | `jarvis_think_deep`+`jarvis_board` | 贾维斯公屏条目 |
+| 7 | 贾维斯公屏未决阻塞/分歧/接口变更 → 二次会对齐+`jarvis_review` 裁决（吃 thinkA/thinkB+requirement）→ 循环到收敛 | `jarvis_meeting`(cycle)+`jarvis_review`+`jarvis_essence` | 裁决 |
 | 8 | CEO 时刻盯人：`jarvis_perf` 5 维评估（成果/完成度/上行健康度[高频异常立即触发]/契合度/深度分），连续 2 次不达标 → 换人（离任→归档→重蒸馏→补位） | `jarvis_perf`+agent_teams `remove_member` | 换人决策 |
-| 9 | 问题上行：技术绕不开/无法抉择 → 禁止跳过 → `jarvis_escalate`（风险细节+已尝试+决策请求）→ 写黑板 → CEO 闭环 | `jarvis_escalate` | 上报记录 |
+| 9 | 问题上行：技术绕不开/无法抉择 → 禁止跳过 → `jarvis_escalate`（风险细节+已尝试+决策请求）→ 写贾维斯公屏 → CEO 闭环 | `jarvis_escalate` | 上报记录 |
 | 10 | 交付版本管理：new_version 打快照（冻结旧版/变更开新版）→ checklist 交付清单（需求本质逐条→交付物→自测，甲方逐条确认）→ status（待确认/已确认/已否决+时限）→ communication 沟通留痕入 project.md | `jarvis_release` | 版本/清单/留痕 |
 | 11 | 收口会：对照领域闸门逐项验收 + 交付清单 → 交付报告（Jarvis 向客户汇报，客户确认即完成） | `jarvis_meeting`(close) | 交付报告 |
 | 12 | 沉淀到项目：角色卡/原型/流程/组件/项目细节/沟通记录/经验 → 下次需求先查记忆直接复用 | `jarvis_store` save | 记忆库更新 |
@@ -93,7 +93,7 @@
 | 阶段二 · 拆解 | 步骤 2（前置） | 决定岗位、任务 DAG |
 | 阶段三 · CEO 定领域流程 | 步骤 2 | jarvis_process 五要素 |
 | 阶段四 · 建队与派活 | 步骤 3-4 | 蒸馏卡 + add_member + create_task |
-| 阶段五 · 会议驱动协作循环 | 步骤 5-7 | kickoff → 独思 → 黑板 → 二次会 |
+| 阶段五 · 会议驱动协作循环 | 步骤 5-7 | kickoff → 独思 → 贾维斯公屏 → 二次会 |
 | 阶段六 · 盯控与接管 | 步骤 8 | jarvis_perf 评估 + 换人 |
 | 阶段七 · 版本化交付与收口 | 步骤 10-12 | jarvis_release + close + 沉淀 |
 

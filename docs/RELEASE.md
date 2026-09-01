@@ -33,7 +33,7 @@ bash scripts/selfcheck.sh
 
 ## 三、功能自检（人工）
 
-- 新会话用 jarvis-org 预设 → 输入 `/jarvis 我要做一个 xx` → 应开始：需求本质回归 → `jarvis_process` 定领域流程（插件无预设，CEO 现场定）→ 查本项目 `.jarvis/` 沉淀 → web 蒸馏 CEO → 定子角色 → 逐卡蒸馏+`jarvis_distill` 校验 → `jarvis_store` 落盘沉淀 → 协同架构 → kickoff 会 → 独思/黑板/按需二次会 → 收口交付。
+- 新会话用 jarvis-org 预设 → 输入 `/jarvis 我要做一个 xx` → 应开始：需求本质回归 → `jarvis_process` 定领域流程（插件无预设，CEO 现场定）→ 查本项目 `.jarvis/` 沉淀 → web 蒸馏 CEO → 定子角色 → 逐卡蒸馏+`jarvis_distill` 校验 → `jarvis_store` 落盘沉淀 → 协同架构 → kickoff 会 → 独思/贾维斯公屏/按需二次会 → 收口交付。
 - `jarvis_distill` 故意喂"缺 source/缺防冒名/缺协同架构"的 CEO 卡 → 必须不通过（防 bug 校验生效）。
 - 角色卡必须来自「项目沉淀（本项目）+ 现场蒸馏」——插件无静态卡；`jarvis_process` 不返回任何领域模板（customized 恒 true）。
 - 重启 dsh web 后核心工具仍在（bundle 持久化安装）——这正是"动态插件重启丢失"的修复点。

@@ -1,7 +1,7 @@
 # luke-jarvis 数字员工公司操作系统 · 改造方案（REFORM-PLAN）
 
-> 版本：v1.5（2026-08-28，v1.5 修订：并入 **B36 前端黑板显示入口**（用户实需：用户要看到黑板内容）——新增 I10 改进项 + 专章 D（client 插件注册 UI slot 只读展示 .jarvis/board.json，DSH dsh-client-ui-slots 体系实证，P1 起步/P2 增强，渲染数=实存数验收））｜性质：**方案交付**（本单=出方案，不实施）｜依赖证据：T1 现状体检（架构师，全文件:行号引证，质量 t4 逐条复核通过）、T2 现代办公基准（办公体系专家）、T3 差距分析+目标架构（CEO）、T4 质量审视（质量，7 条反面问题）、黑板 B1-B36。
-> 黑板编号以 captain 重编号后的最新号为准：B10-B12=目标架构裁决（CEO）、B13=ponder 接入（接口变更）、B14=质量风险（T4）、B15=分层升级（接口变更）、B16=CEO 黑板翻译职责（接口变更）、B17=H2 行为断言修订（架构师+质量对质）、B18=质量对 ponder 三洞质问、B21=质量对分层三问质问。
+> 版本：v1.5（2026-08-28，v1.5 修订：并入 **B36 前端贾维斯公屏显示入口**（用户实需：用户要看到贾维斯公屏内容）——新增 I10 改进项 + 专章 D（client 插件注册 UI slot 只读展示 .jarvis/board.json，DSH dsh-client-ui-slots 体系实证，P1 起步/P2 增强，渲染数=实存数验收））｜性质：**方案交付**（本单=出方案，不实施）｜依赖证据：T1 现状体检（架构师，全文件:行号引证，质量 t4 逐条复核通过）、T2 现代办公基准（办公体系专家）、T3 差距分析+目标架构（CEO）、T4 质量审视（质量，7 条反面问题）、贾维斯公屏 B1-B36。
+> 贾维斯公屏编号以 captain 重编号后的最新号为准：B10-B12=目标架构裁决（CEO）、B13=ponder 接入（接口变更）、B14=质量风险（T4）、B15=分层升级（接口变更）、B16=CEO 贾维斯公屏翻译职责（接口变更）、B17=H2 行为断言修订（架构师+质量对质）、B18=质量对 ponder 三洞质问、B21=质量对分层三问质问。
 
 ---
 
@@ -23,7 +23,7 @@
 
 | 编号 | 级别 | 缺陷 | 证据 |
 |---|---|---|---|
-| H1 | P0 | **系统级状态零持久化**：全插件无任何 fs 操作（grep 实测 0 命中）；jarvis_store save 只返回路径（:363-370）、jarvis_board 纯函数靠调用方回传整个 JSON（:1240-1305，ID 按数组长度重算、无并发写保护）、jarvis_release 无落盘（:1167-1177）、jarvis_perf history 靠入参（:1014）——"沉淀/黑板/版本"是口头契约非系统特性 | plugin.js 全局 0 fs；**黑板并发写 ID 冲突已在本次团队运行中实证**：captain 并发写重编号 B13-B15 + 质量连续 4 次追加黑板撞 ID（重编号 B22-B26）——现场实证非推演 |
+| H1 | P0 | **系统级状态零持久化**：全插件无任何 fs 操作（grep 实测 0 命中）；jarvis_store save 只返回路径（:363-370）、jarvis_board 纯函数靠调用方回传整个 JSON（:1240-1305，ID 按数组长度重算、无并发写保护）、jarvis_release 无落盘（:1167-1177）、jarvis_perf history 靠入参（:1014）——"沉淀/贾维斯公屏/版本"是口头契约非系统特性 | plugin.js 全局 0 fs；**贾维斯公屏并发写 ID 冲突已在本次团队运行中实证**：captain 并发写重编号 B13-B15 + 质量连续 4 次追加贾维斯公屏撞 ID（重编号 B22-B26）——现场实证非推演 |
 | H2 | P1 | **绩效换人单信号误触发 + 历史记账双失配**（B17 复现实锤，行为断言）：①`action = !okThis && (isTriggered \|\| totalStrikes>=2) ? 换人`（:1051）→ **escalation=0 即首判换人**，其余全优（score=69）也不例外；②`(isTriggered?1:1)` 恒真死代码（:1050）、strikes 未用（:1049）；③场景1：history=[F,F]+本次全优 → score=100 → action=继续，**达标即清零历史**，两次旧败被忽略；④场景2：fail,pass,fail 非连续 → totalStrikes=3 → 换人，**旧账按全量累计非"连续2次"语义**（实测注入复现） | plugin.js:1044-1057；实测直调复现 |
 | H3 | P1 | **essence 审计闸可绕过**：board resolve() 关闭条目不检查 essenceChecked（:1277-1280）；needsMeeting 只看阻塞/未决数（:1290-1294），未审计决策仅以提示形式附加（:1302-1303）——"决策必过需求本质审计定稿"是口头闸 | plugin.js:1270-1305 |
 
@@ -88,13 +88,13 @@ D1 组织=无常设组织仅按单建临时团队；D2 目标=无 OKR/目标-任
 | I1 jarvis_perf 触发逻辑（H2） | 删恒真三元+未用 strikes；**先定行为规范（质量 R7，B17 修订版）**：①首次异常（escalation=0 单信号）=评估+补强观察，不换人；②换人触发=连续 2 次不达标；③"连续"语义=最近历史序列中不达标计数，**单次全优不清零旧账**（修复 B17 场景1）；④历史记账按最近窗口（如近 3 次）判定，修 B17 场景2 全量累计；⑤换人动作前 board 留痕评估依据；规范过 jarvis_essence 审计后实施 | plugin.js:1044-1057 重写 + 单测增"escalation=0 单异常不换人/历史不达标不被单次全优清零/非连续不触发换人"用例 | 行为规范先定稿；单测断言 |
 | I2 essence 闸硬化（H3） | board resolve 决策类条目前强制要求 essenceChecked 或显式豁免留痕；未审计决策 resolve 需二次确认 | plugin.js:1270-1305 加闸 | 单测：resolve 未审计决策被拦截 |
 | I3 全局持久化接入（H1） | jarvis_state 统一服务（原子写/锁/JSON schema）；store/board/release/perf/meeting 改读写真实文件。**B24 最小切面修订（质量试错演练）**：P0 第一步**只接 board 一个工具**（本次 B13-B24 并发写 ID 冲突=实证现场，最小可运行单元）验证后再复制到其余工具——不一步到位；并发写测试形态定义：≥2 并发写同一 board、断言条目零丢失+ID 唯一、动作=两进程各自 add 10 条。**架构师 B32 P0 验收样例（v1.4 引用）**：①ID 策略=持久化 seq 单调计数器（弃用 plugin.js:1270 长度重算——B13-B15/B22-B26 实证撞 ID；首次接入对既有 items 取 max 作初值、旧 ID 不重排）；②原子写=tmp+rename 同目录（writeFileSync→renameSync，失败不留半写文件，JSON.parse 失败保留旧版；前置 read-merge-write 消除旧读覆盖主窗口，跨进程 lockfile 作可选二道）；③写后回读校验=写毕回读断言 seq/items 数，失败返回可上行错误不静默。**B32 v1.1 精化 4 点（全部采纳）**：①并发语义拆分——单进程（串行/Promise.all 伪并发）断言 ID 唯一+seq 严格+1；双进程真并发+无锁断言=文件合法+无半写+至少一写者 10 条完整（弱保证）；双进程+lockfile 才断言 20/20（强保证，可选态）；②回读断言改 seq 单调+JSON 可解析+本写者写入 ID 存在，精确 length 相等只留单进程用例（规避并发窗口误报）；③lockfile 重试按 EEXIST 错误码判定，超时走 escalate 上行；④显式标注 POSIX rename 假设，Windows rename 覆盖需先 unlink 或 fallback（防实现期踩坑）。验收=test/state.test.js 六用例（并发 ID 唯一≥2写者×10条/原子写中断/旧读覆盖/回读失败路径/迁移/seq 单调）+61 单测不回归+selfcheck 加 board 完整性体检+落盘率埋点。**注意质量 R6**：写明"零副作用"指不污染外部环境/不改用户代码，state 层仅写 <项目>/.jarvis/ 自有路径 | 新增 tools + .jarvis/ 既有路径（零迁移） | test/state.test.js 六用例+61 基线不回归；长会话落盘回读测试；并发写不丢条目（≥2 写者×10 条，ID 唯一）；selfcheck board 完整性体检 |
-| I4 文档-工具数对账（S1） | selfcheck 加自动对账：README/RELEASE/ARCHITECTURE 工具数 vs TOOLS.length，漂移即失败。**B24 扩展：文档-黑板编号同步并入对账**（交付物引用 board 编号须与 board.json 实存 ID 一致，防本次 B23/B25 重编号漂移重演）。**回应质量 R2** | scripts/selfcheck.sh | selfcheck 对账项通过/漂移即红 |
+| I4 文档-工具数对账（S1） | selfcheck 加自动对账：README/RELEASE/ARCHITECTURE 工具数 vs TOOLS.length，漂移即失败。**B24 扩展：文档-贾维斯公屏编号同步并入对账**（交付物引用 board 编号须与 board.json 实存 ID 一致，防本次 B23/B25 重编号漂移重演）。**回应质量 R2** | scripts/selfcheck.sh | selfcheck 对账项通过/漂移即红 |
 | I5 e2e 真实化（S2） | /jarvis 在真 DSH 会话跑通（命令→建队→取卡→落盘→回读复用）+ 落盘回读断言 | test/e2e-flow.test.mjs 改造 + docs 修正 | 真会话跑通；非 handler 仿真 |
 | I6 需求分级与识别（S5） | 分级改"复杂度+风险+领域"多信号；identifyIndustry 实识别 | plugin.js:271-274、1313-1322 | 分级不纯按长度 |
 | I7 **ponder 接入角色思维器（B13）** | 见 §五专章 | skills/jarvis.md + preset + plugin.js:809 | 见 §五 |
 | I8 **问题升级分层（B15）** | 见 §六专章 | plugin.js:667-716 + skills + docs | 见 §六 |
-| I9 **CEO 黑板翻译职责（B16，v1.3 按 B26 加机械判据）** | ①CEO 时刻关注黑板（除盯员工能力外）；②用户/主面板需求**不原样上黑板**——jarvis_board 或流程层设**显式翻译步骤**（先翻译再落条目）：把用户原话转为团队可执行的目标/验收/边界描述；③黑板写入规范：条目区分**原始需求来源（用户原话，带引用）**与 **CEO 翻译后条目（目标/验收/边界）**，两者并存可追溯；④员工直接照抄用户原话上黑板=**打回**，由 CEO 重译；⑤与需求本质回归（essence）衔接：**翻译即本质回归的执行层动作**，红线：翻译≠篡改；⑥验收判据：无翻译的裸用户条目=不合格。**B26 机械判据三件套（防 H3 同款口头闸）**：a) 原始需求条目与翻译条目并存且 sourceRef 互链（用户原话不删原文，另立条目）；b) 翻译条目必须含 **目标/验收/边界 三要素字段**（缺一=打回）+ 指定 translator=CEO（缺失或非 CEO=打回）；c) **字面相似度机械检查**：翻译条目与用户原话逐字重复率>70% 或译文只是原文改写无新增三要素 = 判"原样照抄"打回。**翻译 schema 四字段**：translator / sourceRef / triple(目标,验收,边界) / addedNote(翻译新增项来源标注：CEO 推断 or 用户确认过——未标注新增=篡改打回)。**翻译≠篡改机械保障**：jarvis_essence 四查应用于翻译动作（防迎合=不得把"简单做个表格"翻成"建设数据中台"；防幻觉=新增要素必须 addedNote 标注来源；真实优先=原话关键约束[金额/期限/范围]在翻译条目保留可追溯，**原话要素 vs 译文案差检查，丢关键约束=曲解原意打回**） | skills/jarvis.md 黑板协议段（:95-99）+ plugin.js jarvis_board 加"来源/译者/三要素/addedNote"字段与翻译层校验（现状 :1227-1234 仅 board/add/resolve/audited/role，均为目标态）+ 组织职责（preset）+ essence 四查衔接 | 单测断言：照抄打回（相似度>70%）；丢关键约束打回（差集检查）；翻译条目缺 translator/非 CEO=打回；缺三要素=打回；黑板每条用户类条目有对应翻译条目 |
-| I10 **前端黑板显示入口（B36，v1.5 按用户需求新增）** | 用户需要看到黑板内容——提供**前端显示入口**：client 插件注册 UI slot 展示 `.jarvis/board.json`（条目/类型/状态/未决项/阻塞/决策审计标记 essenceChecked），P0/P1 **只读浏览起步**（直接读 board.json），P2 可加刷新/筛选/按角色过滤；与既有 P2"client UI 起步（黑板/团队可视化）"合并（S3 从"空壳可扩展"升级为实需）。**质量 B36 两问回应**：①渲染数=board.json 实存条目数（渲染=数据源，刷新不漂移；空壳环境=降级为"黑板文件可读"说明文档）；②只读展示不写库不撞 H1 并发写主路径，但**建议依赖 P0 jarvis_state 持久化层之后接入**（读到的必是落盘真相，展示旧数据=bug） | src/client/plugin.js 从空壳改真实 client 插件（参考 DSH `dsh-client-ui-slots`/`dsh-client-ui-conversation`/`dsh-client-connection` 注册模式，~/.dsh/profiles/web/node_modules/@deepseek-ai/ 实存）；package.json exports `./client` 已存在 | web 界面打开黑板视图=board.json 全部条目（含类型/状态/ID），渲染数=实存数；无 UI 环境降级说明；P0 后接入则只读展示与落盘一致 |
+| I9 **CEO 贾维斯公屏翻译职责（B16，v1.3 按 B26 加机械判据）** | ①CEO 时刻关注贾维斯公屏（除盯员工能力外）；②用户/主面板需求**不原样上贾维斯公屏**——jarvis_board 或流程层设**显式翻译步骤**（先翻译再落条目）：把用户原话转为团队可执行的目标/验收/边界描述；③贾维斯公屏写入规范：条目区分**原始需求来源（用户原话，带引用）**与 **CEO 翻译后条目（目标/验收/边界）**，两者并存可追溯；④员工直接照抄用户原话上贾维斯公屏=**打回**，由 CEO 重译；⑤与需求本质回归（essence）衔接：**翻译即本质回归的执行层动作**，红线：翻译≠篡改；⑥验收判据：无翻译的裸用户条目=不合格。**B26 机械判据三件套（防 H3 同款口头闸）**：a) 原始需求条目与翻译条目并存且 sourceRef 互链（用户原话不删原文，另立条目）；b) 翻译条目必须含 **目标/验收/边界 三要素字段**（缺一=打回）+ 指定 translator=CEO（缺失或非 CEO=打回）；c) **字面相似度机械检查**：翻译条目与用户原话逐字重复率>70% 或译文只是原文改写无新增三要素 = 判"原样照抄"打回。**翻译 schema 四字段**：translator / sourceRef / triple(目标,验收,边界) / addedNote(翻译新增项来源标注：CEO 推断 or 用户确认过——未标注新增=篡改打回)。**翻译≠篡改机械保障**：jarvis_essence 四查应用于翻译动作（防迎合=不得把"简单做个表格"翻成"建设数据中台"；防幻觉=新增要素必须 addedNote 标注来源；真实优先=原话关键约束[金额/期限/范围]在翻译条目保留可追溯，**原话要素 vs 译文案差检查，丢关键约束=曲解原意打回**） | skills/jarvis.md 贾维斯公屏协议段（:95-99）+ plugin.js jarvis_board 加"来源/译者/三要素/addedNote"字段与翻译层校验（现状 :1227-1234 仅 board/add/resolve/audited/role，均为目标态）+ 组织职责（preset）+ essence 四查衔接 | 单测断言：照抄打回（相似度>70%）；丢关键约束打回（差集检查）；翻译条目缺 translator/非 CEO=打回；缺三要素=打回；贾维斯公屏每条用户类条目有对应翻译条目 |
+| I10 **前端贾维斯公屏显示入口（B36，v1.5 按用户需求新增）** | 用户需要看到贾维斯公屏内容——提供**前端显示入口**：client 插件注册 UI slot 展示 `.jarvis/board.json`（条目/类型/状态/未决项/阻塞/决策审计标记 essenceChecked），P0/P1 **只读浏览起步**（直接读 board.json），P2 可加刷新/筛选/按角色过滤；与既有 P2"client UI 起步（贾维斯公屏/团队可视化）"合并（S3 从"空壳可扩展"升级为实需）。**质量 B36 两问回应**：①渲染数=board.json 实存条目数（渲染=数据源，刷新不漂移；空壳环境=降级为"贾维斯公屏文件可读"说明文档）；②只读展示不写库不撞 H1 并发写主路径，但**建议依赖 P0 jarvis_state 持久化层之后接入**（读到的必是落盘真相，展示旧数据=bug） | src/client/plugin.js 从空壳改真实 client 插件（参考 DSH `dsh-client-ui-slots`/`dsh-client-ui-conversation`/`dsh-client-connection` 注册模式，~/.dsh/profiles/web/node_modules/@deepseek-ai/ 实存）；package.json exports `./client` 已存在 | web 界面打开贾维斯公屏视图=board.json 全部条目（含类型/状态/ID），渲染数=实存数；无 UI 环境降级说明；P0 后接入则只读展示与落盘一致 |
 
 ### 新增（9 子系统，每项职责/与 17 工具关系/载体）
 
@@ -117,26 +117,26 @@ D1 组织=无常设组织仅按单建临时团队；D2 目标=无 OKR/目标-任
 
 ---
 
-## 六之专章 D：前端黑板显示入口（黑板 B36，P1/P2 级，用户实需）
+## 六之专章 D：前端贾维斯公屏显示入口（贾维斯公屏 B36，P1/P2 级，用户实需）
 
 ### D.1 需求与现状
-用户原话："是不是还应该提供一个前端显示入口，用户需要看到黑板上的内容"——数字员工公司的**用户侧可视化**：不能只有 Jarvis/CEO/员工能读写黑板，用户也要能看到团队在做什么、黑板上的条目/决策/阻塞。
-现状实证：①`src/client/plugin.js` = 空壳 `apply(ctx){}`（方案 S3 已指出 client 空壳，现升级为实需）；②DSH client 插件体系真实存在（`~/.dsh/profiles/web/node_modules/@deepseek-ai/` 下 `dsh-client-ui-slots`/`dsh-client-ui-conversation`/`dsh-client-connection`，main=lib/index.js 为可引用注册模式）——client 插件可通过 UI slot 注册前端视图；③数据源现成：`<项目>/.jarvis/board.json` 即黑板真相（本项目已实存 36 条）。
+用户原话："是不是还应该提供一个前端显示入口，用户需要看到贾维斯公屏上的内容"——数字员工公司的**用户侧可视化**：不能只有 Jarvis/CEO/员工能读写贾维斯公屏，用户也要能看到团队在做什么、贾维斯公屏上的条目/决策/阻塞。
+现状实证：①`src/client/plugin.js` = 空壳 `apply(ctx){}`（方案 S3 已指出 client 空壳，现升级为实需）；②DSH client 插件体系真实存在（`~/.dsh/profiles/web/node_modules/@deepseek-ai/` 下 `dsh-client-ui-slots`/`dsh-client-ui-conversation`/`dsh-client-connection`，main=lib/index.js 为可引用注册模式）——client 插件可通过 UI slot 注册前端视图；③数据源现成：`<项目>/.jarvis/board.json` 即贾维斯公屏真相（本项目已实存 36 条）。
 
 ### D.2 设计（最简可运行单元起步）
-- **只读浏览起步**：client 插件注册 UI slot，读 `<项目>/.jarvis/board.json` 渲染黑板——每条：ID / 类型(问题/发现/决策/风险/阻塞/接口变更) / 状态(open/resolved) / 内容 / 角色 / 决策审计标记(essenceChecked) / 时间；未决项/阻塞项高亮。
+- **只读浏览起步**：client 插件注册 UI slot，读 `<项目>/.jarvis/board.json` 渲染贾维斯公屏——每条：ID / 类型(问题/发现/决策/风险/阻塞/接口变更) / 状态(open/resolved) / 内容 / 角色 / 决策审计标记(essenceChecked) / 时间；未决项/阻塞项高亮。
 - **P2 增强**：刷新、按类型/角色筛选、决策审计状态视图、与 jarvis_board 工具写路径联动（写后即见）。
-- **降级**：无 web UI 的环境（headless/无 slot）→ 不报错，文档说明"黑板文件可读"（`read <项目>/.jarvis/board.json`），功能不承诺。
+- **降级**：无 web UI 的环境（headless/无 slot）→ 不报错，文档说明"贾维斯公屏文件可读"（`read <项目>/.jarvis/board.json`），功能不承诺。
 - **与持久化层关系**：只读展示**建议在 P0 jarvis_state 持久化层之后接入**——读到的必是落盘真相；若提前接入，先接"直接读文件"形态（只读不写，不撞 H1 并发写主路径），展示旧数据=bug（质量 B36 问②答案）。
 
 ### D.3 载体与验收
 - 载体：`src/client/plugin.js` 从空壳改真实 client 插件（参考 `dsh-client-ui-slots` 注册模式）+ `package.json` exports `./client`（已存在）。
-- 验收判据（可判定）：①web 界面打开黑板视图 = board.json **全部**条目（渲染数=实存数，逐条含类型/状态/ID）；②刷新后与磁盘文件一致不漂移；③无 UI 环境降级说明存在；④P0 后接入则只读展示与落盘一致（不展示旧数据）。
+- 验收判据（可判定）：①web 界面打开贾维斯公屏视图 = board.json **全部**条目（渲染数=实存数，逐条含类型/状态/ID）；②刷新后与磁盘文件一致不漂移；③无 UI 环境降级说明存在；④P0 后接入则只读展示与落盘一致（不展示旧数据）。
 - 四象限：改进（I10，S3 升级为实需）；路线图：P1 起步（与 I3 持久化同批或紧随）/P2 增强（与 client UI 合并）。
 
 ---
 
-## 五、专章 A：ponder 技能接入角色思维器（黑板 B13，P1/P2 级）
+## 五、专章 A：ponder 技能接入角色思维器（贾维斯公屏 B13，P1/P2 级）
 
 ### 5.1 已核实事实
 1. ponder 真实存在：/root/.dsh/skills/ponder/（SKILL.md 19KB 十阶段流水线 + scripts/{orchestrate,step-guard,evolve,pipeline-metrics,weights}.js + resources/）。十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（八卦镜 8 维并行 agent、辩论立论 agent、step-guard 守卫 init/after/status）。**子 agent 必须全部返回才能进入下一步**（SKILL.md 硬约束）。
@@ -181,11 +181,11 @@ stakes 由调用方按 jarvis 既有语义传参（think_deep 参数），插件
 
 ### 5.6 已知边界与跳过机制（诚实标注）
 十阶段含并行 agent、耗时显著高于七段——仅 high 启用，且按 ponder 硬约束等待全部子 agent 返回；本设计稿为方案级推演（本单=出方案）；ponder 在 web_search 受限环境的真实可用性须集成验收实测（agent-reach 不可用时走 WebSearch/WebFetch 兜底），不预先断言已通。
-**跳过规则（B18 Q2 的答案，防"高赌注必走 ponder"变口头闸）**：高赌注允许跳过的条件=①ponder 技能不可用（成员无 skill 工具/运行时缺失，须 jarvis_escalate 上报留痕）；②用户明示成本优先。**跳过必须显式声明+可审核**（think_deep 输出含 skipReason 字段 + 黑板留痕），**评审/裁决时按"未做深度对抗"降级标注置信度**；任何静默降级（贴"已 ponder"标签但没跑）视为 H3 同款违规，质量闸打回。谁判定跳过得当=CEO 复核（对照 B16 翻译职责与 B15 分层升级链路）。
+**跳过规则（B18 Q2 的答案，防"高赌注必走 ponder"变口头闸）**：高赌注允许跳过的条件=①ponder 技能不可用（成员无 skill 工具/运行时缺失，须 jarvis_escalate 上报留痕）；②用户明示成本优先。**跳过必须显式声明+可审核**（think_deep 输出含 skipReason 字段 + 贾维斯公屏留痕），**评审/裁决时按"未做深度对抗"降级标注置信度**；任何静默降级（贴"已 ponder"标签但没跑）视为 H3 同款违规，质量闸打回。谁判定跳过得当=CEO 复核（对照 B16 翻译职责与 B15 分层升级链路）。
 
 ---
 
-## 六、专章 B：问题升级分层规则（黑板 B15，P1 级）
+## 六、专章 B：问题升级分层规则（贾维斯公屏 B15，P1 级）
 
 ### 6.1 已核实事实
 jarvis_escalate（plugin.js:667-716）：完整性校验已有（缺问题/风险/决策请求→打回 :700-705）；升级对象写死"CEO/jarvis_review"（:710）；无"内部消化优先"显式步骤、无层级字段、无"内部已尝试消化"记录。
@@ -214,7 +214,7 @@ CEO（团队内角色，独立决策主体）
 - 校验：employee 缺 internalAttempts → 打回"先走内部消化再上报"；employee 且 toUser=true → 打回"员工不得直接透传用户侧"；owner=user 且 fromLevel=employee → 打回/降级 ceo；
 - output 新增 `path`（员工→CEO→Jarvis→用户链上当前节点）；
 - boardEntry 阻塞条目追加"内部尝试：<摘要>；期望层：<owner>"——CEO 闭环可评判已消化程度；
-- **B21 Q1 的答案（防口头闸）**：透传判定不做文本约定——escalate 记录含 `toUser` 标记 + 调用链 `path` + 黑板 sourceRef，单测强制"员工 toUser=true 无 internalAttempts=打回"，集成层留痕可查；任何绕过（模型直接 ask_user_question 用户）依靠 B16 黑板翻译职责（CEO 时刻盯黑板，发现员工直问用户即登记违规留痕，perf 评估采信）；
+- **B21 Q1 的答案（防口头闸）**：透传判定不做文本约定——escalate 记录含 `toUser` 标记 + 调用链 `path` + 贾维斯公屏 sourceRef，单测强制"员工 toUser=true 无 internalAttempts=打回"，集成层留痕可查；任何绕过（模型直接 ask_user_question 用户）依靠 B16 贾维斯公屏翻译职责（CEO 时刻盯贾维斯公屏，发现员工直问用户即登记违规留痕，perf 评估采信）；
 - compat：老调用默认 fromLevel=employee + internalAttempts 缺省 → 打回提示补记录（行为变更，**改前先核对 test/plugin.test.js 中 escalate 相关用例并同步更新，防回归，呼应质量 R4 同款风险与质量 B14③**）。
 
 ### 6.4 ponder 采访/无知自检阶段约束（并入专章 A）
@@ -225,15 +225,15 @@ CEO（团队内角色，独立决策主体）
 
 ### 6.5 验收判据（可判定）
 - 单测：`(role=员工,toUser=true,internalAttempts='')`→打回且提示"先内部消化"；`(fromLevel=employee,owner=user)`→打回/降级；补全后 ok 且 path 含 CEO 节点；
-- **B21 Q2 的答案（消化有效性=双签名防静默压下）**：CEO"消化有效"的判定=①黑板该阻塞条目 **resolved**；②有 `jarvis_review` 或二次会 **裁决记录**（写入 board 决策条目）；两者缺一 = 消化未闭环，按 B16 职责 CEO 必须补齐——消化不是口头承诺，是可复核的双签名事件；H3 修复（I2 essence 闸）同步保证 resolve 不绕过审计；
+- **B21 Q2 的答案（消化有效性=双签名防静默压下）**：CEO"消化有效"的判定=①贾维斯公屏该阻塞条目 **resolved**；②有 `jarvis_review` 或二次会 **裁决记录**（写入 board 决策条目）；两者缺一 = 消化未闭环，按 B16 职责 CEO 必须补齐——消化不是口头承诺，是可复核的双签名事件；H3 修复（I2 essence 闸）同步保证 resolve 不绕过审计；
 - **B21 Q3 的答案（透传与回灌接口）**：员工跑 ponder 采访/无知自检时不得 ask_user_question 直达用户——先问 CEO/内部裁决；CEO 判定"角色卡办不到需用户事实"→ 汇总提炼（B16 翻译）后由主面板问用户（带选项）；**用户回答按 ponder run_id 回灌**：写入 .jarvis/ponder-runs/<run_id>/user-input.json，ponder 侧通过 orchestrate/storeStep 供 interview 画像与后续阶段读取——接口在 t5 明确，不做静默转述；谁判定透传=CEO 复核（员工自判视为待确认，须 CEO 确认后才透传）；
 - 集成（e2e 真会话）：员工遇"需用户偏好"问题 → 先见 CEO 消化动作、无即问即透传；CEO 消化不了 → 汇总后 Jarvis 问用户；回答按 run_id 回灌后闭环；
 - 回归：61 基线+新增 escalate 用例全绿；
-- **回应质量 t4"别变成口头闸"**：判定机制=上行记录字段（internalAttempts/path/owner/toUser）机械校验（单测级强制）+ 黑板留痕（boardEntry 含内部尝试 + 双签名 closed 事件），双闸可复核，非纯协议纸面。
+- **回应质量 t4"别变成口头闸"**：判定机制=上行记录字段（internalAttempts/path/owner/toUser）机械校验（单测级强制）+ 贾维斯公屏留痕（boardEntry 含内部尝试 + 双签名 closed 事件），双闸可复核，非纯协议纸面。
 
 ---
 
-## 六之专章 C：可行性闸门（黑板 B22，P1 级治理改进）
+## 六之专章 C：可行性闸门（贾维斯公屏 B22，P1 级治理改进）
 
 > 需求本质：用户可能不懂"领域技术"、提出不可能实现的要求——必须在进入实际开发之前反馈出来不予接受（对齐真实企业需求评审）。
 
@@ -258,10 +258,10 @@ CEO（团队内角色，独立决策主体）
 
 ### C.3 反馈与处置
 - 不可行项向用户反馈=**依据**（为什么不可行，引事实/文档：OPS-QA/plugin 边界/能力清单）+ **可替代方向**（降级/换路径/拆分）；
-- 反馈留痕入黑板（type=决策，owner=user 待确认）——**不静默接受也不静默丢弃**；闸记录与翻译条目 **sourceRef 互链**（原话可回溯，B30 Q2① 升级 B26 schema）；
+- 反馈留痕入贾维斯公屏（type=决策，owner=user 待确认）——**不静默接受也不静默丢弃**；闸记录与翻译条目 **sourceRef 互链**（原话可回溯，B30 Q2① 升级 B26 schema）；
 - 用户确认接受替代 = 改写需求（CEO 翻译，B16）再进 DAG；
 - **"待澄清"强制优先于"不可行"（B30 Q2②）**：evidence 不足/判据未实证/需求有第二种合理解读 → verdict 必须=待澄清走用户确认；**无澄清记录直接判不可行=打回**；
-- 用户坚持原意 = 记录"**明确否决项**"进黑板，**含三件套（B30 Q2③）**：`用户坚持原话 + CEO 依据 + 替代方向`（owner=user，status=否决），不静默丢弃；**用户有权走 B15 分层 escalate 到主面板复核**（否决后可申诉，CEO 对申诉不得以"已记录"打发，须响应闭环）；
+- 用户坚持原意 = 记录"**明确否决项**"进贾维斯公屏，**含三件套（B30 Q2③）**：`用户坚持原话 + CEO 依据 + 替代方向`（owner=user，status=否决），不静默丢弃；**用户有权走 B15 分层 escalate 到主面板复核**（否决后可申诉，CEO 对申诉不得以"已记录"打发，须响应闭环）；
 - **软困难处置（B30 Q2④）**：成本/时间类困难不得以"不可行"名义拒——先给拆分/分期替代，用户仍拒绝才记否决。
 
 ### C.4 执行者与质量审视
@@ -272,7 +272,7 @@ CEO（团队内角色，独立决策主体）
 1. 进入开发的需求项均有**可行性闸记录**（过闸时间/裁决人/依据）；
 2. 方案含不可行项示例（headless 不支持 tools/commands、web_search 不可用时要求实时联网）——示例已写入 C.2；
 3. 无"静默接受不可行项"路径：不可行项必有反馈留痕（依据+替代方向）；
-4. 无"静默丢弃被拒项"路径：用户坚持原意项=黑板"明确否决项"记录（三件套完整）；
+4. 无"静默丢弃被拒项"路径：用户坚持原意项=贾维斯公屏"明确否决项"记录（三件套完整）；
 5. **不可行缺 evidence 或缺 alternative → 自动打回（单测断言，B30 新增）**；
 6. **"资源类困难误判不可行"反例测试（B30 新增）**：注入"成本高/时间紧"型需求 → 断言 verdict≠不可行（须=待澄清或可行+拆分分期替代），直接判不可行=用例失败。
 
@@ -298,21 +298,21 @@ CEO（团队内角色，独立决策主体）
 ## 八、分阶段路线图（改造按"诊断→解耦→赋能→迭代"，最简自治单元起步，无指标不上线）
 
 ### P0 · 打地基（先砍官僚税再上系统）
-目标：修 H1 持久化 + 清理（死代码/旧库）——让"沉淀/黑板/版本"从口头契约变系统特性。
-任务：**I3 最小切面先行——只接 board 一个工具**（本次 B13-B24 并发写 ID 冲突=实证现场，最小可运行单元；**验收样例=架构师 B32 v1.1 精化版：seq 单调 ID+tmp/rename 原子写+回读校验+test/state.test.js 六用例**），验证后再复制到 store/release/perf；删除项（R4 顺序先测后删）；R1 旧库归档；I4 文档对账（含黑板编号同步）。
+目标：修 H1 持久化 + 清理（死代码/旧库）——让"沉淀/贾维斯公屏/版本"从口头契约变系统特性。
+任务：**I3 最小切面先行——只接 board 一个工具**（本次 B13-B24 并发写 ID 冲突=实证现场，最小可运行单元；**验收样例=架构师 B32 v1.1 精化版：seq 单调 ID+tmp/rename 原子写+回读校验+test/state.test.js 六用例**），验证后再复制到 store/release/perf；删除项（R4 顺序先测后删）；R1 旧库归档；I4 文档对账（含贾维斯公屏编号同步）。
 验收闸门：单测全绿（61+新增）；长会话落盘回读测试通过；**并发写测试形态定义**（≥2 写者×各 10 条，断言条目零丢失+ID 唯一）；selfcheck 对账项过。
-**可观察指标（B24① 载体定义，防"无指标不上线"违规）**：沉淀落盘率 = 落盘成功写次数 / 黑板写入动作总次数（埋点=jarvis_board 每个写入动作计数器，P0 起即埋，不必等 P2 metrics）；黑板并发写冲突数→0（并发测试断言计数）。
+**可观察指标（B24① 载体定义，防"无指标不上线"违规）**：沉淀落盘率 = 落盘成功写次数 / 贾维斯公屏写入动作总次数（埋点=jarvis_board 每个写入动作计数器，P0 起即埋，不必等 P2 metrics）；贾维斯公屏并发写冲突数→0（并发测试断言计数）。
 
 ### P1 · 治理与思维器（优先级最高，成本最低）
-目标：修 H2/H3 两个"错误逻辑+口头闸"；接 ponder（B13）+ 分层升级（B15）+ CEO 黑板翻译职责（B16）；目标/知识先行。
-任务：R7 行为规范定稿（B17 修订版）+ I1 perf 修复；I2 essence 闸硬化；I7 ponder 接入（skills+preset+tool 描述+衔接契约+三洞修补 B18+**per-run guard 文件实锤落地 B24⑤⑥**）；I8 分层升级（escalate 字段+校验+单测+双签名 B21）；I9 CEO 黑板翻译职责（B16/B26：机械判据三件套+翻译 schema 四字段）；**专章 C 可行性闸门（B22）**；N jarvis_okr + jarvis_wiki（最小可行版）；I5 e2e 真实化（P1 尾）。
-验收闸门：单测断言（H2 场景不误换人/未审计决策被拦截/员工直问用户打回/员工照抄用户原话上黑板=打回）；真会话跑通 ponder 十阶段且喂 review 可裁决（run_id 溯源+字段级校验）；OKR/Wiki 最小版可用（目标链可查/10 问命中≥8）；黑板条目含来源字段且每条用户类条目有 CEO 翻译条目（无翻译裸条目=不合格）。
-可观察指标：误换人率→0；未审计决策绕过数→0；员工直达用户提问数→0；黑板原始需求-翻译并存可追溯率；目标追溯深度；知识检索命中率。
+目标：修 H2/H3 两个"错误逻辑+口头闸"；接 ponder（B13）+ 分层升级（B15）+ CEO 贾维斯公屏翻译职责（B16）；目标/知识先行。
+任务：R7 行为规范定稿（B17 修订版）+ I1 perf 修复；I2 essence 闸硬化；I7 ponder 接入（skills+preset+tool 描述+衔接契约+三洞修补 B18+**per-run guard 文件实锤落地 B24⑤⑥**）；I8 分层升级（escalate 字段+校验+单测+双签名 B21）；I9 CEO 贾维斯公屏翻译职责（B16/B26：机械判据三件套+翻译 schema 四字段）；**专章 C 可行性闸门（B22）**；N jarvis_okr + jarvis_wiki（最小可行版）；I5 e2e 真实化（P1 尾）。
+验收闸门：单测断言（H2 场景不误换人/未审计决策被拦截/员工直问用户打回/员工照抄用户原话上贾维斯公屏=打回）；真会话跑通 ponder 十阶段且喂 review 可裁决（run_id 溯源+字段级校验）；OKR/Wiki 最小版可用（目标链可查/10 问命中≥8）；贾维斯公屏条目含来源字段且每条用户类条目有 CEO 翻译条目（无翻译裸条目=不合格）。
+可观察指标：误换人率→0；未审计决策绕过数→0；员工直达用户提问数→0；贾维斯公屏原始需求-翻译并存可追溯率；目标追溯深度；知识检索命中率。
 
 ### P2 · 全体系铺开（赋能）
-目标：补齐新增子系统（flow/approval/metrics/iam/minutes+async/org/边界文档）+ 组件注册表（R5）+ client UI 起步（S3 黑板/团队可视化）。
+目标：补齐新增子系统（flow/approval/metrics/iam/minutes+async/org/边界文档）+ 组件注册表（R5）+ client UI 起步（S3 贾维斯公屏/团队可视化）。
 任务：jarvis_flow、jarvis_approval、jarvis_metrics、jarvis_iam、jarvis_minutes+jarvis_async、org.json+BOUNDARIES.md、capability 注册表、client UI v0.1。
-验收闸门：每子系统有可判定验收（见 §四表）；组件注册表真实落盘有验收记录；UI 可看黑板/团队。
+验收闸门：每子系统有可判定验收（见 §四表）；组件注册表真实落盘有验收记录；UI 可看贾维斯公屏/团队。
 可观察指标：决策时延（escalate→闭环）、协作成本（会议/消息数）、员工自主度（无需上报即决策占比）。
 
 ### P3 · 迭代与领域扩展
@@ -329,7 +329,7 @@ CEO（团队内角色，独立决策主体）
 
 - 回归本质：本方案=把 luke-jarvis 改造成现代化办公体系（用户明示主轴 D1）。是，未跑偏为"堆工具"——每项新增都有对应差距行与验收。
 - 防迎合：用户预判"还有很多不足"——本方案不足逐条有 T1 文件:行号证据（质量 t4 独立复核通过），非顺着用户话头乱找毛病；保留项（16 真实性治理超基准、11 成果可观测近基准）如实承认现状优点，不为了"显得不足"贬低现状。I9 翻译职责红线并列此处：翻译=本质回归执行层（为谁解决什么/怎样算成功），**翻译≠篡改——不得在翻译层曲解用户原意**，防"翻译"变成"迎合自己想要的架构"的通道。
-- 防幻觉：全文证据=真实代码行号/实测数字/黑板记录；B13/B15 事实=我亲手核实（ponder 目录、preset 注册、escalate 代码）；推测均标注（H1 并发写推演已在本次实证；ponder 真实可用性待测）。
+- 防幻觉：全文证据=真实代码行号/实测数字/贾维斯公屏记录；B13/B15 事实=我亲手核实（ponder 目录、preset 注册、escalate 代码）；推测均标注（H1 并发写推演已在本次实证；ponder 真实可用性待测）。
 - 真实优先：硬缺陷我亲手 grep/读码复验；文档数字以实测为准（61/11）；"我想要的架构"全部落在四象限建议区，未冒充现状缺陷。
 
 ---
@@ -347,16 +347,16 @@ CEO（团队内角色，独立决策主体）
 ## 附：交付物索引
 
 - 本方案：docs/REFORM-PLAN.md（本文件）
-- 差距分析/四象限裁决：黑板 B10-B12
+- 差距分析/四象限裁决：贾维斯公屏 B10-B12
 - ponder 接入设计稿：.jarvis/ponder-integration-design.md
 - 分层升级设计稿：.jarvis/escalate-layered-design.md
 - 过程证据：.jarvis/board.json（B1-B21）、project.md、process-luke-jarvis-reform.json
 - 现状体检原始报告：架构师 t1 完成回复（inbox 留痕）
-- 质量审视：t4 完成回复（7 条反面问题）+ 黑板 B14/B18/B21
+- 质量审视：t4 完成回复（7 条反面问题）+ 贾维斯公屏 B14/B18/B21
 - 需求变更设计稿：.jarvis/ponder-integration-design.md（B13）、.jarvis/escalate-layered-design.md（B15）
-- v1.1 修订记录：B16（CEO 黑板翻译职责 → I9）、B17（H2 行为断言修订 + R4 修正）、B18（ponder 三洞 → §5.5/5.6）、B21（分层三问 → §6.3/6.5）
+- v1.1 修订记录：B16（CEO 贾维斯公屏翻译职责 → I9）、B17（H2 行为断言修订 + R4 修正）、B18（ponder 三洞 → §5.5/5.6）、B21（分层三问 → §6.3/6.5）
 - v1.2 修订记录：B16 I9 细化（jarvis_board 显式翻译步骤/员工照抄=打回/essence 衔接"翻译=本质回归执行层，翻译≠篡改"/无翻译裸用户条目=不合格）
-- v1.3 修订记录：B22 可行性闸门（→ 专章 C）；B24 质量试错演练（P0 最小切面=先接 board、并发写测试形态、落盘率埋点载体、文档-黑板编号对账并入 I4、ponder per-run guard 实锤）；B26（I9 机械判据三件套+翻译 schema 四字段+essence 应用于翻译）
-- v1.3 定稿同步：版本头黑板引用 B1-B21→B1-B28（实存）；H1 证据行补"质量连撞 4 次 ID（B22-B26）实证"
+- v1.3 修订记录：B22 可行性闸门（→ 专章 C）；B24 质量试错演练（P0 最小切面=先接 board、并发写测试形态、落盘率埋点载体、文档-贾维斯公屏编号对账并入 I4、ponder per-run guard 实锤）；B26（I9 机械判据三件套+翻译 schema 四字段+essence 应用于翻译）
+- v1.3 定稿同步：版本头贾维斯公屏引用 B1-B21→B1-B28（实存）；H1 证据行补"质量连撞 4 次 ID（B22-B26）实证"
 - v1.4 修订记录：质量 B30 对专章 C 最终质问——Q1 闸记录 schema 七字段（item/verdict/evidence/alternative/rejectReason/reviewedBy/techCheckedBy）+硬边界（必引实证）vs 软困难（不得判不可行须给拆分/分期）分级；Q2 误杀防护（sourceRef 互链升级 B26 schema、"待澄清"强制优先于"不可行"、明确否决项三件套+用户可走 B15 申诉到主面板、软困难处置）；C.5 新增"不可行缺 evidence/alternative 自动打回"与"资源类困难误判反例测试"两条验收。
 - v1.4 补：B32 架构师 I3 P0 验收样例并入 I3 行与 P0 任务（seq 单调 ID/tmp+rename 原子写/回读校验/test.state.js 六用例/并发语义拆分：单进程强断言、双进程无锁弱保证、双进程 lockfile 20/20 可选强保证/lockfile EEXIST 判定/POSIX rename 假设标注）；质量 B33 有条件通过已登记。

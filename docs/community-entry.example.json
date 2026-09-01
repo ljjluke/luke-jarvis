@@ -3,7 +3,7 @@
   "name": "贾维斯数字员工公司",
   "nameEn": "Luke Jarvis — Digital Employee Company",
   "author": "ljjluke",
-  "description": "给 DSH 用的领域无关「数字员工公司」操作系统：需求本质回归→CEO 定领域流程（插件无领域预设）→现场 web 蒸馏真实大佬做 CEO/子角色（六段式+证据链+source+防冒名，jarvis_distill 校验）→角色卡/流程沉淀到项目 .jarvis/（本项目角色做的，经验属于项目，后续需求可复用本项目沉淀）→会议驱动协作（kickoff 会→独思→统一黑板→按需二次会+裁决）→问题上行/能力补足组件化→收口交付。插件不含任何静态角色卡与领域模板。",
+  "description": "给 DSH 用的领域无关「数字员工公司」操作系统：需求本质回归→CEO 定领域流程（插件无领域预设）→现场 web 蒸馏真实大佬做 CEO/子角色（六段式+证据链+source+防冒名，jarvis_distill 校验）→角色卡/流程沉淀到项目 .jarvis/（本项目角色做的，经验属于项目，后续需求可复用本项目沉淀）→会议驱动协作（kickoff 会→独思→统一贾维斯公屏→按需二次会+裁决）→问题上行/能力补足组件化→收口交付。插件不含任何静态角色卡与领域模板。",
   "descriptionEn": "A domain-agnostic digital-employee company OS for DSH: requirement-essence first, CEO defines the domain process (plugin presets nothing), live web-distills a real authority into CEO/sub-role cards (six-section + evidence chain + source + anti-impersonation, validated by jarvis_distill). Cards and processes sink into the project .jarvis/ folder (the project's own experience, reusable for later needs). Meeting-driven collaboration: kickoff → solo thinking → shared blackboard → on-demand re-meeting with arbitration, issue escalation, componentized capability build-up. The plugin ships zero static role cards or domain templates.",
   "repo": "https://github.com/ljjluke/luke-jarvis",
   "category": "agent"
