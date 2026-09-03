@@ -1,26 +1,26 @@
 #!/usr/bin/env node
 /**
- * evolve.js — 自进化引擎
+ * evolve.cjs — 自进化引擎
  *
  * 读取收集器数据 → 检测模式 → 产出自适应建议
  * 沙箱验证通过后，建议写入 evolve-rules.json
  *
  * 数据流:
- *   pipeline-metrics.js (收集) → evolve.js (分析) → evolve-rules.json (上线)
+ *   pipeline-metrics.cjs (收集) → evolve.cjs (分析) → evolve-rules.json (上线)
  *
  * 用法:
- *   node skills/ponder/scripts/evolve.js                    — 完整分析 + 出建议
- *   node skills/ponder/scripts/evolve.js status             — 只看统计
- *   node skills/ponder/scripts/evolve.js apply <rule-id>    — 将建议上线为规则
+ *   node skills/ponder/scripts/evolve.cjs                    — 完整分析 + 出建议
+ *   node skills/ponder/scripts/evolve.cjs status             — 只看统计
+ *   node skills/ponder/scripts/evolve.cjs apply <rule-id>    — 将建议上线为规则
  *
  * 验证状态: 用21条真实管道运行数据验证通过
  */
 const fs = require('fs');
 const path = require('path');
-const { WeightRegistry, DEFAULT_WEIGHTS } = require('./weights.js');
-const { dataRoot, initializeDataFile, initializeJsonDataFile, resolvePlugin } = require('../../../scripts/runtime-paths.cjs');
+const { WeightRegistry, DEFAULT_WEIGHTS } = require('./weights.cjs');
+const { dataRoot, initializeDataFile, initializeJsonDataFile, resolvePlugin } = require('./_lib/runtime-paths.cjs');
 // 步骤命名单一真源 + 历史别名兼容层
-const { STEPS, normalizeStep, allStepNamesFor } = require('../../../scripts/step-names');
+const { STEPS, normalizeStep, allStepNamesFor } = require('./_lib/step-names.cjs');
 
 // ══════════════════════════════════════
 //  classifyErrorPattern — 错误归类(贝特森L2: 把行为信号归类成推理偏差类型+检查项)
@@ -81,7 +81,7 @@ function classifyErrorPattern(step, signals) {
 function recallErrors(questionType) {
   var results = [];
   try {
-    var knowledge = require('../../../scripts/knowledge');
+    var knowledge = require('./_lib/knowledge.cjs');
     var refuted = knowledge.listRefuted ? knowledge.listRefuted() : [];
     if (!refuted || refuted.length === 0) {
       if (fs.existsSync(STEP_METRICS_FILE)) {
@@ -118,7 +118,7 @@ const METRICS_FILE = path.join(DATA_DIR, 'metrics', 'pipeline-runs.ndjson');  //
 const STEP_METRICS_FILE = path.join(DATA_DIR, 'metrics', 'step-runs.ndjson'); // 新格式（步骤级别）
 const RULES_FILE = initializeDataFile(
   'evolve-rules.json',
-  resolvePlugin('skills', 'ponder', 'resources', 'evolve-rules.json')
+  resolvePlugin('resources', 'evolve-rules.json')
 );
 
 // ── 获取匹配问题的规则（供 orchestration 层调用）──
@@ -152,7 +152,7 @@ function getMatchingRules(questionType, stepName) {
 //    ① testing 候选fix 长期(>STALE_DAYS天)未通过验证 → 删除(候选堆积成噪音)
 //    ② active 规则长期(>STALE_DAYS天)未命中(lastHit) → 标记 stale(供人工审查是否删)
 //    ③ 权重饱和反转预警(反者道之动): 某系数>=SATURATION_THRESH → 标记可疑过拟合
-//  用法: node skills/ponder/scripts/evolve.js prune
+//  用法: node skills/ponder/scripts/evolve.cjs prune
 // ══════════════════════════════════════
 function prune() {
   const STALE_DAYS = 14;
@@ -202,7 +202,7 @@ function prune() {
 
   // ③ 权重饱和反转预警(反者道之动: 物极必反, 被反复强化到极点的系数将失效)
   try {
-    const { WeightRegistry } = require('./weights.js');
+    const { WeightRegistry } = require('./weights.cjs');
     const reg = new WeightRegistry();
     for (const [k, v] of Object.entries(reg.getAll())) {
       if (typeof v === 'number' && v >= SATURATION_THRESH && !k.startsWith('_')) {
@@ -232,7 +232,7 @@ const THRESHOLDS = {
 // ── pipeline-meta.json 读写 ──
 const PIPELINE_META_FILE = initializeDataFile(
   'pipeline-meta.json',
-  resolvePlugin('skills', 'ponder', 'resources', 'pipeline-meta.json')
+  resolvePlugin('resources', 'pipeline-meta.json')
 );
 
 function readPipelineMeta() {
@@ -246,9 +246,9 @@ function writePipelineMeta(meta) {
 }
 
 /**
- * 将 evolve.js 分析结果映射到 WeightRegistry.integrateFromPipeline() 输入格式，
+ * 将 evolve.cjs 分析结果映射到 WeightRegistry.integrateFromPipeline() 输入格式，
  * 调用权重学习，然后将权重调整记录写入 pipeline-meta.json 的 mutation_history。
- * @param {object} result — evolve.js analyze() 的输出
+ * @param {object} result — evolve.cjs analyze() 的输出
  * @returns {string[]} — 权重调整日志
  */
 function integrateWeightsFromAnalysis(result) {
@@ -748,7 +748,7 @@ function cli() {
       }
     }
     console.log('\n共生成 ' + fixed + ' 个修复方案')
-    if (fixed > 0) console.log('测试命令: node skills/ponder/scripts/evolve.js test-fix <fix-id>')
+    if (fixed > 0) console.log('测试命令: node skills/ponder/scripts/evolve.cjs test-fix <fix-id>')
     return
   }
 

@@ -8,7 +8,7 @@ const path = require('path');
 // DSH 运行环境检测：DSH_HOME / DSH_SESSION_ID 由 DeepSeek Harness 注入。
 const isDSH = !!(process.env.DSH_HOME || process.env.DSH_SESSION_ID);
 
-const pluginRoot = path.resolve(__dirname, '..');
+const pluginRoot = path.resolve(__dirname, '..', '..'); // 技能自包含：<技能根>/scripts/_lib/ → <技能根>
 const projectRoot = path.resolve(process.env.PONDER_PROJECT_DIR || process.cwd());
 const defaultDataDir = process.env.PONDER_DATA_DIR
   ? process.env.PONDER_DATA_DIR

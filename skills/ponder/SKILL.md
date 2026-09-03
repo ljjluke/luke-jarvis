@@ -9,8 +9,8 @@ argument-hint: "<question or decision>"
 本 Skill 可在 Claude Code 与 DeepSeek Harness (DSH) 两种环境运行：
 
 - **Claude Code**：`${CLAUDE_PLUGIN_ROOT}` 指向插件安装根；数据默认写入 `~/.claude/data/skills/ponder/`。
-- **DSH（DeepSeek Harness）**：没有 `CLAUDE_PLUGIN_ROOT` 变量。插件根由脚本自定位（`scripts/runtime-paths.js` 的 `pluginRoot`，即仓库根）；数据默认写入 `~/.dsh/data/ponder/`。
-- **平台无关的路径规则（两种环境通用）**：脚本调用一律写相对形式——从仓库根执行 `node skills/ponder/scripts/...`；engine/resource 文件一律写 `engine/xxx.md`、`skills/<owner>/resources/xxx.json` 的相对路径。以下正文中的所有 `node "${CLAUDE_PLUGIN_ROOT}/..."` 与 `${CLAUDE_PLUGIN_ROOT}/...` 引用，在 DSH 下按上述规则替换为相对路径即可，语义不变。禁止把任何生成文件写入插件/仓库目录。
+- **DSH（DeepSeek Harness）**：没有 `CLAUDE_PLUGIN_ROOT` 变量。本技能目录即根（DSH 技能加载器暴露其磁盘路径，通常是 `~/.dsh/skills/ponder/` 或 luke-jarvis 包内 `skills/ponder/`），脚本由 `scripts/runtime-paths.cjs` 自定位（`__dirname` 向上解析，不依赖 cwd）；数据默认写入 `~/.dsh/data/ponder/`（PONDER_DATA_DIR 可覆盖）。
+- **平台无关的路径规则（两种环境通用）**：本文内所有引用均为**技能内相对路径**——`scripts/step-guard.cjs`、`stages/<阶段>.json`、`engine/<方法>.md`、`resources/<资源>.json` 都相对本技能目录。执行脚本用 `node <本技能目录>/scripts/<脚本>.cjs ...`（或先 `cd` 进本技能目录再按相对路径执行）；读文件用 Read 工具读 `<本技能目录>/<相对路径>`。**禁止把任何生成文件写入插件/技能/仓库目录**——持久数据一律写 PONDER_DATA_DIR 或项目 `.jarvis/`。
 - **交互**：DSH 下用 `ask_user_question` 工具（对应 Claude Code 的 `AskUserQuestion`，一次一问、带选项）。
 - **Agent-Reach**：可选外部能力。Claude Code 的 Setup/SessionStart hooks 会自动安装检查；DSH 下不自动安装，可用 `agent-reach doctor --json` 探活，不可用时走 WebSearch/WebFetch 兜底。
 
@@ -32,12 +32,12 @@ argument-hint: "<question or decision>"
 然后静默初始化本次完整流程：
 
 ```text
-node skills/ponder/scripts/step-guard.js" init <问题摘要>
+node scripts/step-guard.cjs init <问题摘要>
 ```
 
-此守卫只用于完整 `/luke:ponder`，不改变专项 Skill 的独立调用方式。随后输出 📋 **需求画像采集**，再 AskUserQuestion 一次一问，所有问题带选项。**必须覆盖天/地/人/法/物全部五个维度**。每个维度内**穷举追问直到用户在该维度无新信息可提供**——每问完一个问题，自问"这个维度下还有没有需要了解的？"有就继续追问，没有才切到下一维度。⛔ 禁止每个维度只问 1 个问题就收工。每次 AskUserQuestion 返回后，先静默调用 `step-guard.js status`，从 `remaining` 的第一个阶段继续，禁止因交互中断重启或跳步。完成后一两句话总结。⛔ 完成立即进入分析阶段，禁止等待确认。采访产出成功存储后调用 `step-guard.js after interview 0 <certainty>`。
+此守卫只用于完整 `/luke:ponder`，不改变专项 Skill 的独立调用方式。随后输出 📋 **需求画像采集**，再 AskUserQuestion 一次一问，所有问题带选项。**必须覆盖天/地/人/法/物全部五个维度**。每个维度内**穷举追问直到用户在该维度无新信息可提供**——每问完一个问题，自问"这个维度下还有没有需要了解的？"有就继续追问，没有才切到下一维度。⛔ 禁止每个维度只问 1 个问题就收工。每次 AskUserQuestion 返回后，先静默调用 `step-guard.cjs status`，从 `remaining` 的第一个阶段继续，禁止因交互中断重启或跳步。完成后一两句话总结。⛔ 完成立即进入分析阶段，禁止等待确认。采访产出成功存储后调用 `step-guard.cjs after interview 0 <certainty>`。
 
-**无知自检（门控:复用神思赌注判断,可逆小事跳过,高赌注问题必做）**: 五诊画像完成后,框架基于当前画像做一次无知自检——列出2-5个"我知道我不知道"的专业事项。⛔不能写"不确定用户预算"(那是五诊低分维度),必须写**领域敏感事项**(即该领域内五诊的五个通用维度探不到、但会显著影响决策质量的专业维度——例如某个领域特定的约束条件、某个只有该领域从业者才熟悉的评估维度、某个在特定情境下会改变方案可行性的专业前提)。每个无知条目须含:(a)该领域为什么需要知道这件事;(b)当前画像缺少它为什么是风险。能自己查的先查(公开信息),查不到的用 AskUserQuestion 追问用户——追问时**先一句话说明为什么重要**,然后给出2-3个具体选项让用户选择。追问结果注入画像的领域专业维度,后续步骤可引用。若当前画像已足够专业无显著无知,可诚实留空(不凑假无知)。⛔ 无知自检（含追问）完成后才进入分析阶段，禁止跳过追问直接进入。方法见 `${CLAUDE_PLUGIN_ROOT}/engine/socratic-ignorance.md`。
+**无知自检（门控:复用神思赌注判断,可逆小事跳过,高赌注问题必做）**: 五诊画像完成后,框架基于当前画像做一次无知自检——列出2-5个"我知道我不知道"的专业事项。⛔不能写"不确定用户预算"(那是五诊低分维度),必须写**领域敏感事项**(即该领域内五诊的五个通用维度探不到、但会显著影响决策质量的专业维度——例如某个领域特定的约束条件、某个只有该领域从业者才熟悉的评估维度、某个在特定情境下会改变方案可行性的专业前提)。每个无知条目须含:(a)该领域为什么需要知道这件事;(b)当前画像缺少它为什么是风险。能自己查的先查(公开信息),查不到的用 AskUserQuestion 追问用户——追问时**先一句话说明为什么重要**,然后给出2-3个具体选项让用户选择。追问结果注入画像的领域专业维度,后续步骤可引用。若当前画像已足够专业无显著无知,可诚实留空(不凑假无知)。⛔ 无知自检（含追问）完成后才进入分析阶段，禁止跳过追问直接进入。方法见 `engine/socratic-ignorance.md`。
 
 ### 分析阶段
 
@@ -48,17 +48,17 @@ node skills/ponder/scripts/step-guard.js" init <问题摘要>
 ⛔ **神思 → 发散 → 八卦镜 三步严格串行**：发散必须吃神思的产出，八卦镜必须吃发散的产出。禁止把这三步当成三个并行 agent 一起起。八卦镜内部的 8 维度 agent 才是并行的。
 ⛔ 每步必须按以下顺序完整执行。读文件用 Read 工具，禁止 bash echo。十阶段固定为 `interview → shensi → divergence → bagua → plans → converge → score → simulate → debate → synthesis`；评分与情景推演是两个独立阶段，任何一个都不能替代另一个。
 
-每个分析阶段开始前，静默调用 `step-guard.js before <stage>`。若返回 `BLOCKED`，必须先补齐 `missing`，不得继续当前阶段。`before` 返回的 `upstream_certainties` 注入当前推理：低确定性要求增加验证和反例，高确定性可减少重复深挖，但**不得省略阶段、worker 或展示**。每个阶段产生 `certainty`（0-1）；神思、八卦镜和辩论还传递 `reasoning_dynamics`，终态画像在后续阶段持续刷新并由方案阶段优先消费。
+每个分析阶段开始前，静默调用 `step-guard.cjs before <stage>`。若返回 `BLOCKED`，必须先补齐 `missing`，不得继续当前阶段。`before` 返回的 `upstream_certainties` 注入当前推理：低确定性要求增加验证和反例，高确定性可减少重复深挖，但**不得省略阶段、worker 或展示**。每个阶段产生 `certainty`（0-1）；神思、八卦镜和辩论还传递 `reasoning_dynamics`，终态画像在后续阶段持续刷新并由方案阶段优先消费。
 
-阶段输出经 `orchestrate.js step` 成功存储并记录指标后，再静默调用 `step-guard.js after <stage> <完整Subagent数> <certainty>`；若存储失败、worker 缺失或 `after` 返回非 `RECORDED/ALREADY_RECORDED`，不得进入下一阶段。
+阶段输出经 `orchestrate.cjs step` 成功存储并记录指标后，再静默调用 `step-guard.cjs after <stage> <完整Subagent数> <certainty>`；若存储失败、worker 缺失或 `after` 返回非 `RECORDED/ALREADY_RECORDED`，不得进入下一阶段。
 
 ```
 （内部执行顺序，不输出步骤编号和标签）
 🔇 以下为静默内部动作，禁止把命令/stdout/路径展示给用户：
-   - 查历史（node skills/ponder/scripts/orchestrate.js" history <步骤名> <问题类型>）+ 错误警告，结果只注入 prompt 参考
-   - 查进化规则（node skills/ponder/scripts/orchestrate.js" rules <步骤名> <问题类型>）命中的自适应规则，以自然语言融入本步推理参考（和查历史同路径，静默注入不展示命令）
+   - 查历史（node scripts/orchestrate.cjs history <步骤名> <问题类型>）+ 错误警告，结果只注入 prompt 参考
+   - 查进化规则（node scripts/orchestrate.cjs rules <步骤名> <问题类型>）命中的自适应规则，以自然语言融入本步推理参考（和查历史同路径，静默注入不展示命令）
    - 读 JSON prompt / 读引擎文档（用 Read 工具）
-   - 存产出（node skills/ponder/scripts/orchestrate.js" step ...）
+   - 存产出（node scripts/orchestrate.cjs step ...）
    其作用是管线运转，与用户无关，静默完成即可。若历史命中带来新约束/盲点，以自然语言融入本步推理展示，不展示"查到了历史"本身。
 
 📢 以下为该展示给用户的推理步骤（每步都要把过程与结果讲清楚）：
@@ -74,15 +74,15 @@ node skills/ponder/scripts/step-guard.js" init <问题摘要>
 
 | 阶段 | 提示文件 | 目标 | 做法 |
 |-----|---------|------|------|
-| 💭 神思 | `skills/ponder-stages/shensi.json` | 前提审视+跳出常规思维 | 主线程直行，**先产出 stake 字段（赌注判定，全链下游读此字段定门控，schema 强制必填，复用v1.18.37硬判据：任一命中即high/判不清按high/用户郑重即high）**，高赌注问题先审视前提（涉及用户真实情况的前提用 AskUserQuestion 确认），再展示反直觉发现；若前提审视暴露出"问题提法本身预设了未验证前提"则触发问题消解（质疑问题该不该这么问而非在框架内解题，多数问题不触发留空）；前提审视段内部自检损失态度（损失厌恶/参照点依赖/概率权重扭曲，不展示标签，见 `${CLAUDE_PLUGIN_ROOT}/engine/prospect-theory.md`） |
-| 🔭 发散 | `skills/ponder-stages/divergence.json` | 多角度审视 | **必须等神思产出后**主线程直行（吃神思结论），展示6视角，**高赌注问题六视产出后做视角互否**（找1-2对对立视角互质疑再合题，可逆小事跳过），共识须是互否后存活判断非简单汇总 |
-| 🔍 八卦镜 | `skills/ponder-stages/bagua.json` | 发现盲点 | **必须等发散产出后**再起子 agent（吃发散共识）；每维度一个 agent（共8个并行），**必须等全部8个维度 agent 返回并展示盲点表格后**，主线程再汇总为 key_finding 交给方案。不允许在部分维度还在排查时就跳到方案步骤 |
-| 📋 方案 | `skills/ponder-stages/plans.json` | 5-10个可选方案 | **高赌注问题起agent前先做终态画像**（先描述"成了的具体样子"须可判定像验收标准，再反向链拆解到今天第一步，可逆小事跳过），把终态注入每个agent让方案朝终态收敛；每方案一个 agent（并行），**必须等所有方案 agent 返回并展示后**才进入收敛，**高赌注问题每个方案必须经辩证运动(正题→反题→合题)，可逆小事跳过**：生成方案后写出它具体在什么条件下失效(反题，须写"当X时不成立")、吸收反题后如何修正或划界(合题)，展示方案对比表格+每方案的反题合题 |
-| 🎯 收敛 | `skills/ponder-stages/converge.json` | 淘汰弱方案保留最优 | 主线程直行（吃 plans），展示幸存方案及淘汰理由；**高赌注问题额外输出工作立场**（框架此刻倾向哪个幸存方案+凭什么+什么会让我改主意，不许骑墙，可逆小事跳过） |
-| 📊 方案评分 | `skills/ponder-stages/score.json` | 8维度评幸存方案 | **必须等收敛产出 survivors 后**，对每个幸存方案各起一个 agent（并行），**必须等所有评分 agent 返回并展示各维度单项分和总分后**再汇总，**高赌注问题对总分最高方案做归因**（它凭什么拿这个分：3个最可能原因+若原因不成立反事实排名，可逆小事跳过）；若评分合法性可疑（分数接近排名敏感权重/与直觉背离/某维度无经验锚点/权重来源case类型不匹配）触发先验自检（质疑评分工具的先验框架而非继续用结果，多数case不触发留空） |
-| 🎬 推演 | `skills/ponder-stages/simulate.json` | 模拟幸存方案 | ⛔**无论赌注高低必做，不受可逆小事门控影响**。**必须等方案评分后**，对每个幸存方案各起一个隔离的通用 Subagent，**必须等所有推演 agent 全部返回并展示结果后**，再汇总💡发现。不允许只推演一个方案（指有多个方案时不能只做部分） |
-| ⚔️ 辩论 | `skills/ponder-stages/debate.json` | 排名推荐 | ⛔**无论赌注高低必做，不受可逆小事门控影响**。**必须等推演全部返回后**，对每个幸存方案各起一个 agent 做立论（并行），**全部立论返回并展示后**再汇总做攻击评估→抗压排名，**必须展示排名表格**；**高赌注问题额外输出立场演化**（辩论攻防有没有改变收敛阶段的倾向：变了记从X到Y+哪个攻击动摇的，没变记为何不动，可逆小事跳过）；反向思维段内部升级为系统反事实排查（双向反事实/因果链排查/可控不可控区分，不展示方法论标签，见 `${CLAUDE_PLUGIN_ROOT}/engine/counterfactual-thinking.md`） |
-| 🏆 综合 | `skills/ponder-stages/synthesis.json` | 最终结论+风险+结论自反+可谬标注+不可同化项+立场谱系+偏好自省 | 主线程直行（吃辩论 debate_summary+ranked），高赌注问题输出完整结论+结论自反（质疑账本收敛+共享前提）+可谬标注（**基于立场**：框架最终倾向A，A最可能因X错+备选，可逆小事跳过）+不可同化项+立场谱系+偏好自省（跨期偏好/动机取向/偏好稳定性，不展示标签，见 `${CLAUDE_PLUGIN_ROOT}/engine/preference-structure.md`），三动作互斥约束有代码兜底（`${CLAUDE_PLUGIN_ROOT}/scripts/synthesis_guard.js` 拦可谬↔自反/可谬↔他者撞对象+他者字段齐全）。⛔可逆小事只跳过这四个深度动作，但**推演辩论的结论必须正常展示**，不允许"只出结论"把前面步骤的产出吞掉 |
+| 💭 神思 | `stages/shensi.json` | 前提审视+跳出常规思维 | 主线程直行，**先产出 stake 字段（赌注判定，全链下游读此字段定门控，schema 强制必填，复用v1.18.37硬判据：任一命中即high/判不清按high/用户郑重即high）**，高赌注问题先审视前提（涉及用户真实情况的前提用 AskUserQuestion 确认），再展示反直觉发现；若前提审视暴露出"问题提法本身预设了未验证前提"则触发问题消解（质疑问题该不该这么问而非在框架内解题，多数问题不触发留空）；前提审视段内部自检损失态度（损失厌恶/参照点依赖/概率权重扭曲，不展示标签，见 `engine/prospect-theory.md`） |
+| 🔭 发散 | `stages/divergence.json` | 多角度审视 | **必须等神思产出后**主线程直行（吃神思结论），展示6视角，**高赌注问题六视产出后做视角互否**（找1-2对对立视角互质疑再合题，可逆小事跳过），共识须是互否后存活判断非简单汇总 |
+| 🔍 八卦镜 | `stages/bagua.json` | 发现盲点 | **必须等发散产出后**再起子 agent（吃发散共识）；每维度一个 agent（共8个并行），**必须等全部8个维度 agent 返回并展示盲点表格后**，主线程再汇总为 key_finding 交给方案。不允许在部分维度还在排查时就跳到方案步骤 |
+| 📋 方案 | `stages/plans.json` | 5-10个可选方案 | **高赌注问题起agent前先做终态画像**（先描述"成了的具体样子"须可判定像验收标准，再反向链拆解到今天第一步，可逆小事跳过），把终态注入每个agent让方案朝终态收敛；每方案一个 agent（并行），**必须等所有方案 agent 返回并展示后**才进入收敛，**高赌注问题每个方案必须经辩证运动(正题→反题→合题)，可逆小事跳过**：生成方案后写出它具体在什么条件下失效(反题，须写"当X时不成立")、吸收反题后如何修正或划界(合题)，展示方案对比表格+每方案的反题合题 |
+| 🎯 收敛 | `stages/converge.json` | 淘汰弱方案保留最优 | 主线程直行（吃 plans），展示幸存方案及淘汰理由；**高赌注问题额外输出工作立场**（框架此刻倾向哪个幸存方案+凭什么+什么会让我改主意，不许骑墙，可逆小事跳过） |
+| 📊 方案评分 | `stages/score.json` | 8维度评幸存方案 | **必须等收敛产出 survivors 后**，对每个幸存方案各起一个 agent（并行），**必须等所有评分 agent 返回并展示各维度单项分和总分后**再汇总，**高赌注问题对总分最高方案做归因**（它凭什么拿这个分：3个最可能原因+若原因不成立反事实排名，可逆小事跳过）；若评分合法性可疑（分数接近排名敏感权重/与直觉背离/某维度无经验锚点/权重来源case类型不匹配）触发先验自检（质疑评分工具的先验框架而非继续用结果，多数case不触发留空） |
+| 🎬 推演 | `stages/simulate.json` | 模拟幸存方案 | ⛔**无论赌注高低必做，不受可逆小事门控影响**。**必须等方案评分后**，对每个幸存方案各起一个隔离的通用 Subagent，**必须等所有推演 agent 全部返回并展示结果后**，再汇总💡发现。不允许只推演一个方案（指有多个方案时不能只做部分） |
+| ⚔️ 辩论 | `stages/debate.json` | 排名推荐 | ⛔**无论赌注高低必做，不受可逆小事门控影响**。**必须等推演全部返回后**，对每个幸存方案各起一个 agent 做立论（并行），**全部立论返回并展示后**再汇总做攻击评估→抗压排名，**必须展示排名表格**；**高赌注问题额外输出立场演化**（辩论攻防有没有改变收敛阶段的倾向：变了记从X到Y+哪个攻击动摇的，没变记为何不动，可逆小事跳过）；反向思维段内部升级为系统反事实排查（双向反事实/因果链排查/可控不可控区分，不展示方法论标签，见 `engine/counterfactual-thinking.md`） |
+| 🏆 综合 | `stages/synthesis.json` | 最终结论+风险+结论自反+可谬标注+不可同化项+立场谱系+偏好自省 | 主线程直行（吃辩论 debate_summary+ranked），高赌注问题输出完整结论+结论自反（质疑账本收敛+共享前提）+可谬标注（**基于立场**：框架最终倾向A，A最可能因X错+备选，可逆小事跳过）+不可同化项+立场谱系+偏好自省（跨期偏好/动机取向/偏好稳定性，不展示标签，见 `engine/preference-structure.md`），三动作互斥约束有代码兜底（`scripts/synthesis_guard.cjs` 拦可谬↔自反/可谬↔他者撞对象+他者字段齐全）。⛔可逆小事只跳过这四个深度动作，但**推演辩论的结论必须正常展示**，不允许"只出结论"把前面步骤的产出吞掉 |
 
 ### 用户确认
 各步的画像刷新已覆盖大部分用户确认。综合后仍需要用户本人拍板的**核心方向选择**（而非信息确认），用 AskUserQuestion 带选项提问。用户回应后输出最终结论。没有遗留则直接出结论。
@@ -117,10 +117,10 @@ node skills/ponder/scripts/step-guard.js" init <问题摘要>
 
 ### 流程结束后
 
-综合前先静默调用 `step-guard.js status`。只有 `remaining` 为空且十阶段全部完成，才允许展示综合结论和进入用户确认；否则从第一个 remaining 阶段恢复。用户确认、反驳或修正后，通过 `knowledge.js outcome` 记录对应 `point_id` 的 confirmed/refuted/corrected 结果，不调用旧 MMA 命令。
+综合前先静默调用 `step-guard.cjs status`。只有 `remaining` 为空且十阶段全部完成，才允许展示综合结论和进入用户确认；否则从第一个 remaining 阶段恢复。用户确认、反驳或修正后，把该 point 的 confirmed/refuted/corrected 结果连同 run_id 写入项目溯源（luke-jarvis 数据层：<项目>/.jarvis/ponder-runs/<run_id>/outcome.json，由执行者用文件工具写入，不依赖独立 knowledge.js/mma 存储）。
 
 ```text
-node skills/ponder/scripts/orchestrate.js" finalize <类型> <问题>
+node scripts/orchestrate.cjs finalize <类型> <问题>
 ```
 
 只在完整流程与用户确认完成后静默执行保洁、质量记录和学习。

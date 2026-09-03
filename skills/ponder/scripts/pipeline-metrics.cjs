@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * pipeline-metrics.js — 增量式步骤指标收集器
+ * pipeline-metrics.cjs — 增量式步骤指标收集器
  *
  * 每步结束后单独记录，不再等完整管道跑完才收集。
  *
  * 用法:
- *   node skills/ponder/scripts/pipeline-metrics.js step <步骤名> '<步骤输出JSON>'  — 记录一步
- *   node skills/ponder/scripts/pipeline-metrics.js log                              — 查看日志
- *   node skills/ponder/scripts/pipeline-metrics.js status                           — 统计概览
+ *   node skills/ponder/scripts/pipeline-metrics.cjs step <步骤名> '<步骤输出JSON>'  — 记录一步
+ *   node skills/ponder/scripts/pipeline-metrics.cjs log                              — 查看日志
+ *   node skills/ponder/scripts/pipeline-metrics.cjs status                           — 统计概览
  */
 const fs = require('fs');
 const path = require('path');
-const { resolveData } = require('../../../scripts/runtime-paths.cjs');
+const { resolveData } = require('./_lib/runtime-paths.cjs');
 
 const DATA_DIR = resolveData('metrics');
 const STEP_LOG = path.join(DATA_DIR, 'step-runs.ndjson'); // 每步一条记录
@@ -162,7 +162,7 @@ function main() {
   if (cmd === 'step') {
     var stepName = args[1];
     var outputJson = args[2];
-    if (!stepName || !outputJson) { console.error('用法: node pipeline-metrics.js step <步骤名> \'<输出JSON>\''); process.exit(1); }
+    if (!stepName || !outputJson) { console.error('用法: node pipeline-metrics.cjs step <步骤名> \'<输出JSON>\''); process.exit(1); }
     var output;
     try { output = JSON.parse(outputJson); } catch(e) {
       // 宽松解析:尝试从自然语言中抠 JSON,再失败则降级空对象不崩
@@ -207,9 +207,9 @@ function main() {
 
   } else {
     console.log('用法:');
-    console.log('  node skills/ponder/scripts/pipeline-metrics.js step <步骤名> \'<JSON>\'   — 记录一步');
-    console.log('  node skills/ponder/scripts/pipeline-metrics.js log                       — 查看日志');
-    console.log('  node skills/ponder/scripts/pipeline-metrics.js status                    — 统计概览');
+    console.log('  node skills/ponder/scripts/pipeline-metrics.cjs step <步骤名> \'<JSON>\'   — 记录一步');
+    console.log('  node skills/ponder/scripts/pipeline-metrics.cjs log                       — 查看日志');
+    console.log('  node skills/ponder/scripts/pipeline-metrics.cjs status                    — 统计概览');
   }
 }
 

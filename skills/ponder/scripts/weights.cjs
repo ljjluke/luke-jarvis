@@ -6,11 +6,11 @@
  * 从 pipeline 验证结果中学习，自动调整系数。
  *
  * 用法:
- *   node skills/ponder/scripts/weights.js status           — 查看所有权重
- *   node skills/ponder/scripts/weights.js get <key>        — 获取单个权重
- *   node skills/ponder/scripts/weights.js set <key> <val>  — 手动设置
- *   node skills/ponder/scripts/weights.js learn '<json>'   — 从pipeline结果自动学习
- *   node skills/ponder/scripts/weights.js reset            — 恢复出厂设置
+ *   node skills/ponder/scripts/weights.cjs status           — 查看所有权重
+ *   node skills/ponder/scripts/weights.cjs get <key>        — 获取单个权重
+ *   node skills/ponder/scripts/weights.cjs set <key> <val>  — 手动设置
+ *   node skills/ponder/scripts/weights.cjs learn '<json>'   — 从pipeline结果自动学习
+ *   node skills/ponder/scripts/weights.cjs reset            — 恢复出厂设置
  *
  * 学习信号:
  *   verifyPassed → 当前权重被"确认"，微幅向使用值巩固
@@ -21,10 +21,10 @@
 
 const path = require('path')
 const fs = require('fs')
-const { dataRoot } = require('../../../scripts/runtime-paths.cjs')
+const { dataRoot } = require('./_lib/runtime-paths.cjs')
 
 const DATA_DIR = dataRoot
-const WEIGHTS_FILE = path.join(DATA_DIR, 'learned-weights.json')
+const WEIGHTS_FILE = path.join(DATA_DIR, 'learned-weights.cjson')
 
 const DEFAULT_WEIGHTS = {
   // ── 不确定性合成系数 ──
@@ -60,9 +60,9 @@ const DEFAULT_WEIGHTS = {
   vfinal_robust: 0.3,
   vfinal_persp: 0.2,
 
-  // ── 清晰度评分权重 (evolve.js 多信号清晰度可信分, v1.18.42 从硬编码改为可学习) ──
-  // 之前 evolve.js 第278行 isClearWeight=0.25/0.35 等硬编码三元运算, 学了也不读.
-  // 现注册成可学习权重, evolve.js 评分逻辑读 registry.get(), learn() 能调整它们.
+  // ── 清晰度评分权重 (evolve.cjs 多信号清晰度可信分, v1.18.42 从硬编码改为可学习) ──
+  // 之前 evolve.cjs 第278行 isClearWeight=0.25/0.35 等硬编码三元运算, 学了也不读.
+  // 现注册成可学习权重, evolve.cjs 评分逻辑读 registry.get(), learn() 能调整它们.
   // 信号1: is_clear 本身权重 (发散步骤可信度低用低权重, 其他步骤用默认)
   clarity_weight_divergence: 0.25,   // 发散步骤 is_clear 信号权重 (发散不可信77%)
   clarity_weight_default: 0.35,     // 其他步骤 is_clear 信号权重 (维度可信96%)
@@ -256,20 +256,20 @@ function cli(args) {
       break
     }
     case 'get': {
-      if (!args[1]) { console.error('Usage: node skills/ponder/scripts/weights.js get <key>'); break }
+      if (!args[1]) { console.error('Usage: node skills/ponder/scripts/weights.cjs get <key>'); break }
       const v = registry.get(args[1])
       if (v === undefined) { console.error('Unknown weight: ' + args[1]); break }
       console.log(v)
       break
     }
     case 'set': {
-      if (!args[1] || !args[2]) { console.error('Usage: node skills/ponder/scripts/weights.js set <key> <value>'); break }
+      if (!args[1] || !args[2]) { console.error('Usage: node skills/ponder/scripts/weights.cjs set <key> <value>'); break }
       registry.set(args[1], args[2])
       console.log('✅ ' + args[1] + ' = ' + registry.get(args[1]))
       break
     }
     case 'learn': {
-      if (!args[1]) { console.error('Usage: node skills/ponder/scripts/weights.js learn <json-string>'); break }
+      if (!args[1]) { console.error('Usage: node skills/ponder/scripts/weights.cjs learn <json-string>'); break }
       const result = JSON.parse(args[1])
       const logs = registry.integrateFromPipeline(result)
       console.log(JSON.stringify({ learned: logs.length > 0, changes: logs }))
@@ -281,7 +281,7 @@ function cli(args) {
       break
     }
     default:
-      console.log('Usage: node skills/ponder/scripts/weights.js <status|get|set|learn|reset> [args...]')
+      console.log('Usage: node skills/ponder/scripts/weights.cjs <status|get|set|learn|reset> [args...]')
       console.log('  status            — 查看所有权重')
       console.log('  get <key>         — 获取单个权重')
       console.log('  set <key> <val>   — 手动设置 (0-1)')

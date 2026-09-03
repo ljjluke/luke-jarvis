@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * ═══════════════════════════════════════════════════════════════
- *  step-guard.js — 步骤强制守卫
+ *  step-guard.cjs — 步骤强制守卫
  *  "不积跬步，无以至千里" —《荀子·劝学》
  * ═══════════════════════════════════════════════════════════════
  *
@@ -9,22 +9,22 @@
  *  此守卫用文件持久化步骤完成状态，LLM每步前后必须调用。
  *
  *  命令:
- *    node step-guard.js init <问题摘要>           — 初始化新运行
- *    node step-guard.js before <步骤名>           — 检查前置步骤是否完成
- *    node step-guard.js after <步骤名> [子agent数] [certainty] — 记录步骤完成(可选:确定性0-1)
- *    node step-guard.js status                    — 查看当前运行进度
- *    node step-guard.js reset                    — 清除运行状态
+ *    node step-guard.cjs init <问题摘要>           — 初始化新运行
+ *    node step-guard.cjs before <步骤名>           — 检查前置步骤是否完成
+ *    node step-guard.cjs after <步骤名> [子agent数] [certainty] — 记录步骤完成(可选:确定性0-1)
+ *    node step-guard.cjs status                    — 查看当前运行进度
+ *    node step-guard.cjs reset                    — 清除运行状态
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { dataRoot } = require('../../../scripts/runtime-paths.cjs');
+const { dataRoot } = require('./_lib/runtime-paths.cjs');
 
 const DATA_DIR = dataRoot;
 
-const GUARD_FILE = path.join(DATA_DIR, 'step-guard.json');
+const GUARD_FILE = path.join(DATA_DIR, 'step-guard.cjson');
 
-// 步骤顺序（单一真源，与 step-names.js 一致）
+// 步骤顺序（单一真源，与 step-names.cjs 一致）
 const STEPS = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis'];
 
 // 步骤中文标签
@@ -154,7 +154,7 @@ function before(step) {
     return {
       verdict: 'BLOCKED',
       step: stdStep,
-      message: '⛔ 运行未初始化，请先调用 step-guard.js init <问题摘要>',
+      message: '⛔ 运行未初始化，请先调用 step-guard.cjs init <问题摘要>',
     };
   }
 
@@ -210,7 +210,7 @@ function after(step, agentCount, certainty) {
   if (!state.run_id) {
     return {
       verdict: 'ERROR',
-      message: '⛔ 运行未初始化，请先调用 step-guard.js init',
+      message: '⛔ 运行未初始化，请先调用 step-guard.cjs init',
     };
   }
 
@@ -396,11 +396,11 @@ function main() {
         verdict: 'USAGE',
         message: '用法:',
         commands: [
-          '  node step-guard.js init <问题摘要>           — 初始化新运行',
-          '  node step-guard.js before <步骤名>           — 检查前置步骤是否完成',
-          '  node step-guard.js after <步骤名> [子agent数] [certainty] — 记录步骤完成(可选:确定性0-1)',
-          '  node step-guard.js status                    — 查看当前运行进度',
-          '  node step-guard.js reset                    — 清除运行状态',
+          '  node step-guard.cjs init <问题摘要>           — 初始化新运行',
+          '  node step-guard.cjs before <步骤名>           — 检查前置步骤是否完成',
+          '  node step-guard.cjs after <步骤名> [子agent数] [certainty] — 记录步骤完成(可选:确定性0-1)',
+          '  node step-guard.cjs status                    — 查看当前运行进度',
+          '  node step-guard.cjs reset                    — 清除运行状态',
         ],
         steps: STEPS,
       };

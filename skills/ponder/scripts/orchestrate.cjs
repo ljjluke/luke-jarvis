@@ -1,33 +1,33 @@
 #!/usr/bin/env node
 /**
- * orchestrate.js — 增量式步骤存储 + 流程收尾
+ * orchestrate.cjs — 增量式步骤存储 + 流程收尾
  *
  * 不在流程开始前加载任何东西，各步骤独立查询自己的历史。
  * 这个脚本只做两件事:
  *   存一步产出到MMA + 记指标  |  流程结束后的保洁+学习
  *
  * 用法:
- *   node skills/ponder/scripts/orchestrate.js step <步骤名> <问题类型> '<步骤输出JSON>'
+ *   node skills/ponder/scripts/orchestrate.cjs step <步骤名> <问题类型> '<步骤输出JSON>'
  *     存一步产出到MMA + 记录该步指标
  *
- *   node skills/ponder/scripts/orchestrate.js finalize <问题类型> <问题描述>
+ *   node skills/ponder/scripts/orchestrate.cjs finalize <问题类型> <问题描述>
  *     知识保洁 + 权重学习 + 进化分析
  *
- *   node skills/ponder/scripts/orchestrate.js rules <步骤名> <问题类型>
+ *   node skills/ponder/scripts/orchestrate.cjs rules <步骤名> <问题类型>
  *     查本步命中的自适应进化规则（供管线起跑前注入prompt参考）
  */
 const fs = require('fs');
 const path = require('path');
-const { dataRoot, initializeJsonDataFile, resolvePlugin } = require('../../../scripts/runtime-paths.cjs');
+const { dataRoot, initializeJsonDataFile, resolvePlugin } = require('./_lib/runtime-paths.cjs');
 
 const DATA_DIR = dataRoot;
-const META_FILE = initializeJsonDataFile('pipeline-meta.json', resolvePlugin('skills', 'ponder', 'resources', 'pipeline-meta.json'));
+const META_FILE = initializeJsonDataFile('pipeline-meta.json', resolvePlugin('resources', 'pipeline-meta.json'));
 
 // 延迟加载
 var _WeightRegistry = null;
 function getWeightRegistry() {
   if (!_WeightRegistry) {
-    var wr = require('./weights');
+    var wr = require('./weights.cjs');
     _WeightRegistry = new wr.WeightRegistry();
   }
   return _WeightRegistry;
@@ -37,7 +37,7 @@ function getWeightRegistry() {
 function queryHistory(stepName, questionType) {
   var result = { entries: [] };
   try {
-    var knowledge = require('../../../scripts/knowledge');
+    var knowledge = require('./_lib/knowledge.cjs');
     var hist = knowledge.recallStepHistory(stepName, questionType, { query: '', limit: 20 });
     if (hist && hist.length > 0) {
       result.entries = hist.slice(0, 3).map(function(h) { return { content: (h.content || '').substring(0, 200), q: h.q, status: h.status }; });
@@ -53,7 +53,7 @@ function queryHistory(stepName, questionType) {
 function queryRules(stepName, questionType) {
   var result = { matched: [] };
   try {
-    var evolve = require('./evolve');
+    var evolve = require('./evolve.cjs');
     var rules = evolve.getMatchingRules(questionType, stepName);
     if (rules && rules.length > 0) {
       result.matched = rules.map(function(r) {
@@ -100,7 +100,7 @@ function storeStep(stepName, questionType, stepOutputJson, userRequest, knowledg
 
   // 0. 步骤顺序校验：非法 JSON、未初始化或跳步都不得持久化。
   try {
-    var stepGuard = require('./step-guard');
+    var stepGuard = require('./step-guard.cjs');
     guardState = stepGuard.status();
     var stdStep = stepGuard.normalizeStepName(stepName);
     var STEPS = stepGuard.STEPS || [];
@@ -128,7 +128,7 @@ function storeStep(stepName, questionType, stepOutputJson, userRequest, knowledg
 
   // 1. 存步骤产出到MMA
   try {
-    var knowledge = require('../../../scripts/knowledge');
+    var knowledge = require('./_lib/knowledge.cjs');
     // 提取 original_example（抽象提炼后保留的原始案例）
     var originalExample = output && output.original_example ? output.original_example : '';
     var storeResult = knowledge.storeStepOutput(stepName, questionType, stepOutputJson, {
@@ -145,7 +145,7 @@ function storeStep(stepName, questionType, stepOutputJson, userRequest, knowledg
   // applicability（适用条件）必填级强烈建议：没有适用条件的结论是格言，无法指导后续决策
   if (knowledgeEntry && typeof knowledgeEntry === 'object' && knowledgeEntry.description) {
     try {
-      var knowledgeStore = require('../../../scripts/knowledge');
+      var knowledgeStore = require('./_lib/knowledge.cjs');
       var knowledgeResult = knowledgeStore.store(knowledgeEntry);
       if (knowledgeResult && knowledgeResult.id) {
         result.knowledge_point_id = knowledgeResult.id;
@@ -158,7 +158,7 @@ function storeStep(stepName, questionType, stepOutputJson, userRequest, knowledg
 
   // 2. 记指标
   try {
-    var metrics = require('./pipeline-metrics');
+    var metrics = require('./pipeline-metrics.cjs');
     var record = metrics.collectStep(stepName, output, {
       question_type: questionType,
       user_request: userRequest || '',
@@ -187,7 +187,7 @@ function finalize(questionType, userRequest) {
 
   var guardStatus;
   try {
-    guardStatus = require('./step-guard').status();
+    guardStatus = require('./step-guard.cjs').status();
   } catch (e) {
     result.error = 'step_guard_unavailable';
     result.detail = e.message;
@@ -203,7 +203,7 @@ function finalize(questionType, userRequest) {
 
   // 1. 知识保洁
   try {
-    var simpleLifecycle = require('../../../scripts/mma/simple-lifecycle');
+    var simpleLifecycle = require('./_lib/mma/simple-lifecycle.cjs');
     var groomResult = simpleLifecycle.groomAll();
     result.grooming_done = true;
     result.groomed = Object.keys(groomResult).reduce(function(total, key) { return total + (groomResult[key] || []).length; }, 0);
@@ -211,7 +211,7 @@ function finalize(questionType, userRequest) {
 
   // 1.5 计算本次运行的 quality_score (供进化系统计算 free_energy)
   try {
-    var metrics = require('./pipeline-metrics');
+    var metrics = require('./pipeline-metrics.cjs');
     var pMetrics = require('path');
     var mDataDir = pMetrics.join(DATA_DIR, 'metrics');
     var stepLog = pMetrics.join(mDataDir, 'step-runs.ndjson');
@@ -243,7 +243,7 @@ function finalize(questionType, userRequest) {
   var evolve = null;
   var analysis = null;
   try {
-    evolve = require('./evolve');
+    evolve = require('./evolve.cjs');
     var runs = evolve.loadRuns();
     if (runs.length >= 3) {
       analysis = evolve.analyze(runs);
@@ -315,10 +315,10 @@ function main() {
     finalize(args[1] || '', args[2] || '');
   } else {
     console.log('用法:');
-    console.log('  node skills/ponder/scripts/orchestrate.js history <步骤名> <问题类型>          — 查top3历史');
-    console.log('  node skills/ponder/scripts/orchestrate.js rules <步骤名> <问题类型>            — 查本步命中的进化规则');
-    console.log('  node skills/ponder/scripts/orchestrate.js step <步骤名> <问题类型> \'<JSON>\' [用户请求] [knowledge_entry_JSON] - 存一步产出+记指标');
-    console.log('  node skills/ponder/scripts/orchestrate.js finalize <问题类型> <问题描述>        — 保洁+学习');
+    console.log('  node skills/ponder/scripts/orchestrate.cjs history <步骤名> <问题类型>          — 查top3历史');
+    console.log('  node skills/ponder/scripts/orchestrate.cjs rules <步骤名> <问题类型>            — 查本步命中的进化规则');
+    console.log('  node skills/ponder/scripts/orchestrate.cjs step <步骤名> <问题类型> \'<JSON>\' [用户请求] [knowledge_entry_JSON] - 存一步产出+记指标');
+    console.log('  node skills/ponder/scripts/orchestrate.cjs finalize <问题类型> <问题描述>        — 保洁+学习');
   }
 }
 
