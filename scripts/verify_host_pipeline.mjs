@@ -133,6 +133,7 @@ const CASES = {
       ]),
     },
     { tasksJson: '[{"id":"T1","title":"A","assignee":"甲","deps":["T2"],"acceptance":"产出A"},{"id":"T2","title":"B","assignee":"乙","deps":["T1"],"acceptance":"产出B"}]' }, // 循环依赖打回
+    { tasksJson: '[{"id":"T1","title":"方案","assignee":"甲","acceptance":"出方案"},{"id":"T2","title":"实现","assignee":"乙","deps":["T1"],"inputs":["来自T9的接口"],"acceptance":"过测"}]' }, // 输入来源悬空打回
   ],
   jarvis_clarify: [
     { mode: 'analyze', requirement: '做一个库存管理系统', industry: '供应链' },

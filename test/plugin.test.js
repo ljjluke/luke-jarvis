@@ -1234,3 +1234,36 @@ test('jarvis_taskgraph：有依赖未写输入来源给提示；坏 JSON 报错'
   assert.strictEqual(r2.ok, false, '坏 JSON 打回')
   assert.ok(r2.issues.some((i) => i.includes('解析失败')), '报解析失败')
 })
+
+// jarvis_taskgraph：deps/inputs 一致性（学 HuggingGPT：参数引用是事实源，deps 必须覆盖 inputs 上游）
+test('jarvis_taskgraph：inputs 引用必须 ∈ deps（自引用/悬空引用/不一致打回）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  // 1) inputs 引用自己但 deps 没依赖自己 → 自引用打回
+  const r1 = await def.handler({ tasksJson: JSON.stringify([
+    { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
+    { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T2的接口'], acceptance: '代码过测' },
+  ]) })
+  assert.strictEqual(r1.ok, false, '输入来源自引用应打回')
+  assert.ok(r1.issues.some((i) => i.includes('自引用')), '报自引用')
+  // 2) inputs 引用不存在的 T9 → 悬空打回
+  const r2 = await def.handler({ tasksJson: JSON.stringify([
+    { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
+    { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T9的接口'], acceptance: '代码过测' },
+  ]) })
+  assert.strictEqual(r2.ok, false, '输入来源悬空应打回')
+  assert.ok(r2.issues.some((i) => i.includes('悬空')), '报悬空')
+  // 3) inputs 引用 T3 但 deps 只依赖 T1 → 不一致打回
+  const r3 = await def.handler({ tasksJson: JSON.stringify([
+    { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
+    { id: 'T3', title: '接口', assignee: '丙', acceptance: '输出接口契约' },
+    { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T3的接口'], acceptance: '代码过测' },
+  ]) })
+  assert.strictEqual(r3.ok, false, 'deps 与 inputs 不一致应打回')
+  assert.ok(r3.issues.some((i) => i.includes('不一致')), '报不一致: ' + r3.issues.join('|'))
+  // 4) 正常：inputs 引用 T1 ∈ deps → 放行
+  const r4 = await def.handler({ tasksJson: JSON.stringify([
+    { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
+    { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T1的方案文档'], acceptance: '代码过测' },
+  ]) })
+  assert.strictEqual(r4.ok, true, 'inputs ∈ deps 应放行')
+})

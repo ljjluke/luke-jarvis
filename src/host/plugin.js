@@ -2282,15 +2282,27 @@ export const TOOLS = [
         if (!acc) issues.push(`任务 ${id} 缺验收标准（acceptance——没有"怎样算完成"的任务不许派）`)
         else if (/^\s*(做完|搞定|弄好|完成|做好|差不多|尽量|尽快|看着办|随便)\s*$/.test(acc)) issues.push(`任务 ${id} 验收标准不可判定：「${acc}」是空泛词——须写明可检查的结果（如"输出文档含 X 节/代码过 Y 测试/页面能 Z"）`)
         const deps = Array.isArray(t?.deps) ? t.deps : []
+        const realDeps = deps.map(normId).filter((d) => d && d !== '-1' && d !== 'none')
         for (const d of deps) {
           const ds = normId(d)
           if (ds === id) issues.push(`任务 ${id} 自依赖（依赖自己——拆错）`)
           else if (ds && ds !== '-1' && ds !== 'none' && !tasks.some((o) => normId(o?.id) === ds)) issues.push(`任务 ${id} 依赖悬空：依赖 ${ds} 不存在（deps 必须指向真实任务 id）`)
         }
-        // 输入槽位：有真实依赖（非 -1）时应说明输入来自哪个上游产出，防下游等不到上游交付
-        const hasRealDep = deps.some((d) => { const ds = normId(d); return ds && ds !== '-1' && ds !== 'none' })
-        const inputsTxt = Array.isArray(t?.inputs) ? t.inputs.join('、') : String(t?.inputs ?? '')
-        if (hasRealDep && !inputsTxt.trim()) issues.push(`任务 ${id} 有依赖但未写输入来源（inputs——下游要等上游的什么产出？写明"来自任务 X 的什么"防空等）`)
+        // 输入槽位（学 HuggingGPT：参数引用是事实源，deps 必须覆盖 inputs 引用的上游）：
+        //   inputs 里的"来自任务 X"必须真实存在且 ∈ deps——不允许 deps 与 inputs 两套信息不一致
+        const inputsArr = Array.isArray(t?.inputs) ? t.inputs : (String(t?.inputs ?? '').split(/[、,;；]/).map((x) => x.trim()).filter(Boolean))
+        const inputRefs = new Set()
+        for (const inp of inputsArr) {
+          const m = String(inp).match(/任务\s*([A-Za-z0-9_-]+|[0-9]+)/) || String(inp).match(/(?:来自|上游|依赖)\s*([A-Za-z0-9_-]+|[0-9]+)/)
+          if (m) {
+            const rid = normId(m[1])
+            if (rid === id) issues.push(`任务 ${id} 输入来源自引用：inputs 引用任务 ${id} 自己（输入只能来自别的前置任务）`)
+            else if (!tasks.some((o) => normId(o?.id) === rid)) issues.push(`任务 ${id} 输入来源悬空：inputs 引用任务 ${rid} 但不存在`)
+            else if (!realDeps.includes(rid)) issues.push(`任务 ${id} deps 与 inputs 不一致：inputs 引用任务 ${rid} 的产出，但 deps=[${realDeps.join(',') || '空'}] 没依赖它——deps 必须覆盖 inputs 引用的全部上游`)
+            inputRefs.add(rid)
+          }
+        }
+        if (realDeps.length && inputsArr.length === 0) issues.push(`任务 ${id} 有依赖但未写输入来源（inputs——下游要等上游的什么产出？写明"来自任务 X 的什么"防空等）`)
       }
       if (!tasks.length && !issues.length) issues.push('任务清单为空（先拆任务再派活）')
       // 循环依赖检测（简化：DFS 报环）
