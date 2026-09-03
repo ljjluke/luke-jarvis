@@ -14,7 +14,9 @@
 
 ### 变更
 
-- `package.json`：移除 `dsh.client` 声明与 `exports["./client"]`；`src/` 仅剩 `host/`。
+- `package.json`：version 0.2.2 → **0.2.3**；移除 `dsh.client` 声明与 `exports["./client"]`；`src/` 仅剩 `host/`。
+- `README.md`：版本徽标 v0.2.3、单测 104→110、verify 40→43、3D 节补 tasks 表。
+- `docs/ARCHITECTURE.md`：**重写对齐 v0.2.3 现状**（旧版停在 13 步/18 工具/62 测试的早期架构）。
 
 ## [0.2.2] - 2026-08-28
 
@@ -78,9 +80,10 @@
 
 ### 文档
 
-- `docs/ARCHITECTURE.md`：与代码逐条核对的真实执行架构（13 步回执 / 18 工具 / 技能阶段对应 / 铁律）
+- `docs/ARCHITECTURE.md`：与代码逐条核对的真实执行架构（13 步回执 / 18 工具 / 技能阶段对应 / 铁律——**0.2.3 已重写**：判领域分支执行流 / 21 工具 / 产物闸体系 / 公司状态数据源）
 - `docs/RELEASE.md` / `docs/PUSH.md` / `docs/UPGRADE-20260828.md`
 
+[0.2.3]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.3
 [0.2.2]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ljjluke/luke-jarvis/releases/tag/v0.2.0

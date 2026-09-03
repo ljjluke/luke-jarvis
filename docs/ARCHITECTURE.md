@@ -1,108 +1,122 @@
 # Luke-Jarvis 执行架构（与代码逐条核对的真实流程）
 
 > 本文档描述 luke-jarvis 数字员工公司**实际执行**的流程。每一层都从 `src/host/plugin.js`、`skills/jarvis.md`、`preset/agent.cordis.yml` 核实过，不是设计稿。
-> 验证：单测 62/62、e2e 全链路、selfcheck 12/12。
+> 验证基线（2026-09-03，v0.2.3）：单测 **110/110**、verify_host_pipeline **43 用例 0 VIOLATION**、selfcheck **11/11**、e2e 全链路。
 
 ## 一、架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ 用户（唯一交互面）                                              │
-│   只敲一个命令：/jarvis <需求描述>                               │
+│   只敲一个命令：/jarvis <需求描述>（可模糊）                     │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ① 命令层  /jarvis                                              │
-│    commands.register(name='jarvis') → execute()                 │
-│    → jarvisCommand(需求) → 返回 13 步流程回执                    │
+│ ① 命令层  /jarvis（jarvisCommand，判领域分支——不是固定步数）    │
+│    判不出领域（乱用/你好/做个东西）→ 请用户说具体想干什么        │
+│        → 从描述判断领域（循环到能判出）                          │
+│    能判领域 → 启动人才流程（②③④）                              │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ② 技能层  skills/jarvis.md（唯一技能入口）                       │
-│    安装：cp skills/jarvis.md → ~/.dsh/skills/jarvis/SKILL.md    │
-│    skill-filesystem 本地发现（preset 不硬编码技能名）            │
+│ ② 人才调度层  🕵️ 猎头（全流程人员唯一入口）                     │
+│    第一个猎头由贾维斯(captain)蒸馏注入（人才入口自举）           │
+│    猎头供 CEO → 贾维斯蒸馏+注入 → CEO 分析需求向猎头定一个       │
+│    领域专家 → 猎头调度 → CEO+专家确认够格                        │
+│    后续换人/补位/临时支援 全过猎头（岗位画像+三重验证）           │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ ③ 两层角色架构                                                    │
 │   Jarvis（主面板 / 本 agent / captain）──对客户唯一接口          │
-│    └─ 蒸馏注入 → CEO（agent_teams 成员角色，带六段式角色卡）      │
-│        └─ 管理 → 员工（产品/研发/测试/风控…也是蒸馏卡成员）       │
+│    接单/判领域/蒸馏执行/验收汇报（captain 权限：add_member）     │
+│    └─ 蒸馏注入 → CEO（团队内带队角色，带六段式角色卡）            │
+│        └─ CEO+领域专家 双人打磨需求（问用户澄清归他们）           │
+│        └─ 管理 → 员工（产品/研发/测试/风控…蒸馏卡成员）           │
+│            员工只认 CEO；有问题先问 CEO（B15 分层）              │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ④ 工具层（19 个工具，tools.register 循环注册，ctx.effect 包裹）   │
-│    jarvis_project     接单分级（S/M/L）                          │
+│ ④ 工具层（21 个工具，TOOLS 数组导出）                            │
+│    jarvis_project     接单分级（S/M/L，领域由 CEO 现场判）       │
 │    jarvis_store       项目记忆库（check/scaffold/save/reuse）    │
 │    jarvis_process     流程设计（五要素，无领域预设）              │
 │    jarvis_distill_guide  蒸馏引导（提炼独有 HOW）                │
-│    jarvis_distill     蒸馏校验（结构+深度双闸≥60）               │
+│    jarvis_distill     蒸馏校验（结构+深度双闸≥60，一票否决）     │
 │    jarvis_fidelity    保真度审计                                 │
-│    jarvis_think / jarvis_think_deep  思考（七段对抗）            │
+│    jarvis_think / jarvis_think_deep  思考（ponder 满血十阶段）   │
 │    jarvis_review / jarvis_essence    裁决 + 本质四查             │
-│    jarvis_collab      协同设计（四要素）                         │
+│    jarvis_collab      协同设计（四要素+全局健康检查）             │
 │    jarvis_meeting     会议（kickoff/cycle/close）                │
-│    jarvis_board       统一贾维斯公屏                                   │
-│    jarvis_perf        绩效评估（5维 + 连续2次换人）               │
+│    jarvis_board       统一公屏（.jarvis/board.json）             │
+│    jarvis_clarify     需求澄清（5角度/T1-T5触发/三阶提问/双人）   │
+│    jarvis_release     交付契约（版本快照/清单/回滚/留痕）         │
+│    jarvis_perf        绩效评估（5维+阶段考核+需求对齐度）         │
 │    jarvis_escalate    问题上行（风险三件套）                     │
-│    jarvis_capability  能力补足（市场→自研复用）
-    jarvis_update      版本检测（本地 vs 远程 tag，能否升级）                  │
-│    jarvis_release     交付契约（版本快照/清单/留痕/状态）
-    jarvis_clarify     需求澄清（三阶提问，T1-T5 可判）        │
+│    jarvis_capability  能力补足（市场→自研复用）                  │
+│    jarvis_update      版本检测（本地 vs 远程 tag）               │
+│    jarvis_company     公司状态快照（3D 数据源，action 单动作同步）│
+│    jarvis_taskgraph   任务编排图校验（依赖闭环/验收可判/并行）    │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ ⑤ 团队编排层  agent_teams_*（平台服务）                          │
-│    create → add_member(注入卡) → create_task(DAG) → status(盯控) │
-│    → remove_member(换人) → send_message(会议/讨论)               │
+│ ⑤ 团队编排层  agent_teams_*（平台服务，贾维斯代 CEO 执行）       │
+│    create → add_member(注入卡) → create_task(带deps)            │
+│    → status(盯控) → reassign_task(转派) → remove_member(换人)    │
+│    → send_message(会议/讨论)——member 无权 add_member             │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ ⑥ 项目记忆库  <项目>/.jarvis/（持久化，跨会话）                  │
 │    prototypes/ 真实人物原型    cards/ 虚拟人物卡                 │
 │    process-*.json 流程         components.json 组件             │
-│    board.json 贾维斯公屏             project.md 项目细节+沟通留痕      │
-│    lessons.md 经验教训                                          │
+│    board.json 公屏    project.md 项目细节    lessons.md 经验     │
+│    company-state.json 公司状态（3D/UI 数据源）                   │
+│    docs/ 需求规格/方案设计/任务编排/测试验收单                   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## 二、一次 /jarvis 的真实执行流（13 步，来自 jarvisCommand 实际输出）
+## 二、一次 /jarvis 的真实执行流（判领域分支，非固定步数）
 
-| # | 动作 | 工具/服务 | 产物 |
+| 阶段 | 动作 | 工具/服务 | 产物 |
 |---|---|---|---|
-| 0 | 先查项目记忆库：有 `.jarvis/`（prototypes/cards/project.md…）直接读取继续，不用重分析源码；没有才从零 | `jarvis_store` check | 复用判定 |
-| 1 | 需求本质回归：为谁解决什么、怎样算成功（可判定），未清晰不开工 | — | 需求本质 |
-| 2 | 定领域流程：阶段/闸门/红线/必须角色/会议触点（无预设，可参考本项目沉淀） | `jarvis_process` | 流程五要素 |
-| 3 | 蒸馏 CEO 角色卡（CEO 是团队内角色非主面板）：web 查证真实大佬 → 存 prototypes/ → distill_guide 提炼独有 HOW → 写六段式卡 → distill+保真度双验 → 注入 | `jarvis_distill_guide`+`jarvis_distill`+`jarvis_fidelity` | CEO 卡 |
-| 4 | 定子角色 → 逐个同样蒸馏+双验+协同设计（四要素+每角色协同段） | `jarvis_collab` | 子角色卡+协同 |
-| 5 | kickoff 全员会：对齐目标/验收+流程闸门+接口契约 → 决议写贾维斯公屏 | `jarvis_meeting`(kickoff)+`jarvis_board` | 决议/契约 |
-| 6 | 各角色独思/干活（关键决策 think_deep）→ 问题/发现/阻塞写贾维斯公屏 | `jarvis_think_deep`+`jarvis_board` | 贾维斯公屏条目 |
-| 7 | 贾维斯公屏未决阻塞/分歧/接口变更 → 二次会对齐+`jarvis_review` 裁决（吃 thinkA/thinkB+requirement）→ 循环到收敛 | `jarvis_meeting`(cycle)+`jarvis_review`+`jarvis_essence` | 裁决 |
-| 8 | CEO 时刻盯人：`jarvis_perf` 5 维评估（成果/完成度/上行健康度[高频异常立即触发]/契合度/深度分），连续 2 次不达标 → 换人（离任→归档→重蒸馏→补位） | `jarvis_perf`+agent_teams `remove_member` | 换人决策 |
-| 9 | 问题上行：技术绕不开/无法抉择 → 禁止跳过 → `jarvis_escalate`（风险细节+已尝试+决策请求）→ 写贾维斯公屏 → CEO 闭环 | `jarvis_escalate` | 上报记录 |
-| 10 | 交付版本管理：new_version 打快照（冻结旧版/变更开新版）→ checklist 交付清单（需求本质逐条→交付物→自测，甲方逐条确认）→ status（待确认/已确认/已否决+时限）→ communication 沟通留痕入 project.md | `jarvis_release` | 版本/清单/留痕 |
-| 11 | 收口会：对照领域闸门逐项验收 + 交付清单 → 交付报告（Jarvis 向客户汇报，客户确认即完成） | `jarvis_meeting`(close) | 交付报告 |
-| 12 | 沉淀到项目：角色卡/原型/流程/组件/项目细节/沟通记录/经验 → 下次需求先查记忆直接复用 | `jarvis_store` save | 记忆库更新 |
+| 0 | 先查项目记忆库：有 `.jarvis/` 直接读取继续；没有才从零 | `jarvis_store` check | 复用判定 |
+| 1 | 判领域方向：**能判自判；判不出（乱用/你好）→ 请用户说具体想干什么/说详细点**，从描述判断——不是问"哪个领域"抽象问题 | `identifyIndustry` + `jarvisCommand` | 领域判定 |
+| 2 | 蒸馏该领域猎头（人才调度层——领域人才唯一入口，第一个由贾维斯蒸馏自举） | `jarvis_distill_guide`+`jarvis_distill` | 猎头卡 |
+| 3 | 猎头供该领域 CEO（岗位画像+三重验证）→ 贾维斯蒸馏+注入 | 同上 + agent_teams `add_member` | CEO 卡 |
+| 4 | CEO 分析需求 → 向猎头定**一个领域专家**搭档 → 猎头调度 → CEO+专家确认够格 | 同上 | 专家卡 |
+| 5 | **CEO+专家双人打磨需求**（各自看法→对齐→问用户"为谁/解决什么/怎样算成功"）→ 需求本质清晰 | `jarvis_clarify`(duo) | 需求本质三段式 |
+| 6 | 整理《需求规格》（每条功能带可判定验收）存 `.jarvis/docs/`——没规格不进拆解 | — | 需求规格文档 |
+| 7 | 蒸馏子角色（逐卡 distill 双闸）→ `jarvis_collab` 协同设计（四要素+全局健康）→ 可建队 | `jarvis_distill`+`jarvis_collab` | 角色卡+协同 |
+| 8 | **CEO 拆《任务编排图》过闸**（依赖闭环/无自依赖循环/每任务验收可判/deps与inputs一致/并行建议）→ 按图派活 | `jarvis_taskgraph` | 任务编排文档 |
+| 9 | kickoff 全员会 → 各角色独思/干活 → 问题写公屏 → 按需二次会+裁决 → 循环 | `jarvis_meeting`+`jarvis_board`+`jarvis_review` | 决议/裁决 |
+| 10 | 迭代到测试过：开发产出 → 测试独立验证 → 返工循环 → 测试通过才算完成 | 三产物闭环 | 通过的产物 |
+| 11 | CEO 盯人：阶段考核（防误判 0 产出）+ 需求对齐度；不达标 → 猎头补位流程 | `jarvis_perf`+猎头 | 绩效/换人 |
+| 12 | 收口交付：三产物逐条核对（断链不许收口）→ checklist 逐条验收 → 复盘沉淀 | `jarvis_release`+`jarvis_store` | 版本/记忆 |
 
-## 三、技能阶段（skills/jarvis.md，指导协议）与命令回执的对应
+## 三、产物闸体系（防"口头干活"——每步有硬产物才进下一步）
 
-| 技能阶段 | 对应回执步骤 | 说明 |
+| 产物闸 | 内容 | 不过闸的后果 |
 |---|---|---|
-| 阶段零 · 先查项目记忆库 | 步骤 0 | 有经验直接继续，无则从零 |
-| 阶段一 · 澄清 | 步骤 1 | 需求本质回归（模糊时 ask_user_question） |
-| 阶段二 · 拆解 | 步骤 2（前置） | 决定岗位、任务 DAG |
-| 阶段三 · CEO 定领域流程 | 步骤 2 | jarvis_process 五要素 |
-| 阶段四 · 建队与派活 | 步骤 3-4 | 蒸馏卡 + add_member + create_task |
-| 阶段五 · 会议驱动协作循环 | 步骤 5-7 | kickoff → 独思 → 贾维斯公屏 → 二次会 |
-| 阶段六 · 盯控与接管 | 步骤 8 | jarvis_perf 评估 + 换人 |
-| 阶段七 · 版本化交付与收口 | 步骤 10-12 | jarvis_release + close + 沉淀 |
+| 需求规格 | 每条功能带可判定验收标准（CEO+专家双人整理） | 没规格不进拆解 |
+| 任务编排图 | 依赖闭环/验收可判/并行建议（`jarvis_taskgraph`） | 悬空依赖=下游等不到 |
+| 方案设计 | 每条需求有实现落点+接口契约 | 没方案不许写实现 |
+| 测试验收单 | 每条需求有测试项，测试独立验证 | 自己说自己好不算 |
 
-## 四、防 bug 铁律（内嵌代码，安装即生效）
+## 四、公司状态（3D 办公室数据源，v0.2.3 起）
 
-1. `jarvis_distill` 校验：六段式必含、CEO 卡必含协同架构、必含真实 source、必含防冒名声明；任缺 → 不通过。
-2. 深度硬闸：assessCardDepth 评分 <60 → 浅层卡一票否决（结构齐全内容空洞不得注入）。
-3. 绝不直接复用旧卡：只提供"现场 web 蒸馏"路径，无"取旧卡"分支。
-4. 真实优先：所有工具输出强制"角色卡只提供思考框架，判断必须基于真实情况"。
-5. 插件无静态卡/无领域模板（领域无关）：角色卡只来自「本项目 .jarvis/ 沉淀（复用起点）」或「现场 web 蒸馏」。
-6. 流程缺失 = 客户提 bug 的温床：宁可多一道闸，不可少一道。
-7. 禁止跳过问题：无法抉择必须 `jarvis_escalate` 上报（风险细节+已尝试+决策请求）。
+- `company-state.json` 8 表：company/employees/meetings/recruiting/ceo/headhunter/tasks/updatedAt
+- 工具动作自动同步：`jarvis_perf`(评估/开除) `jarvis_meeting`(开会) 自动；员工入职/开工/汇报/开除用 `jarvis_company`(mode=action) 单动作同步（employee_hired/started/reporting/terminated/recruiting_started）
+- `jarvis_taskgraph` 任务图 → tasks 表（任务 id/负责人/依赖链/验收/状态——3D 任务看板可画依赖连线）
+- 诚实边界：agent_teams 平台任务级心跳 3D 拿不到，employees.status 是员工动作时自己声明的近似值，非平台实时检测
+
+## 五、防 bug 铁律（内嵌代码，安装即生效）
+
+1. `jarvis_distill` 校验：六段式必含、CEO 卡必含协同架构、必含真实 source、必含防冒名声明、证据链六维；任缺 → 不通过。
+2. 深度硬闸：assessCardDepth 评分 <60 → 浅层卡一票否决（结构齐全内容空洞不得注入）；展示型空泛词密度检测。
+3. 绝不直接复用旧卡：只提供"现场蒸馏"路径，无"取旧卡"分支（项目沉淀可复用但须过 distill 校验+按新需求修订）。
+4. 真实优先：所有工具输出强制"角色卡只提供思考框架，判断必须基于真实情况"；推断不冒充已确认。
+5. 插件无静态卡/无领域模板（领域无关）：角色卡只来自「本项目 .jarvis/ 沉淀」或「现场蒸馏」；`jarvis_process` 无领域流程库。
+6. 流程缺失 = 客户提 bug 的温床：宁可多一道闸（任务编排图闸），不可少一道。
+7. 禁止跳过问题：无法抉择必须 `jarvis_escalate` 上报（风险细节+已尝试+决策请求）；没能力不许硬装会（`jarvis_capability`）。
+8. 要不要问用户 = 看现有信息够不够（不是某人判断）：先查黑板/规格/沉淀，信息缺口才问客户。
