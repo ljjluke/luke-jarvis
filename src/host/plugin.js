@@ -34,7 +34,138 @@ const EVIDENCE_SECTIONS = [
  */
 const COLLAB_FOUR = ['位置', '依赖', '介入时机', '协同方式']
 
-import { execSync } from 'node:child_process'
+/** 公屏（统一黑板）持久化路径：<cwd>/.jarvis/board.json（项目级，与 RPC/HTTP 读取同一约定） */
+function boardFilePath() {
+  const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : ''
+  return (cwd ? cwd + '/' : '') + '.jarvis/board.json'
+}
+
+/** 从磁盘读公屏 items（无文件/坏 JSON → 空数组）。写路径与读取（HTTP/RPC）完全一致，杜绝双源。
+ *  返回 { items, version, statInfo }：version 是 dsh-fs 的乐观并发 token（writeText replaceIfVersion 用）。 */
+async function readBoardItems(fsSvc) {
+  if (!fsSvc || typeof fsSvc.readText !== 'function') return { items: [], fromDisk: false, version: null }
+  try {
+    const target = await fsSvc.resolve(boardFilePath())
+    if (!target) return { items: [], fromDisk: false, version: null }
+    let statInfo = null
+    try { statInfo = (typeof fsSvc.stat === 'function') ? await fsSvc.stat(target) : null } catch { statInfo = null }
+    const text = await fsSvc.readText(target)
+    if (!text) return { items: [], fromDisk: false, version: null }
+    const data = JSON.parse(text)
+    if (data && Array.isArray(data.items)) {
+      return { items: data.items.map((it) => ({ ...it })), fromDisk: true, version: (statInfo && statInfo.version) || null, statInfo }
+    }
+    return { items: [], fromDisk: true, version: null, statInfo }
+  } catch {
+    return { items: [], fromDisk: false, version: null, statInfo: null }
+  }
+}
+
+/** 原子写公屏：dsh-fs writeText + replaceIfVersion 乐观并发守卫。
+ *  写失败（含 FS_STALE_VERSION 并发冲突）不吞：返回 { ok, error } 由调用方如实上报。 */
+export async function writeBoardItems(fsSvc, items, version) {
+  if (!fsSvc || typeof fsSvc.writeText !== 'function') return { ok: false, error: 'fs.writeText 不可用' }
+  try {
+    const target = await fsSvc.resolve(boardFilePath())
+    if (!target) return { ok: false, error: '路径解析失败' }
+    const content = JSON.stringify({ items, updatedAt: new Date().toISOString() }, null, 2)
+    if (version) {
+      await fsSvc.writeText(target, content, { kind: 'replaceIfVersion', version })
+    } else {
+      await fsSvc.writeText(target, content)
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) }
+  }
+}
+
+/** 公屏条目 ID：基于磁盘最新 items 取 max 单调递增（修复并发撞 ID —— 纯函数无解，必须读持久化真源） */
+export function nextBoardId(items) {
+  let max = 0
+  for (const it of items) {
+    const m = /^B(\d+)$/.exec(String(it && it.id || ''))
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return 'B' + (max + 1)
+}
+
+/** 公司状态文件路径（与 jarvis_company 同一文件，3D UI 数据源） */
+function companyStateFile() {
+  const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : ''
+  return (cwd ? cwd + '/' : '') + '.jarvis/company-state.json'
+}
+
+/** 读公司状态（无文件 → 空骨架） */
+async function readCompanyState(fsSvc) {
+  const empty = { company: {}, employees: [], meetings: [], recruiting: [], ceo: {}, headhunter: {}, tasks: [], updatedAt: '' }
+  if (!fsSvc || typeof fsSvc.readText !== 'function') return empty
+  try {
+    const target = await fsSvc.resolve(companyStateFile())
+    if (!target) return empty
+    const text = await fsSvc.readText(target)
+    if (!text) return empty
+    const data = JSON.parse(text)
+    return data && typeof data === 'object' ? { ...empty, ...data } : empty
+  } catch { return empty }
+}
+
+/** 写公司状态 */
+async function writeCompanyState(fsSvc, state) {
+  if (!fsSvc || typeof fsSvc.writeText !== 'function') return false
+  try {
+    const target = await fsSvc.resolve(companyStateFile())
+    if (!target) return false
+    state.updatedAt = new Date().toISOString()
+    await fsSvc.writeText(target, JSON.stringify(state, null, 2))
+    return true
+  } catch { return false }
+}
+
+/**
+ * 工具动作自动同步公司状态（3D 画面反映真实动作，不靠 CEO 手动 update）：
+ *   action.meeting_started/meeting_done → meetings 表更新
+ *   action.employee_evaluated {role, score, strikes, status} → employees 表更新(perfScore/strikes/status)
+ *   action.employee_terminated {role} → employees 表标 terminated
+ *   action.employee_hired {role, persona} → employees 表加人
+ *   action.employee_reporting {role} → employees 表标 reporting
+ *   action.recruiting_started {position} → recruiting 表加条
+ */
+export async function syncCompanyState(fsSvc, action) {
+  if (!fsSvc || typeof fsSvc.readText !== 'function' || typeof fsSvc.writeText !== 'function') return false
+  try {
+    const state = await readCompanyState(fsSvc)
+    const a = action || {}
+    if (a.type === 'meeting_started' && a.meeting) {
+      const m = state.meetings.find((x) => x.id === a.meeting.id)
+      if (m) m.status = 'in_progress'
+      else state.meetings.push({ id: a.meeting.id || 'm' + (state.meetings.length + 1), type: a.meeting.type || '', topic: a.meeting.topic || '', attendees: a.meeting.attendees || [], status: 'in_progress' })
+    } else if (a.type === 'meeting_done' && a.meetingId) {
+      const m = state.meetings.find((x) => x.id === a.meetingId)
+      if (m) m.status = 'done'
+    } else if (a.type === 'employee_evaluated' && a.role) {
+      const emp = state.employees.find((e) => e.role === a.role)
+      const rec = { role: a.role, persona: (emp && emp.persona) || a.persona || '', perfScore: a.score, strikes: a.strikes, status: a.status || (emp && emp.status) || 'working', note: a.note || '' }
+      if (emp) Object.assign(emp, rec)
+      else state.employees.push(rec)
+    } else if (a.type === 'employee_terminated' && a.role) {
+      const emp = state.employees.find((e) => e.role === a.role)
+      if (emp) { emp.status = 'terminated'; emp.terminatedAt = new Date().toISOString().slice(0, 10); emp.note = a.note || emp.note || '' }
+    } else if (a.type === 'employee_hired' && a.role) {
+      state.employees.push({ role: a.role, persona: a.persona || '', status: 'working', hiredAt: new Date().toISOString().slice(0, 10), replaces: a.replaces || '' })
+    } else if (a.type === 'employee_reporting' && a.role) {
+      const emp = state.employees.find((e) => e.role === a.role)
+      if (emp) { emp.status = 'reporting'; emp.lastReportAt = new Date().toISOString().slice(0, 16) }
+    } else if (a.type === 'recruiting_started' && a.position) {
+      state.recruiting.push({ id: 'r' + (state.recruiting.length + 1), position: a.position, targetPersona: a.targetPersona || '', candidates: [], status: 'searching', replacesEmp: a.replacesEmp || '' })
+    } else {
+      return false // 未知动作不改
+    }
+    return await writeCompanyState(fsSvc, state)
+  } catch { return false }
+}
+
+import { execSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 const _require = createRequire(import.meta.url)
@@ -195,6 +326,14 @@ export function assessCardDepth(card, isCeo) {
   const methodologyText = (depthSections['思维模型'] || '') + (depthSections['核心方法论'] || '')
   const hasHow = HOW.test(methodologyText)
   if (!hasHow) issues.push('思维模型/核心方法论只有标签没有"怎么做"的动作链（HOW 而非 WHAT：要写出先做什么、遇到什么情况怎么办）')
+  // ── 2b. 防"展示型空泛"（卡不贵多贵有用——"注重数据驱动/追求卓越/思维缜密"看着厉害但干活用不上）──
+  //   评价性形容词/空泛名词堆砌（无具体对象+动作）= 展示型内容：检测高密度空泛词 → 内容不可用
+  const FLAIR_WORDS = /注重|坚持|追求|秉持|卓越|严谨|缜密|深刻|敏锐|洞察|前瞻|科学|专业|高效|优质|全面|深入|不断|持续|优化|提升|驱动|创新|赋能|以.{0,6}(为导向|为核心|为原则)|全局视角|战略眼光|行业经验|跨领域/
+  const flairMatches = (methodologyText.match(new RegExp(FLAIR_WORDS.source, 'g')) || [])
+  // 空泛密度：方法论文本里每 25 字出现 ≥1 个空泛词 = 空泛堆砌（如"注重数据驱动与量化分析以科学方法指导决策"密度极高）
+  const flairDensity = methodologyText.length > 0 ? flairMatches.length / (methodologyText.length / 25) : 0
+  const hasFlairOverload = flairDensity >= 2.5 && flairMatches.length >= 3
+  if (hasFlairOverload) issues.push('思维模型/核心方法论是"展示型空泛"（评价性形容词堆砌：注重/追求/卓越/严谨/洞察/驱动/优化…看着厉害但干活用不上——无具体对象+动作）。卡不贵多贵有用：每条内容须是"遇到X→做Y"的可执行行为，纯评价词=没用=删掉换成具体做法')
   // ── 3. 证据链六维度逐项带内容（不是光秃秃列词）──
   // 证据链/诚实边界不在 SECTIONS 六段里，直接在全文中定位
   const evidenceText = text
@@ -282,12 +421,57 @@ export function distillGuide(role, material, industry) {
       '⑥ 抓失效边界：他自己承认"这个方法在什么情况不适用"——真实方法的边界感',
     ],
     decisionHeuristics: '提炼决策启发式：他面对不确定性时的默认动作（如"先最小验证再放大""先假设对方是善意的"）——是可执行的 if-then 规则，不是泛泛原则。',
+    achievementTrace:
+      '🏆 **成就反推工作方式（"影子"的真正来源——不是他说过什么，是他做出了什么）**：真实人物取得的成就是**结果证据**（他真做到了，骗不了人），从成就反推的工作方式比访谈里说的更真实（访谈可能包装，成就不会）。做法：\n' +
+      '  ① 列出他**取得的真实成就**（做出了什么/改变了什么/被公认的成果——不只职位头衔）；\n' +
+      '  ② 对每个成就问"**他怎么工作才做到的？**"——反推背后的**工作习惯**（每天怎么投入/怎么决策/怎么取舍/怎么对待失败/怎么组织人），写成可执行的"他工作时的固定动作"；\n' +
+      '  ③ 成就与成就之间找**重复模式**（跨多个成就反复出现的工作方式 = 他最可靠的习惯，不是偶然）；\n' +
+      '  ④ 反推时区分"成就的归因"（什么工作方式真导致了成就 vs 运气/时代红利）——找因果证据，不把时代红利当他本事；\n' +
+      '  ⑤ 产出 = "他的影子习惯清单"：遇到 X 情况 → 他会怎么工作（不是他怎么想，是**他怎么动手**）——这是员工干活时的行为指南。\n' +
+      '  例：Hamel 做出 Humanocracy（成就）→ 反推工作方式：先量化官僚成本再设计新组织（先算账再动手）、拿 7000 人调研做证据（用数据不用感觉）、对照去层级化标杆（找参照系）。',
     validationAnchors: '写卡后用两个锚点自检：①已知答案测试（拿他真实的公开决策，看卡里的方法论能否复现他的选择）；②边界测试（拿一个他没遇到过的新问题，看卡里能否给出像他会给的答案）。两条都过 → 卡才真"像他"。',
     antiGeneric: '⚠️ 防通用话术：如果方法论能被任何管理者套用（"先分析再执行""以结果为导向"），说明没捕捉到独特性——打回重提炼。',
+    personBar:
+      '🔒 **选人闸（蒸馏前先确认：这是该领域真正厉害的人物，不是"真实但平庸"）**——虚拟办公的完成度=员工能力=蒸馏对象的水平，所以选人必须选强的。判断是否"领域厉害人物"：\n' +
+      '  ① 可命名贡献：他/她的方法被命名/被引用（如"PDCA=Deming""情境驱动测试=Bach"）或开创了学派/范式（不只做过项目）；\n' +
+      '  ② 公认度：被该领域同行广泛引用/教科书收录/权威机构认可（不止个人博客自夸）；\n' +
+      '  ③ 排他性：**蒸馏前先想"这个领域公认最强的是谁"**——如果知道还有更被公认/更顶级的人物，就选那个，不将就；\n' +
+      '  ④ 反例：真实存在但方法可被任何人套用（无独有命名贡献/无公认度）= 不合格，换人；\n' +
+      '  ⑤ 领域可扩展：任何领域都有厉害人物（软件=大师、制造=质量/精益大师、教育=教学法开创者、医疗=循证权威、农业=育种/植保权威…）——**没有"这个领域没有厉害人物"这回事，只有没去找**。\n' +
+      '  选人闸不过 → 不进入素材提炼，先换更强的人选再蒸馏。',
+    evidenceTrace:
+      '🔎 **证据溯源分级（每项能力标注"真实环境查得到影子的等级"——防把推断当他说过/做过）**：蒸馏出的每项能力/工作方式必须标证据级，员工只把 A/B 当真影子用，C 不冒充：\n' +
+      '  [A 原文级]：他**亲口说过/亲手写过**（著作/访谈/文章原文）——标"出自哪篇哪句"（如 Hamel"先算官僚税"出自 HBR 2011 原文）——影子最硬；\n' +
+      '  [B 行为级]：他**真实做过**（决策/项目/调研/行为记录，有公开记录）——标"哪个行为/项目"（如 Hamel 做过 7000 人 HBR 读者调研）——影子可靠；\n' +
+      '  [C 推断级]：从成就**反推**的工作方式（他没直接说过/无行为记录，是蒸馏者推断"他大概这么工作"）——**必须显式标 [C推断]**，且**不得冒充 A/B 当真影子驱动员工产出**（防止把脑补当他本事）；C 只作"可能的工作方式"参考，写卡时优先找 A/B 证据替代它。\n' +
+      '  铁律：**A/B/C 混着不标 = 不合格**——用户分不清哪些真查得到影子、哪些是推断；宁可 60 分诚实（标 C 推断）不要 90 分编造（把推断写成他说过）。每项能力写卡格式：[A|B|C] 能力内容（出处/行为/推断依据）。',
+    fingerprintTrace:
+      '🎨 **产出指纹提炼（"产出能看出人物影子"的判据——不是方法论描述，是产出本身可辨识的特征）**：每个人物的产出都有"指纹"——他做出来的东西里**反复出现、可辨识、别人难模仿**的特征（跨作品/成就找重复），员工产出对照指纹就能看出"像不像他做的"。\n' +
+      '  做法（从真实作品/成就提炼，不是从他说过什么）：\n' +
+      '  ① 看他反复做出来的东西（画作/著作/方案/产品/决策记录）——跨多个找**重复出现的特征**（如梵高跨画作反复出现厚涂笔触/高饱和黄蓝/漩涡笔法——他的视觉指纹；Fowler 反复小步重构/演进式架构——他的工作指纹）；\n' +
+      '  ② 每条指纹要**具体到能在产出里逐项检查**（"厚涂笔触/黄蓝高饱和"可查；"有创意"不可查——抽象词不是指纹）；\n' +
+      '  ③ 指纹 = 员工产出时的**创作/工作判据**：每步问"这样做像不像他的指纹"；产出后验证者**对照指纹逐项查产出**（有厚涂?有黄蓝?——有=有影子，无=没影子）。\n' +
+      '  产出格式：指纹清单每条 = 指纹名 + 可查特征（怎么在产出里认出它）+ 出自哪个作品/成就（证据）。',
+    workbenchTrace:
+      '🧰 **工作台需求反馈（人物卡自己反馈"这领域做这活要什么环境工具"——不许默认 Linux 万能、不许乱搞）**：蒸馏时一并反馈该人物的"工作台需求"（写进卡的 `工作台需求：` 段）：\n' +
+      '  ① 做这类产出要什么环境/工具（本领域必需，不是通用 Linux——软件=编译器/运行环境；短视频=剪辑工具；画画=绘图工具/画布；设计=设计软件）；\n' +
+      '  ② 默认环境（Linux shell）够不够——够=直接干；不够=明确列出缺什么工具/环境；\n' +
+      '  ③ 缺了会怎样（能否降级产出/还是产不出真东西）；\n' +
+      '  ④ 红线：默认环境不够却硬干/假装产出 = 一票否决（产出是假的）——环境不到位如实上报等准备，不硬装不糊弄。\n' +
+      '  反馈格式：{"workspaceNeeds":{"tools":["本领域必需工具/环境"],"linuxEnough":true|false,"missing":["缺什么"],"fallback":"缺了能否降级/还是做不了真产出"}}。',
+
+    aiDisplacementTrace:
+      '🤖 **AI 执行平替（人物保留判断/审美/决策，执行从人工工具平移到 AI 工具——前 AI 时代的工具太重）**：真实人物成就多是前 AI 时代用人工工具做的（一笔笔画/手动剪片/手写代码），数字员工在 AI 时代要用 AI 替代人工执行。蒸馏时给每条工作方式标执行方式：\n' +
+      '  [判断] 必须人物亲自判断（怎么选/怎么评好坏/审美取舍/AI 生成后他选哪个）——AI 不能代，代了=丢影子；\n' +
+      '  [AI执行] 可用 AI 工具提速（调研→AI 分析、生成初稿→AI 生成、批量→自动化），保留判断标准 AI 只做执行；\n' +
+      '  [人工] 必须真实人工/真实验证（真测试/真部署/真人确认）——不许 AI 假装完成。\n' +
+      '  红线：判断被 AI 代=丢影子；执行不 AI 化=工具太重；[人工] 环节 AI 冒充=一票否决。\n' +
+      '  反馈格式：每条工作方式标 [判断]/[AI执行]/[人工]，如 {"workHabits":[{"habit":"先量化再动手","execMode":"判断","aiNote":"量化可用AI分析提速但「量什么」是判断"}]}。',
+
     sourceCheck: src
       ? `素材已提供（${src} 字符）：从中逐条找上面 6 类证据，每条标注"出自素材哪段/哪个出处"，并给素材质量分级（一手/二手）。`
       : '⚠️ 未提供素材：先用 web_search 查该领域真实权威（长访谈/一手文章/决策记录优先，避开黑名单源），把原文摘进来再提炼——不许凭印象编。',
-    respondAs: `输出蒸馏作业：{"role":"${role || '?'}","howFingerprints":[{"trigger":"遇到X时→先做Y","source":"出自素材哪段"}],"tradeoffs":["宁可A不要B"],"jargon":["独有概念"],"counterIntuitive":["反直觉决策"],"cognitionTimeline":["A观点→B观点的变化时刻"],"failureBoundary":["不适用场景"],"decisionHeuristics":["if-then 规则"],"knownAnswerTest":["拿真实决策验证卡的方法论能否复现"],"draftCard":"基于以上提炼的六段式卡草稿(待 jarvis_distill 校验)"}。`,
+    respondAs: `输出蒸馏作业：{"role":"${role || '?'}","achievements":[{"achievement":"他取得的真实成就","workHabits":["从该成就反推的工作方式(怎么动手做到的)"]}],"shadowHabits":[{"trigger":"遇到X情况时","habit":"他会怎么工作(固定动作)"}],"howFingerprints":[{"trigger":"遇到X时→先做Y","source":"出自素材哪段"}],"tradeoffs":["宁可A不要B"],"jargon":["独有概念"],"counterIntuitive":["反直觉决策"],"cognitionTimeline":["A观点→B观点的变化时刻"],"failureBoundary":["不适用场景"],"decisionHeuristics":["if-then 规则"],"knownAnswerTest":["拿真实决策验证卡的方法论能否复现"],"draftCard":"基于以上提炼的六段式卡草稿(待 jarvis_distill 校验)"}。`,
   }
 }
 
@@ -312,6 +496,8 @@ export const TOOLS = [
           confidence: { type: 'string', description: 'high/medium/low' },
           suggestion: { type: 'string', description: '适合的建队等级 S/M/L' },
           distillDirection: { type: 'string', description: '建议往哪个方向 web 蒸馏真实大佬' },
+          vague: { type: 'boolean', description: '需求是否过于模糊（需先澄清）' },
+          clarifyHint: { type: 'string', description: '模糊时给出的澄清指引' },
         },
         required: ['industry', 'suggestion'],
       },
@@ -320,27 +506,30 @@ export const TOOLS = [
     handler: async (args) => {
       const text = String(args.requirement ?? '')
       const hit = identifyIndustry(text)
-      const len = text.trim().length
-      const suggestion = len <= 5 ? 'S：直接做（不需要建队）' : len < 40 ? 'M：精简公司（2-4 人，现场蒸馏子角色）' : 'L：全链公司（4-7 人，现场蒸馏 CEO+子角色）'
-      return {
+      const out = {
         industry: hit.industry,
-        confidence: len <= 5 ? 'low' : 'medium',
-        suggestion,
+        confidence: hit.vague ? 'low' : 'medium',
+        suggestion: hit.suggestion,
         distillDirection: hit.distillDirections.join(' / '),
       }
+      if (hit.vague) {
+        out.vague = true
+        out.clarifyHint = '需求过于模糊：先用 jarvis_clarify 做 REFORM-CLARIFY 澄清（问清"为谁解决什么、怎样算成功"），未清晰前不建队。'
+      }
+      return out
     },
   },
 
   {
     name: 'jarvis_store',
     description:
-      '项目记忆库管理（领域无关的"项目长期记忆"）：prototypes(真实人物原型资料)/cards(虚拟人物卡)/process(流程)/components(组件)/project.md(项目细节快照)/board(黑板)/lessons(进度经验) 都沉淀在**项目自己的** <workspace>/.jarvis/ 里——AI 识别到本项目直接读这套记忆继续工作，不用重分析源码。模式：①check=阶段零判定（有记忆→直接读取复用继续；无记忆→从零蒸馏并建立记忆库）；②scaffold=输出记忆库目录结构；③reuse=复用校验（本项目沉淀可复用但须过 jarvis_distill 校验+按新需求修订；跨项目/插件禁止）；④save=按类型写入对应目录（prototype→prototypes/、card→cards/、project→project.md、lesson→lessons.md、process/components→json）。插件本身不携带任何角色卡与领域模板。',
+      '项目记忆库管理（领域无关的"项目长期记忆"，类比 .idea：项目内嵌随项目走）：prototypes(真实人物原型素材)/cards(虚拟人物卡)/process(流程)/components(组件)/project.md(项目细节快照)/board(黑板)/lessons(进度经验) 都沉淀在**项目自己的** <workspace>/.jarvis/ 里——AI 识别到本项目直接读这套记忆继续工作，不用重分析源码。**目录规范**：根目录只放 README.md(规范说明)/board.json/project.md/lessons.md/process-*.json/components.json，其余按类型归档——人物素材→prototypes/、人物卡→cards/(历史→cards/history/)、审计报告→reports/、设计稿→designs/、验证脚本→scripts/、交付文档→docs/，**产物不许散在根目录**。模式：①check=阶段零判定（有记忆→直接读取复用继续；无记忆→从零蒸馏并建立记忆库）；②scaffold=输出记忆库目录结构；③reuse=复用校验（本项目沉淀可复用但须过 jarvis_distill 校验+按新需求修订；跨项目/插件禁止）；④save=按类型写入对应目录（prototype→prototypes/、card→cards/、project→project.md、lesson→lessons.md、process/components→json）。插件本身不携带任何角色卡与领域模板。',
     parameters: {
       type: 'object',
       properties: {
         mode: { type: 'string', description: 'check 查记忆库判定 / scaffold 初始化结构 / reuse 复用校验 / save 写入记忆（默认 scaffold）' },
         projectDir: { type: 'string', description: '项目记忆库根目录（默认 <workspace>/.jarvis/）' },
-        itemType: { type: 'string', description: '沉淀类型：prototype=真实人物原型 / card=虚拟人物卡 / process=领域流程 / component=组件 / project=项目细节快照 / lesson=进度经验（save 用）' },
+        itemType: { type: 'string', description: '沉淀类型：prototype=真实人物原型→prototypes/ / card=虚拟人物卡→cards/ / process=领域流程→根 process-*.json / component=组件→components.json / project=项目细节快照→根 project.md / lesson=进度经验→根 lessons.md / report=审计报告→reports/ / design=设计稿→designs/ / script=验证脚本→scripts/ / doc=交付文档→docs/（save 用，按类型归档不散根目录）' },
         name: { type: 'string', description: '角色名或流程/组件名' },
         existingCards: { type: 'string', description: '本项目已沉淀角色卡清单 JSON，如 [{"role":"研发","file":"cards/研发.md"}]（reuse 校验用）' },
         existingDirs: { type: 'string', description: '本项目 .jarvis/ 已有目录清单 JSON（check 判定用）' },
@@ -372,13 +561,18 @@ export const TOOLS = [
       const existingCards = String(args.existingCards ?? '').trim()
       const existingDirs = String(args.existingDirs ?? '').trim() // 已有沉淀目录清单 JSON（check 用）
       const structure = [
+        `${projectDir}README.md        —— 本目录规范说明（每个子目录放什么/怎么命名/怎么归档）——先读它再读写 .jarvis`,
         `${projectDir}prototypes/      —— 真实人物信息资料（原型）：每个真实大佬的原始素材（访谈/著作/决策记录/URL），是蒸馏的证据源，AI 识别到本项目直接读取`,
-        `${projectDir}cards/           —— 虚拟人物卡（工作能力细节）：蒸馏出的六段式角色卡（思维模型/方法论/红线/协同），含深度分`,
-        `${projectDir}process-*.json   —— 领域流程：CEO 定稿的阶段/闸门/红线/必须角色/会议触点`,
+        `${projectDir}cards/           —— 虚拟人物卡（工作能力细节）：蒸馏出的六段式角色卡（思维模型/方法论/红线/协同），含深度分；历史版本放 cards/history/`,
+        `${projectDir}process-*.json   —— 领域流程：CEO 定稿的阶段/闸门/红线/必须角色/会议触点（命名 process-<需求关键词>.json）`,
         `${projectDir}components.json  —— 组件清单：能力补足自研/引入的组件（名字/功能/用法/维护者）`,
         `${projectDir}board.json       —— 统一黑板：会议驱动协作的状态/未决项/决议`,
         `${projectDir}project.md       —— 项目细节快照：需求本质/验收标准/接口契约/进度/关键决策——AI 读到即可继续，不用重分析源码`,
         `${projectDir}lessons.md       —— 当前项目进度经验总结：踩坑/教训/适配度记录，防重复`,
+        `${projectDir}reports/         —— 审计/复盘报告：单次专项的产出（如 t1 审计报告），命名 <主题>.md`,
+        `${projectDir}designs/         —— 设计稿：方案未实施前的设计文档（供方案评审），实施后归档或并入 docs/`,
+        `${projectDir}scripts/         —— 验收/验证脚本：本项目的可执行验证（如判别实验），命名 <用途>.mjs`,
+        `${projectDir}docs/            —— 交付文档与索引：方案定稿/交付清单/历史需求索引`,
       ]
       let reuseRule = ''
       let verdict = ''
@@ -414,19 +608,31 @@ export const TOOLS = [
           verdict = `${name || typeName} 不在本项目沉淀清单 → 禁止复用（除非是本项目已沉淀且通过校验+修订），跨项目/外部来源必须重新现场蒸馏。`
         }
       } else if (mode === 'save') {
-        // 类型 → 目录/扩展名：prototype=真实人物原型，card=虚拟人物卡，project=项目细节快照，lesson=进度经验，其余 json
-        const ext = itemType === 'card' || itemType === 'prototype' || itemType === 'project' || itemType === 'lesson' ? '.md' : '.json'
-        const dir = itemType === 'card' ? 'cards/' : itemType === 'prototype' ? 'prototypes/' : itemType === 'project' ? '' : itemType === 'lesson' ? '' : ''
+        // 类型 → 目录/扩展名（规范归档：根只放 project/lesson/process/component，其余按类型入子目录）
+        const MD_TYPES = ['card', 'prototype', 'project', 'lesson', 'report', 'design', 'doc']
+        const ext = itemType === 'script' ? '.mjs' : MD_TYPES.includes(itemType) ? '.md' : '.json'
+        const DIR = {
+          card: 'cards/',
+          prototype: 'prototypes/',
+          report: 'reports/',
+          design: 'designs/',
+          script: 'scripts/',
+          doc: 'docs/',
+          process: '', component: '', project: '', lesson: '',
+        }
+        const dir = DIR[itemType] ?? ''
         savePath = `${projectDir}${dir}${(name || itemType || 'item').replace(/[\\/:*?"<>|]/g, '_')}${ext}`
         reuseRule =
           '写入后即成为本项目记忆库：后续本项目需求直接读取复用（卡须过 jarvis_distill 校验+按新需求修订）；跨项目不共享。'
-        verdict = `写入 ${savePath}（项目记忆库，非插件资产）——AI 识别到本项目直接读它继续，不用重分析源码。`
+        verdict = `写入 ${savePath}（项目记忆库，非插件资产；按类型归档到对应子目录，不散在 .jarvis/ 根）——AI 识别到本项目直接读它继续，不用重分析源码。`
       } else {
         reuseRule =
           '插件无静态卡/无领域模板（领域无关）。角色卡与流程只能来自：① 本项目 .jarvis/ 沉淀（可复用起点）；② 现场 web 蒸馏（新需求/跨项目必走）。'
         verdict = `项目沉淀结构就绪：${projectDir} 已初始化（CEO 按结构落盘即可，文件由 CEO/成员在工作区管理）。`
       }
-      return { structure, reuseRule, savePath: savePath || undefined, verdict }
+      const storeOut = { structure, reuseRule, verdict }
+      if (savePath) storeOut.savePath = savePath
+      return storeOut
     },
   },
 
@@ -461,7 +667,7 @@ export const TOOLS = [
         required: ['stages', 'gates', 'redlines', 'verdict'],
       },
       render: (r) =>
-        `【${r.industry || '领域由 CEO 判断'} 流程 · ⚠️ CEO 现场定制（插件无预设）\n设计清单：${r.designChecklist}\n阶段：${r.stages.join(' → ')}\n闸门：${r.gates.map((g) => '  ⛔ ' + g).join('\n')}\n红线：${r.redlines.map((x) => '  🚫 ' + x).join('\n')}\n必须角色：${(r.mustRoles || []).join(' / ')}\n会议触点：${(r.touchpoints || []).join(' / ')}`,
+        `【${r.industry || '领域由 CEO 判断'} 流程 · ⚠️ CEO 现场定制（插件无预设）\n设计清单：${r.designChecklist ?? ''}\n阶段：${r.stages.join(' → ')}\n闸门：${r.gates.map((g) => '  ⛔ ' + g).join('\n')}\n红线：${r.redlines.map((x) => '  🚫 ' + x).join('\n')}\n必须角色：${(r.mustRoles || []).join(' / ')}\n会议触点：${(r.touchpoints || []).join(' / ')}`,
     },
     handler: async (args) => {
       const industry = String(args.industry ?? '').trim()
@@ -541,9 +747,28 @@ export const TOOLS = [
         return { ok: false, missing, verdict: `角色卡缺 ${missing.join('、')}；请补全后重新蒸馏并用 jarvis_distill 校验` }
       }
       // 深度硬闸：结构齐全≠有深度。浅层卡（标题齐全内容空洞/编造保留域 URL/无查证痕迹）→ 不通过
+      //   ⛔ 空洞段一票否决：六段中 ≥3 段内容空洞（filled<4）→ 直接打回——防"真实人名+空泛工作特点"
+      //     的结构凑分卡（只有 source/证据链齐全但方法论全空话，score 可能 ≥60 但实质是空卡）。
       const depth = assessCardDepth(card, isCeo)
-      if (depth.score < 60) {
-        return { ok: false, missing: [], depthScore: depth.score, depthIssues: depth.issues, verdict: `深度不足（${depth.score}/100）——"结构齐全内容空洞"的浅层卡不得注入。${depth.issues.slice(0, 3).join('；')}` }
+      const hasReservedSource = /https?:\/\/[^\s）)】]+/.test(card) && /example\.com|localhost|127\.0\.0\.1|\.test\b|your-domain/.test(card.match(/https?:\/\/[^\s）)】]+/)?.[0] || '')
+      // 代表作品须含"具体成就"（成就反推工作方式的依据——泛泛"某创始人/做过项目"无法反推能力影子，等于卡没有能力来源）
+      //   具体成就信号：作品/成果名 + 做了什么/规模/影响/年份（"主导某项目/创建某体系/著有某书/推动某变革"且可验证）
+      const worksSection = (card.match(/代表作品[：:]\s*([^\n]+)/) || [])[1] || ''
+      const VAGUE_WORKS = /某[^，。]{0,6}(创始人|公司|品牌|项目|产品)|一个项目|一些项目|某企业|做过项目/
+      // 成就证据两种合法形态：①具体动作+成果（主导/创建/著有/推动...）；②"借鉴《真实作品名》"（作品名本身就是他的成就——
+      //   能"借鉴 Refactoring"说明作者写了 Refactoring；但"借鉴某品牌/某公司打法"仍是泛泛，不算）
+      const actionAchievement = /主导|创建|建立|推出|发明|著有|推动|实现|打造|设计|开发|发起|创办|带领|让.{0,10}(提升|降低|增长|成为)|影响|规模|用户|年份/.test(worksSection)
+      const workNamed = /《[^》]{2,30}》/.test(worksSection) || /Refactoring|Continuous|Humanocracy|Rework|Remote|Steve Jobs|Continuous Discovery/.test(worksSection)
+      const hasConcreteAchievement = worksSection.length >= 15 && !VAGUE_WORKS.test(worksSection) && (actionAchievement || workNamed)
+      const hasFlairVeto = depth.issues.some((i) => i.includes('展示型空泛'))
+      if (depth.score < 60 || depth.filled < 4 || hasReservedSource || !hasConcreteAchievement || hasFlairVeto) {
+        const reasons = []
+        if (depth.score < 60) reasons.push(`深度不足（${depth.score}/100）`)
+        if (depth.filled < 4) reasons.push(`六段中 ${6 - depth.filled} 段内容空洞（工作特点空泛——真实人物+空泛方法论 = 不合格，须补该人物独有的 HOW/决策触发词/取舍）`)
+        if (hasReservedSource) reasons.push('source 是保留/示例域（example.com 等——编造出处嫌疑，须真实可查 URL）')
+        if (!hasConcreteAchievement) reasons.push(`代表作品段无"具体成就"（当前='${worksSection.slice(0, 40) || '空'}'——泛泛"某创始人/做过项目"无法反推工作方式=卡没有能力影子来源。须写具体的：做出过什么成果/规模/影响/年份，如"著有 X 书/主导 X 项目推动 X 增长/创建 X 体系"）`)
+        if (hasFlairVeto) reasons.push('方法论是"展示型空泛"（评价性形容词堆砌，无"遇到X→做Y"可执行行为）——卡不贵多贵有用，删空话换具体做法')
+        return { ok: false, missing: [], depthScore: depth.score, depthIssues: depth.issues, verdict: `深度硬闸打回：${reasons.join('；')}——"结构齐全内容空洞"的浅层卡不得注入。${depth.issues.slice(0, 3).join('；')}` }
       }
       return {
         ok: true,
@@ -572,6 +797,7 @@ export const TOOLS = [
         additionalProperties: false,
         properties: {
           role: { type: 'string' },
+          industry: { type: 'string', description: 'CEO 判断的领域（可选）' },
           purpose: { type: 'string' },
           tastePrinciples: { type: 'array', items: { type: 'string' } },
           sourceHierarchy: { type: 'array', items: { type: 'string' } },
@@ -580,7 +806,13 @@ export const TOOLS = [
           steps: { type: 'array', items: { type: 'string' } },
           decisionHeuristics: { type: 'string' },
           validationAnchors: { type: 'string' },
+          achievementTrace: { type: 'string', description: '成就反推工作方式：列出该人物真实成就 → 反推"他怎么工作才做到的"（影子习惯来源）' },
+          evidenceTrace: { type: 'string', description: '证据溯源分级：每项能力标 A原文级/B行为级/C推断级（员工只把 A/B 当真影子，C 不冒充）' },
+          fingerprintTrace: { type: 'string', description: '产出指纹提炼：从真实作品/成就提炼该人物产出的可辨识特征（对照指纹能看出产出像不像他做的）' },
+          workbenchTrace: { type: 'string', description: '工作台需求反馈：人物卡自己反馈这领域做这活要什么环境/工具（不许默认 Linux 万能/不许乱搞）' },
+          aiDisplacementTrace: { type: 'string', description: 'AI 执行平替：人物保留判断/审美/决策，执行从人工工具平移到 AI 工具（每条工作方式标 判断/AI执行/人工）' },
           antiGeneric: { type: 'string' },
+          personBar: { type: 'string', description: '选人闸：蒸馏前先确认该人物是该领域真正厉害的人物（可命名贡献/公认度/排他性），防止注入"真实但平庸"的人' },
           sourceCheck: { type: 'string' },
           respondAs: { type: 'string' },
         },
@@ -654,12 +886,13 @@ export const TOOLS = [
       const essenceCheck = requirement
         ? `先重述需求本质：「${requirement.slice(0, 120)}」——为谁解决什么、怎样算成功。然后逐条核对裁决：① 偏离需求本质了吗（把用户要X做成了你想要的Y）？② 在迎合谁（用户原话/角色卡/主流方案/会议多数）？③ 有没有无依据断言（编造 source/数据/案例）？只要有一项打问号，裁决必须打回重做——回归需求本质优先于一切。必要时用 jarvis_essence 完成审计。`
         : '⚠️ 未提供原始需求（requirement）——裁决必须拿到需求本质才能定案：先补需求再裁决，禁止脱离需求空谈。'
-      return {
+      const reviewOut = {
         ruling: `待 CEO 基于需求本质与真实情况裁决：「${issue}」。A=${sideA}；B=${sideB}。`,
         basis: '需求本质 > 真实情况 > 用户需求 > 专业判断（不迎合角色卡/主流方案/会议多数，回归原始需求定案）',
-        analysis: notes.length ? notes.join('\n') : undefined,
         essenceCheck,
       }
+      if (notes.length) reviewOut.analysis = notes.join('\n')
+      return reviewOut
     },
   },
 
@@ -693,7 +926,7 @@ export const TOOLS = [
         required: ['essence', 'verdict'],
       },
       render: (r) =>
-        `【需求本质审计】本质=${r.essence}\n四查：${(r.checks ?? []).map((c) => '  🔍 ' + c).join('\n')}\n防迎合：${r.flattery}\n防幻觉：${r.hallucination}\n偏离检查：${r.misalignments}\n判定：${r.verdict}\n审计格式：${r.respondAs}`,
+        `【需求本质审计】本质=${r.essence}\n四查：${(r.checks ?? []).map((c) => '  🔍 ' + c).join('\n')}\n防迎合：${r.flattery ?? ''}\n防幻觉：${r.hallucination ?? ''}\n偏离检查：${r.misalignments ?? ''}\n判定：${r.verdict}\n审计格式：${r.respondAs ?? ''}`,
     },
     handler: async (args) => {
       const requirement = String(args.requirement ?? '').trim()
@@ -740,13 +973,15 @@ export const TOOLS = [
           ok: { type: 'boolean', description: '上报单是否完整可提交' },
           missing: { type: 'array', items: { type: 'string' }, description: '缺失的必填项' },
           record: { type: 'string', description: '上报单全文' },
-          boardEntry: { type: 'string', description: '建议写入黑板的阻塞条目' },
+          boardEntry: { type: 'string', description: '写入黑板的阻塞条目（完整上报时已真写入）' },
+          boardWritten: { type: 'boolean', description: '阻塞条目是否已写入黑板' },
+          boardError: { type: 'string', description: '黑板写入失败原因（如实上报，不假装已写入）' },
           protocol: { type: 'string', description: '上报纪律（不许跳过）' },
         },
         required: ['ok', 'record'],
       },
       render: (r) =>
-        `问题上行：${r.ok ? '✅ 可上报' : '❌ 打回补细节：' + (r.missing || []).join('、')}\n${r.record}\n黑板条目：${r.boardEntry}\n纪律：${r.protocol}`,
+        `问题上行：${r.ok ? '✅ 可上报' : '❌ 打回补细节：' + (r.missing || []).join('、')}\n${r.record}\n黑板条目：${r.boardEntry ?? ''}\n纪律：${r.protocol ?? ''}`,
     },
     handler: async (args) => {
       const role = String(args.role ?? '?')
@@ -765,7 +1000,33 @@ export const TOOLS = [
       const boardEntry = `阻塞：${problem}（上报人=${role}；风险=${risk.slice(0, 60) || '待补'}；需要决策：${decisionNeeded.slice(0, 40) || '待补'}）——升级 CEO 处理`
       const protocol =
         '纪律（不许跳过问题）：① 技术绕不开/无法抉择 = 必须上报，禁止沉默、降级处理、假装已解决；② 上报必须带 风险细节+已尝试+决策请求 三件套（空单打回）；③ 上报后写黑板（阻塞条目）触发 CEO 响应；④ 宁可上报被驳回，不可沉默绕行——绕过问题 = 缺陷。'
-      return { ok, missing, record, boardEntry, protocol }
+      // BUG-2 修复：上报单完整时真写黑板（.jarvis/board.json），不再只给建议文本
+      //   ——"上报后写黑板（阻塞条目）"是承诺，必须兑现，否则阻塞可能没人看见
+      let boardWritten = false
+      let boardError = ''
+      if (ok) {
+        const fsSvc = (() => {
+          try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+        })()
+        const disk = await readBoardItems(fsSvc)
+        const items = disk.fromDisk ? disk.items : []
+        // 去重：同问题上行（内容相同且未解决）不重复写
+        const dup = items.some((it) => it.type === '阻塞' && it.status === 'open' && it.content.includes(problem.slice(0, 30)))
+        if (!dup) {
+          items.push({ id: nextBoardId(items), role, type: '阻塞', content: boardEntry, status: 'open', essenceChecked: true, time: new Date().toISOString().slice(0, 16) })
+          const w = await writeBoardItems(fsSvc, items, disk.version)
+          boardWritten = w.ok
+          boardError = w.ok ? '' : w.error
+        } else {
+          boardWritten = true // 已存在相同阻塞条目，视为已登记
+        }
+      }
+      const out = { ok, missing, record, boardEntry, protocol }
+      if (ok) {
+        out.boardWritten = boardWritten
+        if (boardError) out.boardError = boardError
+      }
+      return out
     },
   },
 
@@ -796,7 +1057,7 @@ export const TOOLS = [
         required: ['gap', 'decision'],
       },
       render: (r) =>
-        `【能力补足】缺口=${r.gap}\n决策=${r.decision}\n验证：${r.verifyNotes}\n自研要求：${r.buildNote}\n诚实边界：${r.honestNote}`,
+        `【能力补足】缺口=${r.gap}\n决策=${r.decision}\n验证：${r.verifyNotes ?? ''}\n自研要求：${r.buildNote ?? ''}\n诚实边界：${r.honestNote ?? ''}`,
     },
     handler: async (args) => {
       const task = String(args.task ?? '').trim()
@@ -873,7 +1134,7 @@ export const TOOLS = [
       let remoteVersion = ''
       let remoteError = ''
       try {
-        const out = execSync(`git ls-remote --tags ${remoteUrl}`, { timeout: 20000, encoding: 'utf8' })
+        const out = execFileSync('git', ['ls-remote', '--tags', remoteUrl], { timeout: 20000, encoding: 'utf8' })
         // 取形如 v0.2.0 的最高语义版本 tag（排除 ^{} 与非 v 前缀）
         const tags = out.split('\n').map((l) => l.trim().split(/\s+/)[1]).filter((t) => t && t.startsWith('refs/tags/v'))
           .map((t) => t.replace('refs/tags/', '')).filter((t) => !t.endsWith('^{}'))
@@ -906,14 +1167,11 @@ export const TOOLS = [
           : hasUpdate
             ? `有新版本 ${remoteVersion}（本地 ${localVersion}）：按 UPGRADE 文档升级（解包覆盖 node_modules/luke-jarvis + 重启 dsh web）。`
             : `已是本地最新 ${localVersion}（远程 ${remoteVersion}）：无需升级。`
-      return {
-        localVersion,
-        remoteVersion: remoteVersion || undefined,
-        hasUpdate,
-        changelog: changelog || undefined,
-        upgradeStep: hasUpdate ? 'docs/UPGRADE-*.md：解包 → 覆盖 ~/.dsh/profiles/web/node_modules/luke-jarvis/ → 重启 dsh web' : undefined,
-        verdict,
-      }
+      const updateOut = { localVersion, hasUpdate, verdict }
+      if (remoteVersion) updateOut.remoteVersion = remoteVersion
+      if (changelog) updateOut.changelog = changelog
+      if (hasUpdate) updateOut.upgradeStep = 'docs/UPGRADE-*.md：解包 → 覆盖 ~/.dsh/profiles/web/node_modules/luke-jarvis/ → 重启 dsh web'
+      return updateOut
     },
   },
 
@@ -949,7 +1207,7 @@ export const TOOLS = [
   {
     name: 'jarvis_think_deep',
     description:
-      '角色深度思考器（ponder 满血入口引导器，防幻觉核心）：**每个角色的独立思考必须加载 ponder 技能跑完整十阶段**（DSH 平台级：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，资源分散在 explore/blindspots/solutions/simulate/debate/synthesis 技能全部可加载，子 agent 具备 skill 工具），step-guard init 开始本次 run，把本角色卡六段式作为"人物视角"注入画像后十阶段全量跑完，产出按衔接契约回填（counter←divergence/bagua/debate、realityCheck←interview/无知自检、confidence←converge/certainty、conclusion←synthesis、limits←epistemic_status）。**满血不阉割**：禁止只跑 interview+converge 两段或用轻量七段替代（那达不到思考效果）；低赌注（low）可精简各阶段内 agent 规模但不得跳过阶段。产出带 run_id 溯源，可直接喂给 jarvis_review 做分歧裁决双方依据（thinkA/thinkB）。铁律：真实情况优先于角色卡；宁 60 分诚实不要 90 分编造；跳过 ponder 必须显式声明 skipReason（技能不可用/用户成本优先）并留痕，禁止静默降级；web_search 受限时查证类阶段降级为知识库推演但标注"受限环境推演"。',
+      '角色深度思考器（ponder 满血入口引导器，防幻觉核心）：**每个角色的独立思考必须加载 ponder 技能跑完整十阶段**（DSH 平台级：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，十阶段资源全部在 ponder 技能包内自包含随 luke-jarvis 自带：stages/*.json + engine/*.md + scripts/step-guard.cjs + scripts/_lib/，子 agent 具备 skill 工具），step-guard.cjs init 开始本次 run，把本角色卡六段式作为"人物视角"注入画像后十阶段全量跑完，产出按衔接契约回填（counter←divergence/bagua/debate、realityCheck←interview/无知自检、confidence←converge/certainty、conclusion←synthesis、limits←epistemic_status）。**满血不阉割**：禁止只跑 interview+converge 两段或用轻量七段替代（那达不到思考效果）；低赌注（low）可精简各阶段内 agent 规模但不得跳过阶段。产出带 run_id 溯源，可直接喂给 jarvis_review 做分歧裁决双方依据（thinkA/thinkB）。铁律：真实情况优先于角色卡；宁 60 分诚实不要 90 分编造；跳过 ponder 必须显式声明 skipReason（技能不可用/用户成本优先）并留痕，禁止静默降级；web_search 受限时查证类阶段降级为知识库推演但标注"受限环境推演"。',
     parameters: {
       type: 'object',
       properties: {
@@ -967,6 +1225,7 @@ export const TOOLS = [
         properties: {
           role: { type: 'string' },
           stakes: { type: 'string' },
+          ponderGuide: { type: 'string', description: '满血 ponder 十阶段入口引导（必须先加载 ponder 技能跑完整十阶段，不得跳过）' },
           premises: { type: 'string', description: '前提审视指令：列出隐含前提并标出未验证项' },
           perspective: { type: 'string', description: '视角展开指令：引用角色卡思维模型给出第一判断' },
           counter: { type: 'string', description: '反方攻击指令：当X时不成立' },
@@ -1009,7 +1268,7 @@ export const TOOLS = [
       return {
         role: roleName,
         stakes,
-        ponderGuide: `【${roleName} · ${stakes} 赌注深度思考 · 必须加载 ponder 技能（满血版）】\n${depthNote}${forceNote}\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.js init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.js 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）——${stakes !== 'high' ? '各阶段 agent 规模按低赌注精简（如 bagua 4 维/辩论 2 立论）但阶段一个不少' : '阶段与 agent 规模全量' }；\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；${stakes === 'high' ? 'high 须含可谬自评（见上）。' : ''}\n5. 把 run_id 与阶段产出溯源一并写入输出（供 jarvis_review 防贴标签校验——有 run_id 才算真跑过 ponder）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）降级为知识库推演但标注"受限环境推演"。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","skipReason":"降级原因或空"}。`,
+        ponderGuide: `【${roleName} · ${stakes} 赌注深度思考 · 必须加载 ponder 技能（满血版）】\n${depthNote}${forceNote}\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.cjs init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.cjs 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）——${stakes !== 'high' ? '各阶段 agent 规模按低赌注精简（如 bagua 4 维/辩论 2 立论）但阶段一个不少' : '阶段与 agent 规模全量' }；\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；${stakes === 'high' ? 'high 须含可谬自评（见上）。' : ''}\n5. 把 run_id 与阶段产出溯源一并写入输出（供 jarvis_review 防贴标签校验——有 run_id 才算真跑过 ponder）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）降级为知识库推演但标注"受限环境推演"。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","skipReason":"降级原因或空"}。`,
         premises: `（已转 ponder 十阶段，本字段不适用——见 ponderGuide）`,
         perspective: `（已转 ponder 十阶段——以「${roleName}」角色卡方法论【${howText}】注入画像驱动全程）`,
         counter: `（已转 ponder 十阶段——由 divergence/bagua/debate 产出反方）`,
@@ -1160,7 +1419,7 @@ export const TOOLS = [
   {
     name: 'jarvis_perf',
     description:
-      '员工绩效评估器（CEO 时刻盯人的量化工具，含阶段性完成度考核）：多角度评估员工能力——①成果质量（产出被打回几次/过验收标准没）；②任务完成度（负责任务持续未完成/超时）；③问题上行健康度（过度上报=没判断力，长期不上报=在闷着，高频信号加权）；④角色卡契合度（产出与蒸馏卡方法论是否符合）；⑤深度分（角色卡 distill 深度分）。**阶段性考核（防 0 产出误判）**：必须传 stageStatus——pending（阶段未到/任务未分配）= 判定"待考核"，不计 0 产出、不累计不达标、不触发换人；assigned/in_progress = 按阶段结果考核（阶段完成度是否符合要求）；due（阶段到期未完成）= 才算不达标。判定规则：阶段结果不符合要求才计不达标；连续 2 次不达标 → 建议换人（走离任→重蒸馏补位流程）；高频信号异常（问题上行异常）→ 立即触发评估，不等 2 次。不武断：每次评估写"哪项不足+依据"，留痕可追溯。',
+      '员工绩效评估器（CEO 时刻盯人的量化工具，含阶段性完成度考核）：多角度评估员工能力——⓪需求对齐度（客户价值，最重要：产出是否直指客户需求本质的可判定验收项——2=直指/1=方向对有偏差/0=偏离需求本质做别的，**偏离=一票否决直接换人**）；①成果质量（产出被打回几次/过验收标准没）；②任务完成度（负责任务持续未完成/超时）；③问题上行健康度（过度上报=没判断力，长期不上报=在闷着，高频信号加权）；④角色卡契合度（产出与蒸馏卡方法论是否符合）；⑤深度分（角色卡 distill 深度分）。**阶段性考核（防 0 产出误判）**：必须传 stageStatus——pending（阶段未到/任务未分配）= 判定"待考核"，不计 0 产出、不累计不达标、不触发换人；assigned/in_progress = 按阶段结果考核（阶段完成度是否符合要求）；due（阶段到期未完成）= 才算不达标。判定规则：阶段结果不符合要求才计不达标；连续 2 次不达标 → 建议换人（走离任→重蒸馏补位流程）；高频信号异常（问题上行异常）→ 立即触发评估，不等 2 次；**需求对齐度=0（产出不是客户要的东西）→ 立即换人，不等 2 次**。不武断：每次评估写"哪项不足+依据"，留痕可追溯。',
     parameters: {
       type: 'object',
       properties: {
@@ -1171,6 +1430,7 @@ export const TOOLS = [
         completion: { type: 'string', description: '阶段完成度信号：0-2（0=阶段到期未完成，1=部分完成/延迟，2=按时完成符合要求）；pending 时忽略' },
         escalation: { type: 'string', description: '问题上行健康度信号：0-2（0=过度上报或长期不上报，1=偶有异常，2=健康（及时且合理））' },
         fit: { type: 'string', description: '角色卡契合度信号：0-2（0=产出与卡方法论明显不符，1=部分符合，2=契合）' },
+        alignment: { type: 'string', description: '需求对齐度（客户价值）：2=产出直指需求本质的可判定验收项 / 1=方向对但有偏差 / 0=偏离需求本质做别的（一票否决，直接换人）' },
         depth: { type: 'string', description: '角色卡深度分（jarvis_distill 输出，0-100）' },
         history: { type: 'string', description: '历史评估记录 JSON（连续判定用），如 [{"ok":false,"at":"2026-08-01"}]' },
       },
@@ -1180,11 +1440,29 @@ export const TOOLS = [
         type: 'object',
         additionalProperties: false,
         properties: {
-          ok: { type: 'boolean', description: '本次是否达标（pending=null 待考核）' },
-          score: { type: 'number', description: '综合分 0-100（pending 时=null）' },
-          signals: { type: 'object', description: '各信号明细' },
+          role: { type: 'string', description: '被评估员工角色名' },
+          ok: { oneOf: [{ type: 'boolean' }, { type: 'null' }], description: '本次是否达标（pending=null 待考核，非达标也非不达标）' },
+          score: { oneOf: [{ type: 'number' }, { type: 'null' }], description: '综合分 0-100（pending 时=null，不计 0 产出）' },
+          signals: {
+            type: 'object',
+            description: '各信号明细',
+            properties: {
+              stageStatus: { type: 'string' },
+              stageRequirement: { type: 'string' },
+              quality: { type: 'number' },
+              completion: { type: 'number' },
+              escalation: { type: 'number' },
+              fit: { type: 'number' },
+              alignment: { type: 'number' },
+              depth: { type: 'number' },
+              note: { type: 'string' },
+            },
+          },
           strikes: { type: 'number', description: '连续不达标次数（pending 不累计）' },
           action: { type: 'string', description: '建议动作：待考核/继续观察/补强/换人' },
+          historyNext: { type: 'string', description: '下次评估应回传的 history（含本次结果，JSON 字符串）——修复"需调用方手动维护历史"的断点' },
+          perfFile: { type: 'string', description: '本角色绩效历史自动落盘文件（.jarvis/perf-<role>.json）' },
+          persisted: { type: 'boolean', description: '本次考核是否已自动落盘（有 fs 环境）' },
           verdict: { type: 'string' },
         },
         required: ['ok', 'score', 'action', 'verdict'],
@@ -1196,43 +1474,104 @@ export const TOOLS = [
       const stageStatus = String(args.stageStatus ?? 'in_progress').trim()
       const stageRequirement = String(args.stageRequirement ?? '').trim()
       const num = (v, d = 1) => { const n = Number(v); return Number.isFinite(n) ? n : d }
-      const quality = num(args.quality, 1)
-      const completion = num(args.completion, 1)
-      const escalation = num(args.escalation, 1)
-      const fit = num(args.fit, 1)
-      const depth = num(args.depth, 0)
+      // BUG-9 修复：信号语义 0-2（0=差/异常，1=偶有，2=健康/达标），越界输入（100/-5/非数字）必须 clamp，
+      //   否则 score 会爆出 0-100 范围，且脏值（如 escalation=999）会被误判为"健康满分"
+      const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+      const quality = clamp(num(args.quality, 1), 0, 2)
+      const completion = clamp(num(args.completion, 1), 0, 2)
+      const escalation = clamp(num(args.escalation, 1), 0, 2)
+      const fit = clamp(num(args.fit, 1), 0, 2)
+      const depth = clamp(num(args.depth, 0), 0, 100)
+      // 需求对齐度（客户价值维度）：2=产出直指需求本质的可判定验收项 / 1=方向对但有偏差 / 0=偏离需求本质做别的
+      //   默认 1（中性：CEO 未特别标注时按"方向对"处理，不误伤；显式传 0 = 偏离 → 一票否决）
+      const alignment = clamp(num(args.alignment, 1), 0, 2)
+      // 自动持久化（修复"换人机制状态不落盘"系统性断点）：perf 历史存 .jarvis/perf-<role>.json，
+      //   跨调用自动累计 strikes（CEO 无需手动传 history/存 historyNext）。
+      //   有 ctx 且有 fs → 自动读写；无 ctx（单测/裸调）→ 纯函数行为不变（history 走参数）。
+      const fsSvc = (() => {
+        try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+      })()
+      const perfFile = role ? '.jarvis/perf-' + role.replace(/[\\/:*?"<>|]/g, '_') + '.json' : ''
       let history = []
-      try { history = JSON.parse(String(args.history ?? '[]')) } catch { history = [] }
+      const explicitHistory = args.history !== undefined && args.history !== null && String(args.history).trim() !== ''
+      if (explicitHistory) {
+        try { history = JSON.parse(String(args.history)) } catch { history = [] }
+      } else if (fsSvc && typeof fsSvc.readText === 'function' && role) {
+        // 无显式 history 时自动从磁盘读历史（跨调用累计 strikes 的持久化源）
+        try {
+          const target = await fsSvc.resolve(perfFile)
+          if (target) {
+            const text = await fsSvc.readText(target)
+            if (text) {
+              const data = JSON.parse(text)
+              if (data && Array.isArray(data.history)) history = data.history
+            }
+          }
+        } catch { history = [] }
+      }
       // ── 阶段性考核：阶段未到/任务未分配 = 待考核，不计 0 产出、不累计不达标、不触发换人 ──
       if (stageStatus === 'pending') {
-        return {
+        const pout = {
+          role,
           ok: null,
           score: null,
           signals: { stageStatus, stageRequirement, note: '阶段未到/任务未分配' },
           strikes: 0,
           action: '待考核（阶段未到，不计 0 产出）',
+          historyNext: JSON.stringify(history),
           verdict: `${role} 当前阶段未到/任务未分配（stageStatus=pending）——按阶段性考核规则判定"待考核"：不因 0 产出扣分、不累计不达标、不触发换人。待其阶段任务分配/到期后再评估"阶段性结果是否符合要求（${stageRequirement || '本阶段验收标准'}）"。`,
         }
+        if (role && fsSvc && typeof fsSvc.readText === 'function') pout.perfFile = perfFile
+        return pout
       }
       // ── 阶段已分配/进行中/到期：按阶段性结果考核 ──
-      // completion 语义：due（到期未完成）才算不达标；assigned/in_progress 看阶段性产出是否符合要求
-      const isDue = stageStatus === 'due'
-      // 信号权重：问题上行健康度高频加权（异常即触发）
-      const weighted = quality * 0.25 + completion * 0.2 + escalation * 0.3 + fit * 0.15 + Math.min(2, depth / 50) * 0.1
-      const score = Math.round(weighted * 50) // 0-2 → 0-100
+      // 信号权重：需求对齐度（客户价值）+ 成果质量 + 完成度 + 上行健康度（高频加权）+ 契合 + 深度
+      const weighted = alignment * 0.2 + quality * 0.2 + completion * 0.15 + escalation * 0.25 + fit * 0.1 + Math.min(2, depth / 50) * 0.1
+      let score = Math.round(weighted * 50) // 0-2 → 0-100
       // 阶段性结果是否符合要求：completion 达标（≥1）+ 成果质量达标（≥1）
       const stageOk = completion >= 1 && quality >= 1
-      const okThis = score >= 60 && escalation > 0 && stageOk // 阶段结果不符合要求 = 不达标
-      // 高频信号异常 → 立即记一次不达标（不等 2 次）
+      // 需求对齐度一票否决：产出偏离客户需求本质（做的是别的）→ 即使内部质量/完成度满分也判不达标（客户价值铁律）
+      const misaligned = alignment === 0
+      // 分数与判定一致：偏离时 score 封顶 59（不再出现"80 分却换人"的分数-结论矛盾）
+      if (misaligned) score = Math.min(score, 59)
+      // 高频信号异常（问题上行=0）→ 立即触发评估：即使阶段产出达标，上行=0（过度上报或闷着）也判本次不达标
       const isTriggered = escalation === 0
-      const totalStrikes = okThis ? 0 : (history.filter((h) => h.ok === false).length + (isTriggered ? 1 : 1))
-      const action = !okThis && (isTriggered || totalStrikes >= 2)
-        ? '换人（走 离任→重蒸馏补位 流程）'
-        : !okThis ? '补强观察（阶段结果不符合要求，本次不达标）' : '继续（阶段结果符合要求，达标）'
+      const okThis = score >= 60 && escalation > 0 && stageOk && !misaligned
+      // BUG-1 修复：strikes 语义——历史不达标数 + 本次不达标(1)/达标(0)；isTriggered 时本次必为不达标（escalation=0 已含在 okThis 判定）
+      const prevFails = history.filter((h) => h.ok === false).length
+      const totalStrikes = okThis ? 0 : prevFails + 1
+      const action = misaligned
+        ? '换人（需求本质偏离：产出不是客户要的东西——方向错再补也是错，直接走 离任→重蒸馏补位）'
+        : !okThis && (isTriggered || prevFails + 1 >= 2)
+          ? '换人（走 离任→重蒸馏补位 流程）'
+          : !okThis ? '补强观察（阶段结果不符合要求，本次不达标）' : '继续（阶段结果符合要求，达标）'
       const verdict = role
-        ? `${role} 阶段状态=${stageStatus}，阶段要求=${stageRequirement || '（未注明）'}。阶段结果${stageOk ? '符合要求' : '不符合要求'}（完成度${completion}/质量${quality}），综合 ${score}/100（成果${quality}/完成${completion}/上行${escalation}/契合${fit}/深度${depth}）。${action}。依据已留痕。`
+        ? `${role} 阶段状态=${stageStatus}，阶段要求=${stageRequirement || '（未注明）'}。阶段结果${stageOk ? '符合要求' : '不符合要求'}（完成度${completion}/质量${quality}），需求对齐${alignment === 0 ? '❌ 偏离需求本质（做偏了客户要的东西）' : alignment === 1 ? '方向对（部分对齐）' : '✅ 直指需求本质'}，综合 ${score}/100（对齐${alignment}/成果${quality}/完成${completion}/上行${escalation}/契合${fit}/深度${depth}）。${action}。依据已留痕。`
         : `缺 role 参数。`
-      return { ok: okThis, score, signals: { stageStatus, stageRequirement, quality, completion, escalation, fit, depth }, strikes: totalStrikes, action, verdict }
+      // historyNext：把本次结果并入历史，供 CEO 下次评估直接回传（修复"依赖调用方手动维护 history"的半自动断点）
+      const historyNext = JSON.stringify(history.concat([{ ok: okThis, at: new Date().toISOString().slice(0, 10), action: action.split('（')[0], misaligned: misaligned || undefined }]).slice(-10))
+      // 自动落盘：考核记录写 .jarvis/perf-<role>.json（跨调用累计 strikes 的持久化源）
+      let persisted = false
+      if (fsSvc && typeof fsSvc.writeText === 'function' && role) {
+        try {
+          const target = await fsSvc.resolve(perfFile)
+          if (target) {
+            await fsSvc.writeText(target, JSON.stringify({ role, updatedAt: new Date().toISOString(), history: JSON.parse(historyNext) }, null, 2))
+            persisted = true
+          }
+        } catch { persisted = false }
+      }
+      // 公司状态自动同步（3D 画面反映评估结果：员工 perfScore/strikes/状态——CEO 评估后画面即时可见谁达标/谁被开）
+      if (role && fsSvc && typeof fsSvc.readText === 'function') {
+        const empStatus = action.includes('换人') ? 'terminated' : (okThis ? 'working' : 'on_probation')
+        await syncCompanyState(fsSvc, { type: 'employee_evaluated', role, score, strikes: totalStrikes, status: empStatus, note: stageRequirement || undefined })
+      }
+      const out = { role, ok: okThis, score, signals: { stageStatus, stageRequirement, alignment, quality, completion, escalation, fit, depth }, strikes: totalStrikes, action, verdict, historyNext }
+      if (role && (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function')) {
+        out.perfFile = perfFile
+        out.persisted = persisted
+      }
+      return out
     },
   },
 
@@ -1264,10 +1603,11 @@ export const TOOLS = [
         required: ['goal', 'resolutions'],
       },
       render: (r) =>
-        `【${r.type} 会 · 目标】${r.goal}\n流程：${r.protocol}\n决议记录：${r.resolutions}\n会后任务：${r.actions}\n纪要格式：${r.respondAs}`,
+        `【${r.type} 会 · 目标】${r.goal}\n流程：${r.protocol ?? ''}\n决议记录：${r.resolutions}\n会后任务：${r.actions ?? ''}\n纪要格式：${r.respondAs ?? ''}`,
     },
     handler: async (args) => {
       const type = String(args.meetingType ?? 'kickoff')
+      const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
       const agenda = String(args.agenda ?? '').trim()
       const attendees = String(args.attendees ?? '全员').trim()
       const ctx = String(args.context ?? '').trim()
@@ -1298,6 +1638,14 @@ export const TOOLS = [
         },
       }
       const m = META[type] || META.kickoff
+      // 公司状态自动同步（3D 画面显示"正在开会/会议结束"）
+      try {
+        const fsSvc2 = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        if (fsSvc2) {
+          if (type === 'close') await syncCompanyState(fsSvc2, { type: 'meeting_done', meetingId: 'm' })
+          else await syncCompanyState(fsSvc2, { type: 'meeting_started', meeting: { id: 'm', type, topic: agenda || m.goal, attendees: attendees.split(',') } })
+        }
+      } catch {}
       return {
         type,
         goal: m.goal,
@@ -1320,12 +1668,13 @@ export const TOOLS = [
         version: { type: 'string', description: '版本号（如 v1.0），new_version 必填；rollback 用=当前版本号' },
         rollbackTo: { type: 'string', description: 'rollback 用：要回滚到的历史版本号（如 v1.0）' },
         rollbackReason: { type: 'string', description: 'rollback 用：回滚原因（改错/决策失误/甲方否决），必填留痕' },
-        prevVersions: { type: 'string', description: '已有版本状态 JSON（status/rollback 用），如 [{"version":"v1.0","state":"已确认"}]' },
+        prevVersions: { type: 'string', description: '已有版本状态 JSON（status/rollback/communication 用），如 [{"version":"v1.0","state":"已确认"}]' },
         requirement: { type: 'string', description: '原始需求/需求本质（checklist 用，逐条对应）' },
         items: { type: 'string', description: '交付物清单 JSON 数组（checklist 用）' },
         selfTest: { type: 'string', description: '自测结果（checklist 用，每条交付物的验证证据）' },
-        prevVersions: { type: 'string', description: '已有版本状态 JSON（status 用）' },
-        confirmDeadline: { type: 'string', description: '甲方确认时限（如 3 天；status 用，超时默认通过或挂起）' },
+        confirmDeadline: { type: 'string', description: '甲方确认时限（如 3 天 / 48小时；status 用，超时默认通过或挂起）' },
+        traceCheck: { type: 'string', description: '三产物闭环核对（checklist/收口用）：传 JSON {"需求规格":"path或✓/✗","方案设计":"✓/✗","测试验收单":"✓/✗","逐条闭环":"每条需求→方案→测试→结果 全链 ✓/✗","断链项":["..."]}——防"需求→实现→验收"断链，断链不许收口' },
+        submittedAt: { type: 'string', description: '交付给甲方确认的起始时间 ISO（status 用，启用真实超时判定：剩余时间/已超时）' },
         question: { type: 'string', description: '与甲方的沟通问题（communication 用）' },
         answer: { type: 'string', description: '甲方答复（communication 用）' },
       },
@@ -1339,6 +1688,13 @@ export const TOOLS = [
           status: { type: 'string', description: '版本状态或操作结果' },
           checklist: { type: 'array', items: { type: 'string' }, description: '交付清单（checklist 用）' },
           log: { type: 'string', description: '沟通留痕记录（communication 用）' },
+          projectWritten: { type: 'boolean', description: '沟通记录是否已写入 .jarvis/project.md' },
+          projectError: { type: 'string', description: 'project.md 写入失败原因' },
+          rollbackLog: { type: 'string', description: '回滚留痕记录（rollback 用）' },
+          timedOut: { type: 'boolean', description: '确认时限是否已超时（status 用）' },
+          traceCheckVerdict: { type: 'string', description: '三产物闭环核对结论（checklist 用）' },
+          tracePassed: { type: 'boolean', description: '三产物闭环是否全通过（checklist 用，false=断链不许收口）' },
+          submittedAt: { type: 'string', description: '交付确认起始时间（status 用）' },
           verdict: { type: 'string' },
         },
         required: ['verdict'],
@@ -1363,23 +1719,99 @@ export const TOOLS = [
         const rows = requirement
           ? [`需求本质：${requirement.slice(0, 120)}`].concat(items.map((it, i) => `${i + 1}. ${it}${self ? ' —— 自测：' + self.slice(0, 60) : ''}`))
           : items.map((it, i) => `${i + 1}. ${it}`)
-        verdict = `交付清单已生成（${rows.length} 条）：甲方按条确认即验收；清单 = 需求本质逐条对应，不是模板。`
-        return { version: version || '?', status: '待甲方逐条确认', checklist: rows, verdict }
+        let verdict = `交付清单已生成（${rows.length} 条）：甲方按条确认即验收；清单 = 需求本质逐条对应，不是模板。`
+        const out = { version: version || '?', status: '待甲方逐条确认', checklist: rows, verdict }
+        // 三产物闭环核对（traceCheck）：需求规格/方案设计/测试验收单 全链可追溯，断链不许收口
+        if (args.traceCheck) {
+          let tc = null
+          try { tc = JSON.parse(String(args.traceCheck)) } catch { tc = null }
+          if (tc && typeof tc === 'object') {
+            const hasSpec = /✓|✅|true|存在|在/.test(String(tc['需求规格'] ?? ''))
+            const hasDesign = /✓|✅|true|存在|在/.test(String(tc['方案设计'] ?? ''))
+            const hasTest = /✓|✅|true|存在|在/.test(String(tc['测试验收单'] ?? ''))
+            const chainOk = /✓|✅|true|全链/.test(String(tc['逐条闭环'] ?? ''))
+            const broken = Array.isArray(tc['断链项']) ? tc['断链项'] : []
+            const traceVerdict = hasSpec && hasDesign && hasTest && chainOk && broken.length === 0
+              ? `✅ 三产物闭环核对通过：需求规格→方案设计→测试验收单→逐条闭环 全链完整，可交付。`
+              : `⛔ 三产物闭环核对未过（断链不许收口）：${[!hasSpec ? '需求规格缺' : '', !hasDesign ? '方案设计缺' : '', !hasTest ? '测试验收单缺' : '', !chainOk ? '逐条闭环未全过' : ''].filter(Boolean).join('、')}${broken.length ? '；断链项：' + broken.join('、') : ''}——先补链再交付（每需求→方案→测试→结果）。`
+            out.traceCheckVerdict = traceVerdict
+            out.tracePassed = hasSpec && hasDesign && hasTest && chainOk && broken.length === 0
+            verdict = verdict + '\n' + traceVerdict
+            out.verdict = verdict
+          }
+        }
+        return out
       }
       if (mode === 'status') {
-        const dl = String(args.confirmDeadline ?? '3 天')
+        const dlRaw = String(args.confirmDeadline ?? '3 天')
         let prev = []
         try { prev = JSON.parse(String(args.prevVersions ?? '[]')) } catch { prev = [] }
         const line = prev.length ? `已有版本：${prev.map((v) => v.version + '=' + v.state).join(', ')}` : '尚无已交付版本'
-        verdict = `版本状态：${line}。当前版「${version || '?'}」${dl} 内待甲方确认；超时：默认通过或明确挂起（不无限等）。`
-        return { version: version || '?', status: `待确认（时限 ${dl}）`, verdict }
+        // 真实时限计算（修复"超时默认通过"停留在话术）：submittedAt = 交付给甲方确认的时间（ISO），
+        //   时限解析支持 "N 天/N小时/Nd/Nh/N"；超时 → 默认通过（或明确挂起）；未超时 → 剩余时间。
+        const parseDeadline = (raw) => {
+          const m = String(raw).trim().match(/^(\d+(?:\.\d+)?)\s*(天|小时|h|d|h)?$/)
+          if (!m) return null
+          const n = Number(m[1])
+          const unit = m[2] || ''
+          if (unit === '小时' || unit === 'h') return n * 3600 * 1000
+          if (unit === 'd') return n * 24 * 3600 * 1000
+          return n * 24 * 3600 * 1000 // 默认天
+        }
+        const dlMs = parseDeadline(dlRaw)
+        const submittedRaw = String(args.submittedAt ?? '').trim()
+        let submittedMs = 0
+        if (submittedRaw) {
+          const t = Date.parse(submittedRaw)
+          if (!Number.isNaN(t)) submittedMs = t
+        }
+        const now = Date.now()
+        let timeNote = ''
+        let timedOut = false
+        if (dlMs && submittedMs) {
+          const remaining = submittedMs + dlMs - now
+          timedOut = remaining <= 0
+          timeNote = timedOut
+            ? `⏰ 已超时（提交 ${submittedRaw.slice(0, 10)} + 时限 ${dlRaw}）——按约定默认通过；若甲方仍未确认且需继续等，应明确挂起并重设时限`
+            : `剩余确认时间约 ${Math.max(1, Math.ceil(remaining / 3600000))} 小时（提交 ${submittedRaw.slice(0, 10)}，时限 ${dlRaw}）`
+        }
+        verdict = `版本状态：${line}。当前版「${version || '?'}」${dlRaw} 内待甲方确认；${timeNote || '调用时传 submittedAt（交付确认起始时间 ISO）启用超时判定，否则默认通过/挂起由乙方明确。'}`
+        const out = { version: version || '?', status: `待确认（时限 ${dlRaw}）`, verdict }
+        if (dlMs && submittedMs) out.timedOut = timedOut
+        if (submittedRaw) out.submittedAt = submittedRaw
+        return out
       }
       if (mode === 'communication') {
         const q = String(args.question ?? '')
         const a = String(args.answer ?? '')
         const log = `[${new Date().toISOString().slice(0, 16)}] 问甲方：${q.slice(0, 80)}${a ? ` → 甲方答：${a.slice(0, 80)}` : '（待甲方答复）'}`
-        verdict = `沟通留痕已记录：${log}。写入 project.md（只记结论）。`
-        return { version: version || '?', log, verdict }
+        // BUG-3 修复：真写 project.md（承诺"写入 project.md 只记结论"必须兑现，否则沟通无留痕）
+        let projectWritten = false
+        let projectError = ''
+        const fsSvc = (() => {
+          try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+        })()
+        if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
+          try {
+            const cwd = process.cwd && process.cwd()
+            const pPath = (cwd ? cwd + '/' : '') + '.jarvis/project.md'
+            const target = await fsSvc.resolve(pPath)
+            if (target) {
+              let existing = ''
+              try { existing = await fsSvc.readText(target) } catch { existing = '' }
+              await fsSvc.writeText(target, (existing ? existing.replace(/\n*$/, '\n') : '') + '\n## 甲方沟通记录\n' + log + '\n')
+              projectWritten = true
+            }
+          } catch (e) {
+            projectError = String(e && e.message ? e.message : e)
+          }
+        }
+        const out = { version: version || '?', log, verdict: `沟通留痕已记录：${log}。已追加写入 .jarvis/project.md（只记结论）。` }
+        if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
+          out.projectWritten = projectWritten
+          if (projectError) out.projectError = projectError
+        }
+        return out
       }
       if (mode === 'rollback') {
         // ── 回滚到历史版本（企业级版本管理：改错/决策失误可 undo）──
@@ -1394,9 +1826,14 @@ export const TOOLS = [
         if (!reason) {
           return { version: cur, status: 'rollback 失败', verdict: '⚠️ rollback 必须带 rollbackReason（回滚原因：改错/决策失误/甲方否决）——无原因不回滚，留痕是铁律' }
         }
+        // BUG-7 修复：prev 空 = 无历史版本可回滚（首次交付没有可 undo 的旧版）→ 拒绝；
+        //   非空时回滚目标必须真实存在于版本清单（禁止"回滚到不存在的版本"的假回滚）
+        if (!prev.length) {
+          return { version: cur, status: 'rollback 失败', verdict: '⚠️ prevVersions 为空：没有已交付的历史版本可回滚（首次交付无需/无法回滚）。先 new_version 建立版本线，或确认版本清单（status）' }
+        }
         const targetExists = prev.some((v) => v.version === target)
-        if (!targetExists && prev.length) {
-          return { version: cur, status: 'rollback 失败', verdict: `⚠️ 回滚目标 ${target} 不在已有版本清单（${prev.map((v) => v.version).join(', ')}）——先 status 确认版本清单` }
+        if (!targetExists) {
+          return { version: cur, status: 'rollback 失败', verdict: `⚠️ 回滚目标 ${target} 不在已有版本清单（${prev.map((v) => v.version).join(', ')}）——先 status 确认版本清单；禁止回滚到不存在的版本` }
         }
         const log = `[${new Date().toISOString().slice(0, 16)}] 回滚：${cur} → ${target}（原因：${reason.slice(0, 60)}）——当前版标记"已回滚"（冻结），${target}重新激活为当前版；此动作留痕可追溯。`
         verdict = `✅ 已回滚：${cur} → ${target}（原因：${reason.slice(0, 60)}）。${target}重新激活为当前版；${cur}冻结为"已回滚"历史。回滚动作已留痕（时间/原因/目标）。任何领域的交付改错都能这样 undo。`
@@ -1425,9 +1862,9 @@ export const TOOLS = [
         type: 'object',
         additionalProperties: false,
         properties: {
-          items: { type: 'array', items: { type: 'object' }, description: '更新后的全部黑板条目' },
-          openItems: { type: 'array', items: { type: 'object' }, description: '未决项' },
-          blockers: { type: 'array', items: { type: 'object' }, description: '未解决的阻塞/接口变更' },
+          items: { type: 'array', items: { type: 'object', additionalProperties: true }, description: '更新后的全部黑板条目' },
+          openItems: { type: 'array', items: { type: 'object', additionalProperties: true }, description: '未决项' },
+          blockers: { type: 'array', items: { type: 'object', additionalProperties: true }, description: '未解决的阻塞/接口变更' },
           needsMeeting: { type: 'boolean', description: '是否建议二次开会' },
           reason: { type: 'string', description: '二次开会判定理由' },
           summary: { type: 'string' },
@@ -1441,19 +1878,23 @@ export const TOOLS = [
     },
     handler: async (args) => {
       const role = String(args.role ?? '?').trim() || '?'
-      const items = []
+      const fsSvc = (() => {
+        try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+      })()
+      // 真源：磁盘 .jarvis/board.json（项目级公屏）。board 参数仅作无 fs 环境（如单测）的显式回退。
+      const disk = await readBoardItems(fsSvc)
+      const items = disk.fromDisk ? disk.items : []
       try {
         const p = JSON.parse(String(args.board ?? '{}'))
         if (p && Array.isArray(p.items)) for (const it of p.items) items.push({ ...it })
       } catch {
         /* 新黑板 */
       }
-      // add：新增条目
+      // add：新增条目（ID 从磁盘真源取 max 单调递增，修复并发撞 ID）
       const adds = String(args.add ?? '')
         .split(/\n/)
         .map((s) => s.trim())
         .filter(Boolean)
-      const TYPE_SET = ['问题', '发现', '决策', '风险', '阻塞', '接口变更', '资源需求']
       for (const raw of adds) {
         let type = '', content = raw
         const m = raw.match(/^\s*(问题|发现|决策|风险|阻塞|接口变更|资源需求)\s*[:：|]\s*(.+)$/)
@@ -1470,7 +1911,7 @@ export const TOOLS = [
           else if (/发现|实测|验证|复现/.test(content)) type = '发现'
           else type = '问题'
         }
-        items.push({ id: 'B' + (items.length + 1), role, type, content, status: 'open', essenceChecked: type === '决策' ? false : true, time: new Date().toISOString().slice(0, 16) })
+        items.push({ id: nextBoardId(items), role, type, content, status: 'open', essenceChecked: type === '决策' ? false : true, time: new Date().toISOString().slice(0, 16) })
       }
       // resolve：关闭条目（按 id 或内容关键词）
       const resolves = String(args.resolve ?? '')
@@ -1504,7 +1945,15 @@ export const TOOLS = [
         : `黑板收敛（未决 ${openItems.length} 项，无阻塞）——暂不需要二次会，继续独自思考/干活，有新问题随时写黑板`
       const essenceNote = decisions.length ? `；⚠️ ${decisions.length} 条决策条目未过 jarvis_essence 需求本质校验，定稿前必须审计（防迎合/防幻觉）` : ''
       const summary = `未决 ${openItems.length} 项；阻塞 ${blockers.length} 项${blockers.length ? '：' + blockers.map((b) => b.id + '(' + b.content.slice(0, 20) + ')').join(', ') : ''}。${reason}${essenceNote}`
-      return { items, openItems, blockers, needsMeeting, reason, summary }
+      // 写回磁盘（项目级公屏持久化）。成功=真源已更新；失败=本次仅内存返回（下次调用仍以磁盘为准，不伪造持久化）
+      const persisted = await writeBoardItems(fsSvc, items, disk.version)
+      const out = { items, openItems, blockers, needsMeeting, reason, summary }
+      if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
+        out.persisted = persisted.ok
+        out.storage = persisted.ok ? '.jarvis/board.json' : undefined
+        if (!persisted.ok) out.writeError = persisted.error
+      }
+      return out
     },
   },
 
@@ -1529,6 +1978,7 @@ export const TOOLS = [
         type: 'object',
         additionalProperties: false,
         properties: {
+          mode: { type: 'string', description: '本次执行的模式：analyze/trigger/ask/duo/confirm' },
           essence: { type: 'string', description: '需求本质判定' },
           candidates: { type: 'array', items: { type: 'string' }, description: '5 角度候选问题' },
           vague: { type: 'boolean', description: '需求是否模糊（需澄清）' },
@@ -1542,7 +1992,7 @@ export const TOOLS = [
         required: ['verdict'],
       },
       render: (r) =>
-        `【需求澄清 · ${r.mode ?? 'analyze'}】\n本质：${r.essence}\n模糊度：${r.vague ? '⚠️ 模糊需澄清' : '✅ 可判定'}\n${r.candidates?.length ? '候选问题：\n  ' + r.candidates.map((c) => '· ' + c).join('\n  ') : ''}${r.trigger ? '\n触发：' + r.trigger : ''}${r.questions?.length ? '\n本轮话术：\n  ' + r.questions.map((q) => '· ' + q).join('\n  ') : ''}${r.duoCheck ? '\n双人判据：' + r.duoCheck : ''}${r.confirm ? '\n完成判定：' + r.confirm : ''}\n裁决：${r.verdict}`,
+        `【需求澄清 · ${r.mode ?? 'analyze'}】\n本质：${r.essence ?? ''}\n模糊度：${r.vague === undefined ? '' : r.vague ? '⚠️ 模糊需澄清' : '✅ 可判定'}\n${r.candidates?.length ? '候选问题：\n  ' + r.candidates.map((c) => '· ' + c).join('\n  ') : ''}${r.trigger ? '\n触发：' + r.trigger : ''}${r.questions?.length ? '\n本轮话术：\n  ' + r.questions.map((q) => '· ' + q).join('\n  ') : ''}${r.duoCheck ? '\n双人判据：' + r.duoCheck : ''}${r.confirm ? '\n完成判定：' + r.confirm : ''}\n裁决：${r.verdict}`,
     },
     handler: async (args) => {
       const mode = String(args.mode ?? 'analyze').trim()
@@ -1565,6 +2015,7 @@ export const TOOLS = [
           `【P5 验收】如果做成了，你拿什么判断成功？（指标/完成标准/多少时间内）`,
         ]
         return {
+          mode: 'analyze',
           essence: `为谁解决什么：${req.slice(0, 120)}${industry ? `（领域：${industry}）` : ''}。模糊度判定：${vague ? '⚠️ 需求模糊——缺少' + [hasWho?'':'为谁(受众)',hasWhat?'':'解决什么(动作/对象)',hasSuccess?'':'怎样算成功(指标/验收)'].filter(Boolean).join('/') + '，需按 5 角度引导用户澄清' : '✅ 三要素齐备，可进拆解'}`,
           candidates: cand,
           vague,
@@ -1581,14 +2032,17 @@ export const TOOLS = [
         const generic = /再说说|展开讲讲|具体说说|详细说说|还有吗/.test(candText)
         const emptyCount = cands.filter((c) => !c || c.length < 4).length
         const t1 = emptyCount >= 2 || (generic && cands.length < 3)
-        // T3：命中行业术语但引不出依据（行业词/黑话/规范名——扩大识别：OEE/TPM/点检/GAAP/合规/排期/审批等）
-        const industryTerms = /术语|规范|标准|合规|行业|体系|审批|检验|认证|OEE|TPM|点检|GAAP|IFRS|排期|产能|良率|周转|随访|依从|排课|课时|检定|安全规程|SOP|KPI|ROI|EMR|CRM|ERP/.test(req)
+        // T3：命中专业术语但引不出依据（领域无关——不预设任何行业的黑话词，只识别"用术语表达+给不出依据"的通用模式）
+        //   插件不预设 OEE/TPM/GAAP/排课/良率 等具体行业词（那是领域知识，属项目沉淀职责）；
+        //   只认跨领域的术语标记词（术语/黑话/规范/标准/合规/认证/SOP/KPI/指标…），其余交给 CEO 结合需求现场判断。
+        const industryTerms = /术语|黑话|行话|规范|标准|认证|合规|审核|检定|SOP|KPI|ROI|指标体系|方法论|框架|协议|标准号|出处/.test(req)
         // canCite 只测"已给出的具体依据"（"依据…/按…规范/参考…/…出处/…source"），不含候选问题话术里的"完成标准/验收标准"字样
         const canCite = /(依据|按|参考|根据|引用|查)[^\n]{0,20}(规范|标准|规程|source|出处|案例)|(规范名|标准号|出处|source|案例)[：:]\s*\S+/.test(String(args.candidates ?? ''))
         const t3 = industryTerms && !canCite
         const t4 = /超出|不会|不懂|不知道.*专业|领域外/.test(req) || /专业.*(术语|知识)/.test(req)
         const triggered = t1 || t3 || t4
         return {
+          mode: 'trigger',
           trigger: triggered ? (t1 ? 'T1 触发' : t3 ? 'T3 触发' : 'T4 触发') : '不触发',
           triggerDetail: triggered
             ? `CEO 对「${req.slice(0, 60)}」的${t1 ? '5 角度候选问题≥2 个引不出（含具体名词的）追问' : t3 ? '行业术语命中但引不出行业依据（规范名/source）' : '用户回答超出专业范围'}——建议现场蒸馏该需求领域真实大佬（${industry || '领域由需求决定'}：软件→软件大佬/制造→制造大佬/金融→金融大佬…，插件无预设），六段式卡过 jarvis_distill 校验后双人进场`
@@ -1617,6 +2071,7 @@ export const TOOLS = [
         }
         questions = questions.slice(0, 2) // 每轮≤2 问（遵守 jarvis.md 阶段一）
         return {
+          mode: 'ask',
           questions,
           verdict: `第 ${round} 轮 · ${round === 1 ? '开放式（让用户展开）' : round === 2 ? '聚焦式（追痛点/期望）' : '确认式（钉验收标准）'}——用户回答后继续下一轮或跑 confirm`,
         }
@@ -1629,6 +2084,7 @@ export const TOOLS = [
         const r = Number(args.round ?? 1)
         const mainAsker = r % 2 === 1 ? '蒸馏大佬' : 'CEO' // 奇数轮大佬先主问，偶数轮 CEO 主问
         return {
+          mode: 'duo',
           duoCheck: `方案 A 判据：同刻一人主问（用户回答前主问者 from≤1，对话记录可数）；本轮（第 ${r} 轮）主问者=${mainAsker}；补充消息须标注"补充"（无标注=违规抢问）${hasCeo && hasExpert ? '' : '；⚠️ 双人进场需 CEO 卡 + 蒸馏大佬卡（roleCards）'}`,
           verdict: `双人分工：CEO 域=P5 验收+与交付相关的 P2 子集（频率/负责人/时限）；大佬域=P1-P4 场景/细节/专业盲区。防重复=问题含场景/现状/痛点/期望/验收关键词即同域，后问者降级为具体化追问`,
         }
@@ -1637,16 +2093,103 @@ export const TOOLS = [
         // ── 澄清完成判定（需求本质重述三段式 + 假设分级）──
         const answers = String(args.userAnswers ?? '')
         const aLen = answers.trim().length
-        const hasConfirm = /确认|可以|对|是的|没错|行/.test(answers) || aLen >= 20
+        // BUG-2 修复：必须显式确认才判完成——去掉 "aLen>=20 即算确认" 的宽松兜底（长描述≠用户确认，推断不得冒充已确认）。
+        //   确认词（确认/可以/对/是的/没错/行/嗯/好的/就这么定）+ 或 明确验收标准（数字+单位）作隐含确认辅助。
+        const explicitConfirm = /确认|可以|对|是的|没错|行|嗯|好的|就这么|没问题|同意|OK|ok|就这样/.test(answers)
+        const hasAcceptance = /\d+\s*(%|％|秒|分钟|小时|天|单|次|个|元|万|倍)/.test(answers)
+        const hasConfirm = explicitConfirm || (aLen >= 15 && hasAcceptance)
         const done = aLen >= 15 && hasConfirm
         return {
+          mode: 'confirm',
           confirm: done
-            ? `✅ 澄清完成：需求本质重述（为谁=${/用户|员工|患者|客户|学生/.test(answers) ? '已明确' : '待补'} / 解决什么=${aLen >= 15 ? '已明确' : '待补'} / 怎样算成功=${/指标|衡量|达标|多少|效率/.test(answers) ? '已明确' : '待补'}）经用户确认 → 可进拆解`
-            : `⏳ 未完成：${aLen < 15 ? '用户回答不足（需继续引导）' : '未获用户确认'}——缺一禁止进拆解；用户拒绝/失联=连续 2 轮无有效回答→按 CEO 推断+显式标注继续（3 轮=挂起）`,
+            ? `✅ 澄清完成：需求本质重述（为谁=${/用户|员工|患者|客户|学生/.test(answers) ? '已明确' : '待补'} / 解决什么=${aLen >= 15 ? '已明确' : '待补'} / 怎样算成功=${/指标|衡量|达标|多少|效率|准确率|成功率|\d+\s*(%|％|秒|分钟|小时|天|单|次)|减少|提升|降低/.test(answers) ? '已明确' : '待补'}）经用户确认 → 可进拆解`
+            : `⏳ 未完成：${aLen < 15 ? '用户回答不足（需继续引导）' : '未获用户确认——请明确确认（"确认/可以/对，就是这样"）或给出可判定验收标准（数字+单位）'}——缺一禁止进拆解；用户拒绝/失联=连续 2 轮无有效回答→按 CEO 推断+显式标注继续（3 轮=挂起）`,
           verdict: done ? '澄清完成 → 产出过 B16 黑板翻译（转目标/验收/边界）+ B22 可行性闸（不可行前置反馈）+ B15 分层（标注黑板决议目标态）' : '继续澄清',
         }
       }
-      return { verdict: '未知模式（analyze/trigger/ask/duo/confirm）' }
+      return { mode, verdict: '未知模式（analyze/trigger/ask/duo/confirm）' }
+    },
+  },
+
+  {
+    name: 'jarvis_company',
+    description:
+      '公司状态快照读写器（3D 办公室可视化/UI 的数据源——把你的"CEO 走动监控/会议室开会/猎头招募/员工工位"变成 UI 可读的结构化状态）：维护 <项目>/.jarvis/company-state.json，含 employees(员工表: 角色/人物/状态[working/reporting/meeting/idle/on_probation/terminated]/任务/绩效/离任原因)、meetings(会议表: 类型/议题/参会/状态)、recruiting(招募表: 岗位/目标人物/候选/状态[searching/interviewing/confirmed]/补谁)、ceo/headhunter(当前动作/位置)——headhunter=猎头(寻访专家)。动作模式：update=CEO/主面板在关键动作后更新快照（如派活/汇报/开会/评估/开除/招募确认后），传对应字段；snapshot=读当前快照（UI 轮询用）；clear=新项目/项目结束清空。UI（3D 办公室）只读 snapshot 渲染，不直接改。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'update=更新快照 / snapshot=读当前快照（UI 轮询）/ clear=清空' },
+        employees: { type: 'string', description: '员工表 JSON 数组（update 用）：[{id,role,persona,cardFile,status,taskId,currentWork,lastReport,perfScore,strikes,note}]——status∈working/reporting/meeting/idle/on_probation/terminated' },
+        meetings: { type: 'string', description: '会议表 JSON 数组（update 用）：[{id,type,topic,attendees,status}]——status∈scheduled/in_progress/done' },
+        recruiting: { type: 'string', description: '招募表 JSON 数组（update 用）：[{id,position,targetPersona,candidates,status,replacesEmp}]——status∈searching/interviewing/confirmed/cancelled' },
+        ceo: { type: 'string', description: 'CEO 当前状态 JSON（update 用）：{persona,currentAction,location}——location∈ceo_office/hall/meeting_room' },
+        headhunter: { type: 'string', description: '猎头当前状态 JSON（update 用）：{persona,currentAction}' },
+        phase: { type: 'string', description: '项目当前阶段（如 kickoff/开发/测试/收口）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          snapshot: { type: 'object', additionalProperties: true, description: '当前公司状态快照（UI 渲染数据源）' },
+          updated: { type: 'boolean', description: '本次是否更新了快照' },
+          storage: { type: 'string', description: '快照文件位置' },
+          verdict: { type: 'string' },
+        },
+        required: ['snapshot', 'verdict'],
+      },
+      render: (r) =>
+        `【公司状态】${r.verdict}\n快照文件：${r.storage || '.jarvis/company-state.json'}`,
+    },
+    handler: async (args) => {
+      const mode = String(args.mode ?? 'snapshot').trim()
+      const fsSvc = (() => {
+        try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+      })()
+      const stateFile = '.jarvis/company-state.json'
+      // 读当前快照（有 fs 从磁盘读，无 fs 返回空骨架）
+      let state = { company: {}, employees: [], meetings: [], recruiting: [], ceo: {}, headhunter: {}, tasks: [], updatedAt: '' }
+      if (fsSvc && typeof fsSvc.readText === 'function') {
+        try {
+          const target = await fsSvc.resolve(stateFile)
+          if (target) {
+            const text = await fsSvc.readText(target)
+            if (text) {
+              const data = JSON.parse(text)
+              if (data && typeof data === 'object') state = { ...state, ...data }
+            }
+          }
+        } catch { /* 首次无文件 */ }
+      }
+      if (mode === 'snapshot') {
+        return { snapshot: state, verdict: `公司快照：${state.employees?.length || 0} 员工 / ${state.meetings?.length || 0} 会议 / ${state.recruiting?.length || 0} 招募中（UI 轮询渲染用）`, storage: stateFile }
+      }
+      if (mode === 'clear') {
+        state = { company: {}, employees: [], meetings: [], recruiting: [], ceo: {}, headhunter: {}, tasks: [], updatedAt: '' }
+      } else if (mode === 'update') {
+        // 更新各表（传哪个字段更新哪个）
+        if (args.employees !== undefined) { try { state.employees = JSON.parse(String(args.employees)) } catch {} }
+        if (args.meetings !== undefined) { try { state.meetings = JSON.parse(String(args.meetings)) } catch {} }
+        if (args.recruiting !== undefined) { try { state.recruiting = JSON.parse(String(args.recruiting)) } catch {} }
+        if (args.ceo !== undefined) { try { state.ceo = JSON.parse(String(args.ceo)) } catch {} }
+        if (args.headhunter !== undefined) { try { state.headhunter = JSON.parse(String(args.headhunter)) } catch {} }
+        if (args.phase !== undefined) state.phase = String(args.phase)
+        state.updatedAt = new Date().toISOString()
+      }
+      // 写回磁盘
+      let persisted = false
+      if (fsSvc && typeof fsSvc.writeText === 'function') {
+        try {
+          const target = await fsSvc.resolve(stateFile)
+          if (target) {
+            await fsSvc.writeText(target, JSON.stringify(state, null, 2))
+            persisted = true
+          }
+        } catch {}
+      }
+      const summary = `员工 ${state.employees?.length || 0}（${(state.employees || []).filter((e) => e.status === 'working').length} 工作中 / ${(state.employees || []).filter((e) => e.status === 'terminated').length} 已离任）· 会议 ${state.meetings?.length || 0} · 招募中 ${state.recruiting?.length || 0}`
+      return { snapshot: state, updated: mode !== 'snapshot' && persisted, storage: stateFile, verdict: `公司状态${persisted ? '已落盘' : '（无 fs 未落盘）'}：${summary}` }
     },
   },
 ]
@@ -1654,15 +2197,35 @@ export const TOOLS = [
 /** 需求分级（纯逻辑，供 jarvis_project 工具与 /jarvis 命令共用）。
  *  ⚠️ 领域无关设计：插件不预设任何行业/人物/领域流程（那是项目沉淀的职责）。
  *  这里只做"需求复杂度的分级建议"，领域判断与蒸馏方向由 CEO 按本项目实际情况现场决定。
+ *
+ *  S5 修复（防"模糊需求被跳过澄清"）：不再按字符长度一刀切——"做个东西"(4字) 与 "改个文案"(4字)
+ *  都短，但前者完全无实质内容（模糊需求），后者有明确对象+动作（可判定目标）。
+ *  判据：含实质动词+具体对象 → 至少 M；纯占位/泛词（东西/一下/个东西/帮我弄）→ S（触发澄清，不直接建队）。
  */
 export function identifyIndustry(text) {
-  const len = String(text ?? '').trim().length
-  const suggestion = len <= 5 ? 'S：直接做（不需要建队）' : len < 40 ? 'M：精简公司（2-4 人，现场蒸馏子角色）' : 'L：全链公司（4-7 人，现场蒸馏 CEO+子角色）'
+  const raw = String(text ?? '').trim()
+  const len = raw.length
+  const S_PLACEHOLDER = /(个|点|做|弄|搞|写|建|出|给|上|来|下)\s*(东西|那个|这个|一下|点点|点啥|啥|什么|随便|大概|差不多)|(东西|那个|这个|什么)\s*$/i
+  const hasActionVerb = /(做|建|改|写|开发|设计|搭|搞|弄|出|给|帮我|规划|运营|方案|系统|平台|小程序|APP|应用|网站|页面|流程|功能|机器人|助手|工具|服务|产品)/i.test(raw)
+  const vague = S_PLACEHOLDER.test(raw)
+  const suggestion = vague
+    ? 'S：先澄清（需求过于模糊，无实质对象/动词——先问清"为谁解决什么、怎样算成功"，未清晰前不建队）'
+    : len <= 5
+      ? 'S：直接做（不需要建队）'
+      : len < 40
+        ? 'M：精简公司（2-4 人，现场蒸馏子角色）'
+        : 'L：全链公司（4-7 人，现场蒸馏 CEO+子角色）'
   return {
     industry: '由 CEO 现场判断（插件不预设领域，避免套模板）',
     suggestion,
     distillDirections: ['CEO 按本项目需求特性，web 搜索该领域真实可查证权威（现场决定，不预置名单）'],
     matched: false,
+    vague: vague || (len <= 5 && !hasActionVerb),
+    reason: vague
+      ? '需求过于模糊：仅占位词/无实质对象，必须先澄清（REFORM-CLARIFY）'
+      : len <= 5 && !hasActionVerb
+        ? '需求过短且无明确动作，建议先澄清再定级'
+        : '按需求文本复杂度给出建队分级（领域由 CEO 现场判断）',
   }
 }
 
@@ -1671,17 +2234,76 @@ export function jarvisCommand(requirement) {
   const text = String(requirement ?? '').trim()
   if (!text) return { content: '用法：/jarvis <需求描述>（可模糊）' }
   const hit = identifyIndustry(text)
+  // 链路1 修复：回执末尾给出"接下来 5 分钟该做什么"的可执行清单（主面板不用自己推演，照做即可）
+  const nextActions = hit.vague
+    ? [
+        '① 用 jarvis_clarify analyze 把需求翻译成 5 角度候选问题（P1场景/P2现状/P3痛点/P4期望/P5验收）',
+        '② 用 jarvis_clarify ask 一次只问 1-2 个问题引导用户回答（开放→聚焦→确认）',
+        '③ 用户回答后 trigger 判蒸馏触发（T1-T5），confirm 三段式重述需求本质 → 用户确认后才进拆解',
+      ]
+    : [
+        '① 先查 <项目>/.jarvis/ 记忆库（cards/prototypes/process/project.md/board/lessons）——有直接复用，没有才从零蒸馏',
+        '② 用 jarvis_project 确认建队等级 → jarvis_process 定领域流程（阶段/闸门/红线/必须角色/会议触点）',
+        '③ 用 jarvis_distill_guide + jarvis_distill + jarvis_fidelity 现场蒸馏真实 CEO/子角色卡（web 查证，拒绝编造）',
+        '④ 用 jarvis_collab 定协同架构 → jarvis_meeting kickoff 全员会对齐 → 黑板(jarvis_board) 开跑',
+      ]
   return {
-    content: `已收到需求[${text.slice(0, 120)}]（建议建队等级 ${hit.suggestion}）。\nJarvis 流程启动（Jarvis=主面板/对客户沟通；CEO=团队内角色。先查记忆 → 蒸馏 → 建队 → CEO 盯人换人 → 交付，单一 /jarvis 入口）：\n0. 【先查项目记忆库】先查 <项目>/.jarvis/：prototypes(真实人物原型)+cards(虚拟人物卡)+process(流程)+project.md(项目细节)+board(进度)+lessons(经验) → 有就直接读取继续（不用重分析源码）；没有才从零蒸馏\n1. 需求本质回归：先重述"为谁解决什么、怎样算成功"（可判定标准），未清晰前不开工\n2. 定领域流程：jarvis_process 按本需求定流程（阶段/闸门/红线/必须角色/会议触点）——插件无预设，可参考本项目沉淀（按本次需求修订）\n3. 【蒸馏 CEO 角色卡】CEO 是团队内角色，不是主面板——web 查证该领域真实大佬（长访谈/一手文章/决策记录优先，避开知乎/公众号/百度百科）→ 存 prototypes/ → **先 jarvis_distill_guide 提炼独有 HOW（决策触发词/独特取舍/领域黑话/反直觉/认知变化轨迹/失效边界 + 7品味原则 + 来源分级 + 验证锚点）→ 再写六段式 CEO 卡** → jarvis_distill 证据链硬闸 + jarvis_fidelity 保真度审计 双验 → 作为团队成员注入\n4. 定子角色 → 逐个 同样【distill_guide 提炼 HOW → 写卡 → distill 校验】+ 保真度审计双验（蒸馏方向：${hit.distillDirections[0]}）→ jarvis_collab 设计协同（四要素+每角色自己的协同段）\n5. kickoff 全员会（jarvis_meeting）：对齐目标/验收 + 领域流程闸门/红线 + 接口契约 → 决议写统一黑板（jarvis_board）\n6. 各角色独自思考/干活（关键决策 jarvis_think_deep）→ 所有问题/发现/阻塞写黑板\n7. 黑板有未决阻塞/分歧/接口变更 → 二次会（cycle）+ jarvis_review 裁决（吃 thinkA/thinkB + requirement）→ 循环到黑板收敛\n8. 【CEO 时刻盯人换人】CEO 是团队成员且持续在岗——用 jarvis_perf 多角度评估每个员工（成果质量/任务完成度/问题上行健康度[高频信号异常立即触发]/角色契合度/深度分），连续 2 次不达标 → 换人：离任(写依据) → remove_member → 归档 .jarvis/cards/ 历史 → jarvis_distill_guide 重提炼+重蒸馏更合适的真实大神 → distill 校验 → 新成员补位；其他岗位通力协作（开会/黑板/依赖/升级齐全）\n9. 问题上行：技术绕不开/无法抉择 → 禁止跳过 → jarvis_escalate 带 风险细节+已尝试+决策请求 上报 → 写黑板 → CEO 闭环\n10. 【交付版本管理】用 jarvis_release 与甲方契约化交付：new_version 打版本快照（冻结旧版/变更开新版）→ checklist 生成交付清单（需求本质逐条→交付物→自测，甲方逐条确认）→ status 版本状态（待确认/已确认/已否决+确认时限，超时默认通过或挂起）→ communication 记录与甲方沟通结论（只记结论入 project.md）。乙方永远能说清"交付了什么、等什么确认"，防"需求永远改/无法自证"\n11. 收口会（close）：对照领域闸门逐项验收 + 交付清单 → 交付报告（Jarvis 向客户汇报，客户确认即完成）\n12. 沉淀到项目：角色卡/原型/流程/组件/项目细节/沟通记录/经验 读写 <项目>/.jarvis/ —— 下次需求先查记忆直接复用（阶段零）\n（铁律：插件无预置角色卡/领域模板（领域无关）；捕捉 HOW 而非 WHAT；证据不足宁 60 分诚实不要 90 分编造；真实情况优先于角色卡；需求本质优先于一切；流程缺失 = 客户提 bug 的温床。）`,
+    content: `已收到需求[${text.slice(0, 120)}]（建议建队等级 ${hit.suggestion}）。\nJarvis 流程启动（Jarvis=主面板/对客户沟通；CEO=团队内角色。先查记忆 → 蒸馏 → 建队 → CEO 盯人换人 → 交付，单一 /jarvis 入口）：\n0. 【先查项目记忆库】先查 <项目>/.jarvis/：prototypes(真实人物原型)+cards(虚拟人物卡)+process(流程)+project.md(项目细节)+board(进度)+lessons(经验) → 有就直接读取继续（不用重分析源码）；没有才从零蒸馏\n1. 需求本质回归：先重述"为谁解决什么、怎样算成功"（可判定标准），未清晰前不开工\n2. 定领域流程：jarvis_process 按本需求定流程（阶段/闸门/红线/必须角色/会议触点）——插件无预设，可参考本项目沉淀（按本次需求修订）\n3. 【蒸馏 CEO 角色卡】CEO 是团队内角色，不是主面板——web 查证该领域真实大佬（长访谈/一手文章/决策记录优先，避开知乎/公众号/百度百科）→ 存 prototypes/ → **先 jarvis_distill_guide 提炼独有 HOW（决策触发词/独特取舍/领域黑话/反直觉/认知变化轨迹/失效边界 + 7品味原则 + 来源分级 + 验证锚点）→ 再写六段式 CEO 卡** → jarvis_distill 证据链硬闸 + jarvis_fidelity 保真度审计 双验 → 作为团队成员注入\n4. 定子角色 → 逐个 同样【distill_guide 提炼 HOW → 写卡 → distill 校验】+ 保真度审计双验（蒸馏方向：${hit.distillDirections[0]}）→ jarvis_collab 设计协同（四要素+每角色自己的协同段）\n5. kickoff 全员会（jarvis_meeting）：对齐目标/验收 + 领域流程闸门/红线 + 接口契约 → 决议写统一黑板（jarvis_board）\n6. 各角色独自思考/干活（关键决策 jarvis_think_deep）→ 所有问题/发现/阻塞写黑板\n7. 黑板有未决阻塞/分歧/接口变更 → 二次会（cycle）+ jarvis_review 裁决（吃 thinkA/thinkB + requirement）→ 循环到黑板收敛\n8. 【CEO 时刻盯人换人】CEO 是团队成员且持续在岗——用 jarvis_perf 多角度评估每个员工（成果质量/任务完成度/问题上行健康度[高频信号异常立即触发]/角色契合度/深度分），连续 2 次不达标 → 换人：离任(写依据) → remove_member → 归档 .jarvis/cards/ 历史 → jarvis_distill_guide 重提炼+重蒸馏更合适的真实大神 → distill 校验 → 新成员补位；其他岗位通力协作（开会/黑板/依赖/升级齐全）\n9. 问题上行：技术绕不开/无法抉择 → 禁止跳过 → jarvis_escalate 带 风险细节+已尝试+决策请求 上报 → 写黑板 → CEO 闭环\n10. 【交付版本管理】用 jarvis_release 与甲方契约化交付：new_version 打版本快照（冻结旧版/变更开新版）→ checklist 生成交付清单（需求本质逐条→交付物→自测，甲方逐条确认）→ status 版本状态（待确认/已确认/已否决+确认时限，超时默认通过或挂起）→ communication 记录与甲方沟通结论（只记结论入 project.md）。乙方永远能说清"交付了什么、等什么确认"，防"需求永远改/无法自证"\n11. 收口会（close）：对照领域闸门逐项验收 + 交付清单 → 交付报告（Jarvis 向客户汇报，客户确认即完成）\n12. 沉淀到项目：角色卡/原型/流程/组件/项目细节/沟通记录/经验 读写 <项目>/.jarvis/ —— 下次需求先查记忆直接复用（阶段零）\n（铁律：插件无预置角色卡/领域模板（领域无关）；捕捉 HOW 而非 WHAT；证据不足宁 60 分诚实不要 90 分编造；真实情况优先于角色卡；需求本质优先于一切；流程缺失 = 客户提 bug 的温床。）\n\n【接下来 5 分钟该做什么（照做即可）】${hit.vague ? '⚠️ 需求模糊，先澄清再建队：' : ''}\n${nextActions.join('\n')}`,
   }
 }
 
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
-export const inject = ['tools']
+export const inject = ['tools', 'webServer']
 
 export default {
   inject,
   apply(ctx) {
+
+    // ── webServer route：client 静态 bundle 读取黑板（host.call 仅 dynamic 沙箱可用，静态走 HTTP）──
+    try {
+      const webSvc = (ctx && ctx.webServer) || (typeof ctx.get === 'function' ? ctx.get('webServer') : undefined)
+      if (webSvc && typeof webSvc.register === 'function') {
+        ctx.effect(() =>
+          webSvc.register({
+            kind: 'exact',
+            path: '/api/luke-jarvis/board',
+            handler: async (req, res) => {
+              const send = (status, body) => {
+                try { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) } catch {}
+              }
+              if (!req || req.method !== 'GET') return send(405, { items: [], error: 'method-not-allowed' })
+              try {
+                const cwd = process.cwd && process.cwd()
+                const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
+                let fsSvc = null
+                try { fsSvc = ctx.get('fs') } catch { fsSvc = null }
+                if (!fsSvc || typeof fsSvc.readText !== 'function') return send(200, { items: [], error: 'fs 不可用' })
+                const target = await fsSvc.resolve(boardPath)
+                if (!target) return send(200, { items: [], active: false, reason: 'no .jarvis' })
+                const text = await fsSvc.readText(target)
+                if (!text) return send(200, { items: [], active: false, reason: 'empty board' })
+                let data = null
+                try { data = JSON.parse(text) } catch { data = null }
+                if (!data || !Array.isArray(data.items)) return send(200, { items: [], active: true, reason: 'bad json' })
+                return send(200, {
+                  items: data.items.map((it) => ({
+                    id: String(it.id || ''),
+                    role: String(it.role || ''),
+                    type: String(it.type || '问题'),
+                    content: String(it.content || '').slice(0, 200),
+                    status: String(it.status || 'open'),
+                    essenceChecked: Boolean(it.essenceChecked),
+                  })),
+                  active: true,
+                })
+              } catch (e) {
+                return send(200, { items: [], error: String(e && e.message ? e.message : e) })
+              }
+            }
+          })
+        )
+      }
+    } catch {}
     // 1) 模型工具：tools 已注入（ctx.tools 就绪）；对无注入能力的宿主/测试环境降级 ctx.get
     const toolsSvc =
       (ctx && ctx.tools) || (typeof ctx.get === 'function' ? ctx.get('tools') : undefined)
@@ -1695,7 +2317,11 @@ export default {
               parameters: normalizeParameters(rest.parameters),
               output: {
                 schema: normalizeOutputSchema(rest.output && rest.output.schema),
-                render: rest.output && rest.output.render,
+                render: (args, value) => {
+                  const text =
+                    rest.output && rest.output.render ? rest.output.render(value) : JSON.stringify(value ?? {})
+                  return Array.isArray(text) ? text : [{ type: 'text', text: String(text) }]
+                },
               },
               execute: handler,
             }),
