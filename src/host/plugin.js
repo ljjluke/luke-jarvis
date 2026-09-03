@@ -129,6 +129,7 @@ async function writeCompanyState(fsSvc, state) {
  *   action.employee_terminated {role} → employees 表标 terminated
  *   action.employee_hired {role, persona} → employees 表加人
  *   action.employee_reporting {role} → employees 表标 reporting
+ *   action.employee_started {role} → employees 表标 working（领任务开工，状态从 idle/报到 变干活）
  *   action.recruiting_started {position} → recruiting 表加条
  */
 export async function syncCompanyState(fsSvc, action) {
@@ -164,9 +165,12 @@ export async function syncCompanyState(fsSvc, action) {
           }
         }
       }
+    } else if (a.type === 'employee_started' && a.role) {
+      const emp = state.employees.find((e) => e.role === a.role)
+      if (emp) { emp.status = 'working'; emp.currentWork = a.currentWork || ''; emp.lastStartedAt = new Date().toISOString().slice(0, 16) }
     } else if (a.type === 'employee_reporting' && a.role) {
       const emp = state.employees.find((e) => e.role === a.role)
-      if (emp) { emp.status = 'reporting'; emp.lastReportAt = new Date().toISOString().slice(0, 16) }
+      if (emp) { emp.status = 'reporting'; emp.lastReportAt = new Date().toISOString().slice(0, 16); if (a.note) emp.lastReport = a.note }
     } else if (a.type === 'recruiting_started' && a.position) {
       state.recruiting.push({ id: 'r' + (state.recruiting.length + 1), position: a.position, targetPersona: a.targetPersona || '', candidates: [], status: 'searching', replacesEmp: a.replacesEmp || '' })
     } else {
@@ -2125,7 +2129,7 @@ export const TOOLS = [
   {
     name: 'jarvis_company',
     description:
-      '公司状态快照读写器（3D 办公室可视化/UI 的数据源——把你的"CEO 走动监控/会议室开会/猎头招募/员工工位"变成 UI 可读的结构化状态）：维护 <项目>/.jarvis/company-state.json，含 employees(员工表: 角色/人物/状态[working/reporting/meeting/idle/on_probation/terminated]/任务/绩效/离任原因)、meetings(会议表: 类型/议题/参会/状态)、recruiting(招募表: 岗位/目标人物/候选/状态[searching/interviewing/confirmed]/补谁)、ceo/headhunter(当前动作/位置)——headhunter=猎头(寻访专家)。动作模式：update=CEO/主面板在关键动作后更新快照（如派活/汇报/开会/评估/开除/招募确认后），传对应字段；snapshot=读当前快照（UI 轮询用）；clear=新项目/项目结束清空。UI（3D 办公室）只读 snapshot 渲染，不直接改。',
+      '公司状态快照读写器（3D 办公室可视化/UI 的数据源——把你的"CEO 走动监控/会议室开会/猎头招募/员工工位"变成 UI 可读的结构化状态）：维护 <项目>/.jarvis/company-state.json，含 employees(员工表: 角色/人物/状态[working/reporting/meeting/idle/on_probation/terminated]/任务/绩效/离任原因)、meetings(会议表: 类型/议题/参会/状态)、recruiting(招募表: 岗位/目标人物/候选/状态[searching/interviewing/confirmed]/补谁)、ceo/headhunter(当前动作/位置)——headhunter=猎头(寻访专家)。动作模式：update=CEO/主面板在关键动作后更新快照（如派活/汇报/开会/评估/开除/招募确认后），传对应字段；action=员工/角色单动作局部同步（入职/开工/汇报/开会/评估/开除——内部自动合并，不覆盖他表数据）；snapshot=读当前快照（UI 轮询用）；clear=新项目/项目结束清空。UI（3D 办公室）只读 snapshot 渲染，不直接改。',
     parameters: {
       type: 'object',
       properties: {
@@ -2136,6 +2140,15 @@ export const TOOLS = [
         ceo: { type: 'string', description: 'CEO 当前状态 JSON（update 用）：{persona,currentAction,location}——location∈ceo_office/hall/meeting_room' },
         headhunter: { type: 'string', description: '猎头当前状态 JSON（update 用）：{persona,currentAction}' },
         phase: { type: 'string', description: '项目当前阶段（如 kickoff/开发/测试/收口）' },
+        actionType: { type: 'string', description: '单动作类型（mode=action 用）：employee_hired(入职, 配role/persona/replaces) / employee_started(开工领任务, 配role/currentWork) / employee_reporting(汇报, 配role/note=汇报内容) / employee_terminated(开除, 配role/note=离任原因) / recruiting_started(开招募, 配position/targetPersona/replacesEmp)——自动同步状态防 3D 画面失真' },
+        note: { type: 'string', description: '汇报内容/离任原因等备注（mode=action 用）' },
+        role: { type: 'string', description: '动作针对的员工角色（mode=action 用）' },
+        persona: { type: 'string', description: '入职员工人物（employee_hired 用）' },
+        currentWork: { type: 'string', description: '当前任务（employee_started 用）' },
+        replaces: { type: 'string', description: '补谁的空缺（employee_hired/recruiting_started 用）' },
+        position: { type: 'string', description: '招募岗位（recruiting_started 用）' },
+        targetPersona: { type: 'string', description: '招募目标人物（recruiting_started 用）' },
+        replacesEmp: { type: 'string', description: '补谁（recruiting_started 用）' },
       },
     },
     output: {
@@ -2187,6 +2200,17 @@ export const TOOLS = [
         if (args.headhunter !== undefined) { try { state.headhunter = JSON.parse(String(args.headhunter)) } catch {} }
         if (args.phase !== undefined) state.phase = String(args.phase)
         state.updatedAt = new Date().toISOString()
+      } else if (mode === 'action') {
+        // 单动作局部同步（员工入职/开工/汇报/开除等）——复用 syncCompanyState，只改对应表不覆盖他表
+        const act = { type: args.actionType, role: args.role, persona: args.persona, currentWork: args.currentWork, replaces: args.replaces, position: args.position, targetPersona: args.targetPersona, replacesEmp: args.replacesEmp, note: args.note }
+        const actionTypes = ['employee_hired', 'employee_started', 'employee_reporting', 'employee_terminated', 'recruiting_started']
+        if (!actionTypes.includes(args.actionType)) return { snapshot: state, updated: false, storage: stateFile, verdict: `未知 actionType：${args.actionType || '(空)'}（支持 ${actionTypes.join('/')}）——未改动` }
+        if (args.actionType === 'employee_hired' && !args.role) return { snapshot: state, updated: false, storage: stateFile, verdict: 'employee_hired 缺 role（入职谁）——未改动' }
+        if ((args.actionType === 'employee_started' || args.actionType === 'employee_reporting' || args.actionType === 'employee_terminated') && !args.role) return { snapshot: state, updated: false, storage: stateFile, verdict: `${args.actionType} 缺 role——未改动` }
+        if (args.actionType === 'recruiting_started' && !args.position) return { snapshot: state, updated: false, storage: stateFile, verdict: 'recruiting_started 缺 position——未改动' }
+        const ok = await syncCompanyState(fsSvc, act)
+        if (!ok) return { snapshot: state, updated: false, storage: stateFile, verdict: `action ${args.actionType} 同步失败（无 fs 或动作未生效）` }
+        return { snapshot: state, updated: true, storage: stateFile, verdict: `action ${args.actionType} 已同步（状态局部更新，不覆盖他表）` }
       }
       // 写回磁盘
       let persisted = false

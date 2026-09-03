@@ -1151,3 +1151,28 @@ test('syncCompanyState：员工注入后 recruiting 自动 confirmed（防 3D �
   assert.strictEqual(state.recruiting.find((r) => r.position === 'CEO').status, 'confirmed', '已注入岗位 recruiting 自动 confirmed')
   assert.strictEqual(state.recruiting.find((r) => r.position === '测试').status, 'searching', '未注入岗位仍 searching')
 })
+
+test('syncCompanyState：employee_started 领任务开工标 working（补全状态机缺口）', async () => {
+  const files = new Map()
+  const sp = process.cwd() + '/.jarvis/company-state.json'
+  const fsSvc = {
+    async resolve(p) { return { path: p } },
+    async readText(t) { const f = files.get(t.path); return f ? f.content : '' },
+    async writeText(t, c) { files.set(t.path, { content: c }); return {} },
+  }
+  await syncCompanyState(fsSvc, { type: 'employee_hired', role: '测试', persona: 'James Bach' })
+  await syncCompanyState(fsSvc, { type: 'employee_reporting', role: '测试', note: '回归发现 2 个缺陷已修 1 个' })
+  let state = JSON.parse(files.get(sp).content)
+  const r = state.employees.find((e) => e.role === '测试')
+  assert.strictEqual(r.status, 'reporting', '汇报标 reporting')
+  assert.strictEqual(r.lastReport, '回归发现 2 个缺陷已修 1 个', '汇报内容留痕 lastReport')
+  assert.ok(r.lastReportAt, '汇报时间留痕')
+  await syncCompanyState(fsSvc, { type: 'employee_started', role: '测试', currentWork: '回归 e2e 流程' })
+  state = JSON.parse(files.get(sp).content)
+  const emp = state.employees.find((e) => e.role === '测试')
+  assert.strictEqual(emp.status, 'working', '开工标 working')
+  assert.strictEqual(emp.currentWork, '回归 e2e 流程', '记录当前任务')
+  await syncCompanyState(fsSvc, { type: 'employee_terminated', role: '测试', note: '连续不达标' })
+  state = JSON.parse(files.get(sp).content)
+  assert.strictEqual(state.employees.find((e) => e.role === '测试').status, 'terminated', '开除标 terminated')
+})

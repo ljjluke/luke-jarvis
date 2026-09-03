@@ -485,6 +485,25 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 - **3D 画面各元素的数据来源**：CEO 办公室→ceo 表；会议室→meetings 表（in_progress 显示灯亮）；大厅工位→employees 表（status 决定工位状态：working 灯绿/reporting 闪烁/on_probation 黄/terminated 空位）；猎头→recruiting 表（searching=在找/interviewing=面试中/confirmed=确认）。
 - **CEO 走动监控的实现路径**：CEO 用 `jarvis_company`(update ceo.location=hall/工位区) 表示"在巡视"→ 读 employees 状态逐个看（working/reporting/绩效）→ 评估不行的 `jarvis_perf` → 自动同步 terminated → **猎头补位流程**（recruiting 表自动加 searching）→ 新员工 hired → 工位恢复。整条链状态自动流转，画面全程可显示。
 
+- **员工状态更新约定（3D 数据源要完整——入职/开工/汇报/开除 都更新状态，不然画面是空的）**：
+  - **员工入职**（猎头推荐→CEO 确认→贾维斯注入）→ 更新 employees 加人（status=working，工位亮绿）+ 对应 recruiting 自动 confirmed（syncCompanyState employee_hired 已自动处理）；
+  - **员工领任务开工** → 更新该员工 status=working（在工位干活）；**阶段性汇报** → status=reporting（画面闪烁，CEO 可来看）；**会议中** → status=meeting（离开工位进会议室）；**空闲/等任务** → status=idle；
+  - **被评估** → perf 自动同步 perfScore/strikes（达标=working/待考核=on_probation）；**开除/换人** → perf 自动同步 terminated（工位空，触发猎头补位 recruiting=searching）；
+  - **谁更新/怎么更新（角色真实入口 = `jarvis_company`(mode=action)，不是内部函数）**：
+    - 员工开工 → `jarvis_company`(mode=action, actionType=employee_started, role=自己, currentWork=任务)——状态标 working；
+    - 员工汇报 → mode=action, actionType=employee_reporting, role=自己——状态标 reporting；
+    - 员工入职 → 贾维斯在注入后 mode=action, actionType=employee_hired, role/persona/replaces（自动标 working + 对应 recruiting confirmed）；
+    - 员工开除 → CEO 评估后 mode=action, actionType=employee_terminated, role/note（自动标 terminated，触发补位）；
+    - 会议中 → 各参会角色在开会期间 status=meeting（`jarvis_meeting` 已自动标 meetings 表 in_progress，员工本人如离开工位可再 action 同步自己）；
+    - CEO 走动/巡视 → `jarvis_company`(mode=update, ceo={location:…})；评估 → `jarvis_perf`（自动同步）。
+    - **动作后不更新状态 = 3D 画面失真**（显示旧状态）——每个角色动作后自问"这步改没改变我的状态？改了就要用 jarvis_company(action/update) 同步"。
+- **3D 模拟盘可渲染的完整场景**（状态齐全后）：CEO 从办公室出来→走进大厅巡视（ceo.location=hall）→ 逐个工位看（employee reporting 闪烁的=在汇报）→ 评估不行→perf→terminated→工位空→猎头办公室亮（recruiting=searching）→ 找到新人→confirmed→工位恢复——**整条链每步状态变化 3D 都能显示**。
+
+- **状态更新的真实程度边界（如实记录，不假装全知）**：agent_teams 平台内部"员工此刻正在跑哪个子任务/想什么"是平台运行时状态，**3D/UI 拿不到**（架构限制：平台不暴露任务级心跳）。所以：
+  - employees.status 的 working/reporting/meeting 是**员工在动作时机自己声明**的（近似值），不是平台实时检测的——3D 显示的是"他最后声明在干什么"，不是"平台证明他在干什么"；
+  - 需要实时感时降级为**可读状态**：他最近一次汇报内容（lastReportAt/lastReport 字段）+ 当前任务 currentWork + perf 记录——这些是动作留痕，能展示"他干到哪了"；
+  - 别在协议里承诺"3D 实时追踪员工思考过程"——那需要平台开放任务级心跳接口，当前做不到，说了就是画饼。
+
 ## 项目记忆库（`.jarvis/`，AI 识别到项目直接读取继续）
 
 ```
