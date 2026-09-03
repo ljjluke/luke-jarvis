@@ -7,8 +7,7 @@
   "exports": {
     ".": "./src/host/plugin.js",
     "./host": "./src/host/plugin.js",
-    "./package.json": "./package.json",
-    "./client": "./src/client/plugin.js"
+    "./package.json": "./package.json"
   },
   "dsh": {
     "engines": {
@@ -16,10 +15,6 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "inject": [],
-      "platform": "web"
     }
   },
   "license": "BSD-3-Clause",
@@ -46,7 +41,7 @@
   ],
   "scripts": {
     "test": "node --test test/plugin.test.js",
-    "typecheck:manual": "node --check src/host/plugin.js && node --check src/client/plugin.js",
+    "typecheck:manual": "node --check src/host/plugin.js",
     "selfcheck": "bash scripts/selfcheck.sh"
   },
   "repository": {

@@ -136,7 +136,7 @@ pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
 | Agent 预设 | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/` |
 | 技能（唯一入口） | `skills/jarvis.md` | `~/.dsh/skills/jarvis/SKILL.md` |
 | ponder 满血（随包自带） | `skills/ponder/`（自包含单目录） | `~/.dsh/skills/ponder/`（整个目录） |
-| 核心插件 | `src/host/plugin.js`、`src/client/plugin.js` | 注册为核心插件 |
+| 核心插件 | `src/host/plugin.js` | 注册为核心插件 |
 
 然后对你的 AI 说：
 

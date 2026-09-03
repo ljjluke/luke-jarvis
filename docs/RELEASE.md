@@ -4,7 +4,6 @@
 
 1. **固化代码**（本仓库已做完）：
    - `src/host/plugin.js`（14 工具 + /jarvis 命令：project/store/process/distill/review/essence/escalate/capability/think/think_deep/fidelity/collab/meeting/board，铁律内嵌）
-   - `src/client/plugin.js`
    - `preset/`（jarvis-org 预设：persona + 铁律 + 工具行）
    - `skills/（jarvis 唯一入口：老板协议+蒸馏方法论+项目记忆库+两层架构）
    - **无 `roles/` 静态卡目录**（领域无关设计：插件不携带任何角色卡/领域模板，领域内容来自「项目沉淀 .jarvis/ + 现场蒸馏」）
@@ -25,7 +24,6 @@ ls ~/.dsh/skills/jarvis/SKILL.md                   # 存在
 
 # 2) 核心插件代码语法自检（Node）
 node --check src/host/plugin.js && echo HOST-OK
-node --check src/client/plugin.js && echo CLIENT-OK
 
 # 3) 全量自检（含单测 + e2e + 铁律/四闸落位）
 bash scripts/selfcheck.sh

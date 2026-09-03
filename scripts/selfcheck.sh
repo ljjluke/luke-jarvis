@@ -5,7 +5,6 @@ cd "$(dirname "$0")/.."
 
 echo "== 1) 核心插件语法 =="
 node --check src/host/plugin.js && echo "   HOST-OK"
-node --check src/client/plugin.js && echo "   CLIENT-OK"
 
 echo "== 2) 插件可被 ESM 加载并导出 apply =="
 node -e "import('./src/host/plugin.js').then(m=>{if(!m.default||typeof m.default.apply!=='function'){console.error('BAD: host 未导出 apply');process.exit(1)};console.log('   HOST apply=OK')})"

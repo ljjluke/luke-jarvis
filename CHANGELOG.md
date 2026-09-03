@@ -2,6 +2,16 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.3] - 2026-09-03
+
+### 移除
+
+- **web 黑板面板按钮+浮层（Client 半边）**：`src/client/plugin.js` 整文件删除（0.2.2 引入的"📋 黑板"会话头部按钮 + 15s 轮询浮层）——只读弹窗无操作能力、与对话流重复，实际价值低。**host 侧数据/API 全保留**（`.jarvis/board.json` + `/api/luke-jarvis/board` + `jarvis/board` RPC），3D 办公室阶段重新设计呈现（如公司大厅可视化嵌公司状态快照，黑板未决项并入）。
+
+### 变更
+
+- `package.json`：移除 `dsh.client` 声明与 `exports["./client"]`；`src/` 仅剩 `host/`。
+
 ## [0.2.2] - 2026-08-28
 
 ### 新增
