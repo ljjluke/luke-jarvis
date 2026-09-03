@@ -2227,6 +2227,139 @@ export const TOOLS = [
       return { snapshot: state, updated: mode !== 'snapshot' && persisted, storage: stateFile, verdict: `公司状态${persisted ? '已落盘' : '（无 fs 未落盘）'}：${summary}` }
     },
   },
+
+  {
+    name: 'jarvis_taskgraph',
+    description:
+      '任务编排图校验器（CEO 派活前的硬产物闸——学 HuggingGPT 的依赖图思想：先拆结构化任务图再执行，防"口头派活依赖漏接/下游等上游/验收不明确"）：输入 CEO 拆出的任务清单 JSON，输出健康检查——每个任务(id/负责人/依赖/输入槽位/验收标准)，校验：①依赖闭环（无悬空依赖——每个依赖 id 都真实存在）；②无自依赖/循环依赖；③并行可行性（无依赖的独立任务可并行，不硬串行）；④每任务验收可判（验收标准非空且可判定）；⑤上下游产出传递（下游任务标注了"输入=上游 X 的产出"，防下游等不到上游交付）。**任务类型不预设枚举**（领域无关：CEO 按需求现场拆，不受限固定清单）。**校验器只做结构健康检查，不替代 CEO 判断**——结构问题(悬空/循环/无验收)打回重拆，拆图过闸才派活。产物沉淀 `<项目>/.jarvis/docs/任务编排-<需求关键词>.md`，且任务图可直接写入 company-state.json 的 tasks 表（3D 任务看板数据源）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        requirement: { type: 'string', description: '需求本质（任务图围绕它拆——每任务须指向需求某条可判定验收）' },
+        tasksJson: { type: 'string', description: '任务清单 JSON 数组：[{id, title, assignee, deps, inputs, acceptance}]——id=任务编号(数字或字符串)；title=任务名；assignee=负责人角色；deps=依赖的上游任务 id 数组(无依赖=[]或省略)；inputs=输入槽位描述(注明来自哪个上游任务产出，如"来自T1的方案设计文档")；acceptance=验收标准(怎样算这个任务完成，可判定)' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          taskCount: { type: 'number', description: '任务总数' },
+          issues: { type: 'array', items: { type: 'string' }, description: '健康检查问题（空=无问题）' },
+          ok: { type: 'boolean', description: '任务图是否可派活' },
+          parallelGroups: { type: 'array', items: { type: 'string' }, description: '可并行的任务组建议' },
+          verdict: { type: 'string' },
+        },
+        required: ['ok', 'verdict'],
+      },
+      render: (r) => `任务编排图：${r.ok ? '✅ 可派活' : '❌ 打回重拆'}（${r.taskCount} 任务）\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n并行建议：${(r.parallelGroups ?? []).join(' / ')}`,
+    },
+    handler: async (args) => {
+      const req = String(args?.requirement ?? '')
+      const issues = []
+      let tasks = []
+      try {
+        const parsed = JSON.parse(String(args?.tasksJson ?? '[]'))
+        if (Array.isArray(parsed)) tasks = parsed
+        else issues.push('tasksJson 需为 JSON 数组')
+      } catch {
+        issues.push('tasksJson 解析失败（需合法 JSON 数组）')
+      }
+      const ids = new Set()
+      const seen = new Set()
+      const normId = (x) => String(x ?? '').trim()
+      for (const t of tasks) {
+        const id = normId(t?.id)
+        if (!id) { issues.push('存在无 id 的任务（每个任务必须编号）'); continue }
+        if (seen.has(id)) { issues.push(`任务 id 重复：${id}`); continue }
+        seen.add(id)
+        ids.add(id)
+        const title = String(t?.title ?? '').trim()
+        if (!title) issues.push(`任务 ${id} 缺标题（title）`)
+        const assignee = String(t?.assignee ?? '').trim()
+        if (!assignee) issues.push(`任务 ${id} 缺负责人（assignee——派活必须有主人）`)
+        const acc = String(t?.acceptance ?? '').trim()
+        if (!acc) issues.push(`任务 ${id} 缺验收标准（acceptance——没有"怎样算完成"的任务不许派）`)
+        else if (/^\s*(做完|搞定|弄好|完成|做好|差不多|尽量|尽快|看着办|随便)\s*$/.test(acc)) issues.push(`任务 ${id} 验收标准不可判定：「${acc}」是空泛词——须写明可检查的结果（如"输出文档含 X 节/代码过 Y 测试/页面能 Z"）`)
+        const deps = Array.isArray(t?.deps) ? t.deps : []
+        for (const d of deps) {
+          const ds = normId(d)
+          if (ds === id) issues.push(`任务 ${id} 自依赖（依赖自己——拆错）`)
+          else if (ds && ds !== '-1' && ds !== 'none' && !tasks.some((o) => normId(o?.id) === ds)) issues.push(`任务 ${id} 依赖悬空：依赖 ${ds} 不存在（deps 必须指向真实任务 id）`)
+        }
+        // 输入槽位：有真实依赖（非 -1）时应说明输入来自哪个上游产出，防下游等不到上游交付
+        const hasRealDep = deps.some((d) => { const ds = normId(d); return ds && ds !== '-1' && ds !== 'none' })
+        const inputsTxt = Array.isArray(t?.inputs) ? t.inputs.join('、') : String(t?.inputs ?? '')
+        if (hasRealDep && !inputsTxt.trim()) issues.push(`任务 ${id} 有依赖但未写输入来源（inputs——下游要等上游的什么产出？写明"来自任务 X 的什么"防空等）`)
+      }
+      if (!tasks.length && !issues.length) issues.push('任务清单为空（先拆任务再派活）')
+      // 循环依赖检测（简化：DFS 报环）
+      const adj = {}
+      for (const t of tasks) {
+        const id = normId(t?.id)
+        if (!id) continue
+        adj[id] = (Array.isArray(t?.deps) ? t.deps : []).map(normId).filter((d) => d && d !== '-1' && d !== 'none' && ids.has(d))
+      }
+      const WHITE = 0, GRAY = 1, BLACK = 2
+      const color = {}
+      const cyclePath = []
+      const dfs = (u, path) => {
+        color[u] = GRAY
+        path.push(u)
+        for (const v of adj[u] || []) {
+          if (!color[v]) { if (dfs(v, path)) return true }
+          else if (color[v] === GRAY) { cyclePath.push(...path.slice(path.indexOf(v)), v); return true }
+        }
+        path.pop()
+        color[u] = BLACK
+        return false
+      }
+      for (const id of ids) {
+        if (!color[id]) {
+          if (dfs(id, [])) { issues.push(`循环依赖：${cyclePath.join(' → ')}（任务互相等，永远不开始——拆错）`); break }
+        }
+      }
+      // 并行组建议（拓扑分层：同层任务可并行；层 = 最长依赖链长度）
+      // 防循环干扰：有环时跳过分层（环已报 issue，不产出误导性并行建议）
+      const hasCycle = issues.some((i) => i.includes('循环依赖'))
+      const levelOf = {}
+      const parallelGroups = []
+      if (!hasCycle) {
+        const computeLevel = (id) => {
+          if (levelOf[id] !== undefined) return levelOf[id]
+          const deps = adj[id] || []
+          if (!deps.length) { levelOf[id] = 0; return 0 }
+          let mx = -1
+          for (const d of deps) mx = Math.max(mx, computeLevel(d))
+          levelOf[id] = mx + 1
+          return levelOf[id]
+        }
+        for (const id of ids) computeLevel(id)
+        const byLevel = {}
+        for (const t of tasks) {
+          const id = normId(t?.id)
+          if (!id) continue
+          const lv = levelOf[id] ?? 0
+          ;(byLevel[lv] = byLevel[lv] || []).push(String(t?.title ?? id))
+        }
+        for (const lv of Object.keys(byLevel).map(Number).sort((a, b) => a - b)) {
+          const group = byLevel[lv]
+          if (group.length > 1) parallelGroups.push(`第${lv + 1}批可并行：${group.join(', ')}`)
+          else if (group.length === 1 && lv === 0) parallelGroups.push(`首批开工：${group[0]}`)
+        }
+      }
+      const ok = issues.length === 0
+      return {
+        taskCount: tasks.length,
+        issues,
+        ok,
+        parallelGroups,
+        verdict: ok
+          ? `任务编排图合格（${tasks.length} 任务）：依赖无悬空/无循环、每任务有负责人+可判定验收、独立任务可并行。可派活（agent_teams_create_task 逐个建，dependencies 按 deps 接）。任务图沉淀 docs/任务编排-*.md 并写入 company-state tasks 表（3D 看板可渲染）。`
+          : `任务编排图待修（${issues.length} 项）：${issues.slice(0, 5).join('；')}。打回 CEO 重拆——任务图有结构问题不许派活（悬空依赖=下游等不到；循环=永远不开始；无验收=做完不知道算不算完）。`,
+      }
+    },
+  },
 ]
 
 /** 需求分级（纯逻辑，供 jarvis_project 工具与 /jarvis 命令共用）。

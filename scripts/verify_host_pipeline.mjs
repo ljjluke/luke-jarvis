@@ -123,6 +123,17 @@ const CASES = {
     { mode: 'snapshot' },
     { mode: 'update', employees: '[{"id":"e1","role":"研发","persona":"Martin Fowler","status":"working"}]', meetings: '[{"id":"m1","type":"kickoff","status":"in_progress"}]', phase: '开发' },
   ],
+  jarvis_taskgraph: [
+    {
+      requirement: '库存同步模块',
+      tasksJson: JSON.stringify([
+        { id: 'T1', title: '方案设计', assignee: '架构', acceptance: '输出方案文档含接口契约', deps: [] },
+        { id: 'T2', title: '后端实现', assignee: '研发', deps: ['T1'], inputs: ['来自T1接口契约'], acceptance: '接口过集成测试' },
+        { id: 'T3', title: '测试验收', assignee: '测试', deps: ['T2'], inputs: ['T2产物'], acceptance: '按测试单逐条通过' },
+      ]),
+    },
+    { tasksJson: '[{"id":"T1","title":"A","assignee":"甲","deps":["T2"],"acceptance":"产出A"},{"id":"T2","title":"B","assignee":"乙","deps":["T1"],"acceptance":"产出B"}]' }, // 循环依赖打回
+  ],
   jarvis_clarify: [
     { mode: 'analyze', requirement: '做一个库存管理系统', industry: '供应链' },
     { mode: 'trigger', requirement: '需要符合 OEE 规范的生产排程系统', candidates: '候选人是什么场景\n现在怎么做' },

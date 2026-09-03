@@ -1176,3 +1176,61 @@ test('syncCompanyState：employee_started 领任务开工标 working（补全状
   state = JSON.parse(files.get(sp).content)
   assert.strictEqual(state.employees.find((e) => e.role === '测试').status, 'terminated', '开除标 terminated')
 })
+
+// 任务编排图校验（学 HuggingGPT 依赖图：拆结构化任务图过闸再派活）
+test('jarvis_taskgraph：健康任务图过闸（依赖闭环/每任务有验收/可并行）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  assert.ok(def, 'jarvis_taskgraph 工具存在')
+  const r = await def.handler({
+    requirement: '做拼团电商小程序',
+    tasksJson: JSON.stringify([
+      { id: 'T1', title: '方案设计', assignee: '架构', acceptance: '输出《方案设计》文档含模块划分+接口契约', deps: [] },
+      { id: 'T2', title: '前端实现', assignee: '前端', deps: ['T1'], inputs: ['来自T1的方案设计文档'], acceptance: '页面能走通下单流程，通过验收用例' },
+      { id: 'T3', title: '后端实现', assignee: '后端', deps: ['T1'], inputs: ['来自T1的接口契约'], acceptance: '接口通过集成测试，返回结构符合契约' },
+      { id: 'T4', title: '测试验收', assignee: '测试', deps: ['T2', 'T3'], inputs: ['T2前端产物', 'T3后端产物'], acceptance: '按《测试验收单》逐条通过，缺陷=0' },
+    ]),
+  })
+  assert.strictEqual(r.ok, true, '健康任务图应过闸')
+  assert.strictEqual(r.taskCount, 4, '任务数正确')
+  assert.deepStrictEqual(r.issues, [], '无问题')
+  // 拓扑分层：T1=第1批（首开工），T2/T3 同层可并行，T4 最后
+  assert.ok(r.parallelGroups.some((g) => g.includes('前端实现') && g.includes('后端实现')), 'T2/T3 同层报可并行: ' + r.parallelGroups.join('|'))
+})
+
+test('jarvis_taskgraph：悬空依赖/循环依赖/无验收 打回', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  const r = await def.handler({
+    requirement: 'x',
+    tasksJson: JSON.stringify([
+      { id: 'T1', title: 'A', assignee: '甲', acceptance: '产出A' },
+      { id: 'T2', title: 'B', assignee: '乙', deps: ['T9'], inputs: ['等T9'], acceptance: '产出B' }, // 悬空依赖 T9 不存在
+      { id: 'T3', title: 'C', assignee: '丙', deps: ['T3'], acceptance: '产出C' }, // 自依赖
+      { id: 'T4', title: 'D', assignee: '丁', deps: ['T5'], acceptance: '产出D' }, // 与T5成环
+      { id: 'T5', title: 'E', assignee: '戊', deps: ['T4'], acceptance: '产出E' }, // 与T4成环
+      { id: 'T6', title: 'F', assignee: '己', deps: ['T1'], acceptance: '做完' }, // 空泛验收
+      { id: 'T7', title: 'G', assignee: '', acceptance: '产出G' }, // 无负责人
+    ]),
+  })
+  assert.strictEqual(r.ok, false, '问题任务图应打回')
+  const all = r.issues.join('\n')
+  assert.ok(all.includes('悬空'), '报悬空依赖: ' + all)
+  assert.ok(all.includes('自依赖'), '报自依赖')
+  assert.ok(all.includes('循环依赖'), '报循环依赖')
+  assert.ok(all.includes('验收标准不可判定'), '报空泛验收')
+  assert.ok(all.includes('缺负责人'), '报缺负责人')
+})
+
+test('jarvis_taskgraph：有依赖未写输入来源给提示；坏 JSON 报错', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  const r1 = await def.handler({
+    tasksJson: JSON.stringify([
+      { id: 1, title: '做A', assignee: '甲', deps: [2], acceptance: 'A完成输出文档' },
+      { id: 2, title: '做B', assignee: '乙', acceptance: 'B完成输出代码' },
+    ]),
+  })
+  assert.strictEqual(r1.ok, false, '有依赖但下游没写输入来源应提示')
+  assert.ok(r1.issues.some((i) => i.includes('输入来源')), '提示输入来源')
+  const r2 = await def.handler({ tasksJson: 'not-json' })
+  assert.strictEqual(r2.ok, false, '坏 JSON 打回')
+  assert.ok(r2.issues.some((i) => i.includes('解析失败')), '报解析失败')
+})
