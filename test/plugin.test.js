@@ -309,30 +309,34 @@ test('identifyIndustry：短但有实质动作（改个文案）→ vague=false 
   assert.strictEqual(r.vague, false, '有具体对象+动词不算模糊')
 })
 
-test('/jarvis 命令执行：真实产物含流程/沉淀/蒸馏指令（非占位，无领域预设）', () => {
+test('/jarvis 命令执行：领域可判需求 → 引导猎头调度流程（猎头供CEO→定专家→双人打磨），无领域预设', () => {
   const r = jarvisCommand('做一个金融风控系统，要管住资金安全')
   assert.ok(!r.content.includes('行业识别：金融'), '不应预设具体行业（领域无关）')
-  assert.ok(r.content.includes('jarvis_distill'), '应包含蒸馏校验指令')
-  assert.ok(r.content.includes('jarvis_process'), '应包含领域流程设计指令')
-  assert.ok(r.content.includes('.jarvis/'), '应包含项目沉淀指令')
-  assert.ok(r.content.includes('60 分诚实'), '应包含女娲式铁律')
+  assert.ok(r.content.includes('猎头'), '引导走猎头调度层')
+  assert.ok(r.content.includes('CEO'), '猎头供 CEO')
+  assert.ok(r.content.includes('领域专家'), 'CEO 定领域专家搭档')
+  assert.ok(r.content.includes('双人打磨需求'), 'CEO+专家双人打磨')
+  assert.ok(r.content.includes('接下来 5 分钟该做什么'), '给出可执行清单')
 })
 
-test('/jarvis 命令执行：链路1 修复——回执含"接下来 5 分钟"可执行清单', () => {
-  const r = jarvisCommand('做一个金融风控系统，要管住资金安全')
-  assert.ok(r.content.includes('接下来 5 分钟该做什么'), '给出可执行下一步清单')
-  assert.ok(r.content.includes('jarvis_clarify') || r.content.includes('jarvis_project'), '清单指向具体工具动作')
+test('/jarvis 命令执行：判不出领域（你好/乱用）→ 请用户说具体想干什么，从中判断领域', () => {
+  const r = jarvisCommand('你好')
+  assert.ok(r.content.includes('判不出领域'), '识别判不出领域')
+  assert.ok(r.content.includes('想做什么/解决什么问题/给谁用'), '请用户说具体想干什么')
+  assert.ok(r.content.includes('说详细点'), '引导说详细点')
+  assert.ok(r.content.includes('从中判断领域'), '从描述判断领域')
 })
 
-test('/jarvis 命令执行：模糊需求 → 清单优先指向澄清（S5 联动链路1）', () => {
+test('/jarvis 命令执行：模糊需求（做个东西）→ 判不出领域，引导说具体（非问抽象领域）', () => {
   const r = jarvisCommand('做个东西')
-  assert.ok(r.content.includes('先澄清'), '模糊需求引导先澄清')
-  assert.ok(r.content.includes('jarvis_clarify'), '明确指向澄清工具')
+  assert.ok(r.content.includes('判不出领域'), '判不出领域引导')
+  assert.ok(!r.content.includes('你想做哪个领域'), '不用抽象问领域')
 })
 
-test('/jarvis 命令执行：同一机制适配任意需求（无行业关键词命中）', () => {
+test('/jarvis 命令执行：领域可判需求走人才流程，机制通用（无行业预设）', () => {
   const r = jarvisCommand('做一个短视频带货直播间运营方案')
-  assert.ok(r.content.includes('建议建队等级'), '机制通用')
+  assert.ok(r.content.includes('猎头'), '机制通用（走猎头调度）')
+  assert.ok(!r.content.includes('行业识别'), '无行业预设')
 })
 
 test('工具清单应含 6 个 jarvis_* 工具（含保真度审计+协同设计）', () => {

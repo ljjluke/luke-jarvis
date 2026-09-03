@@ -2207,9 +2207,12 @@ export function identifyIndustry(text) {
   const len = raw.length
   const S_PLACEHOLDER = /(个|点|做|弄|搞|写|建|出|给|上|来|下)\s*(东西|那个|这个|一下|点点|点啥|啥|什么|随便|大概|差不多)|(东西|那个|这个|什么)\s*$/i
   const hasActionVerb = /(做|建|改|写|开发|设计|搭|搞|弄|出|给|帮我|规划|运营|方案|系统|平台|小程序|APP|应用|网站|页面|流程|功能|机器人|助手|工具|服务|产品)/i.test(raw)
-  const vague = S_PLACEHOLDER.test(raw)
+  // 统一 vague：占位词 或 短且无动作词（如"你好"——短无动作=无实质需求线索）
+  const vague = S_PLACEHOLDER.test(raw) || (len <= 5 && !hasActionVerb)
+  // 领域可判性：有具体对象/行业线索（非占位非纯寒暄）→ 领域可从文本判；否则判不出
+  const hasDomainClue = /系统|平台|小程序|网站|应用|电商|金融|制造|医疗|教育|农业|监测|管理|工具|服务|方案|APP|店|厂|矿|公司|项目/.test(raw)
   const suggestion = vague
-    ? 'S：先澄清（需求过于模糊，无实质对象/动词——先问清"为谁解决什么、怎样算成功"，未清晰前不建队）'
+    ? 'S：先澄清（需求过于模糊——请用户说具体想干什么/说详细点，从中判断需求方向与领域；未清晰前不建队）'
     : len <= 5
       ? 'S：直接做（不需要建队）'
       : len < 40
@@ -2220,12 +2223,14 @@ export function identifyIndustry(text) {
     suggestion,
     distillDirections: ['CEO 按本项目需求特性，web 搜索该领域真实可查证权威（现场决定，不预置名单）'],
     matched: false,
-    vague: vague || (len <= 5 && !hasActionVerb),
+    vague,
+    // 领域是否可判：非模糊且文本含领域线索 → 可判；模糊/无线索 → 判不出(需请用户说详细点)
+    domainDeterminable: !vague && hasDomainClue,
     reason: vague
-      ? '需求过于模糊：仅占位词/无实质对象，必须先澄清（REFORM-CLARIFY）'
-      : len <= 5 && !hasActionVerb
-        ? '需求过短且无明确动作，建议先澄清再定级'
-        : '按需求文本复杂度给出建队分级（领域由 CEO 现场判断）',
+      ? '需求过于模糊（占位词或短无动作）——判不出领域方向，请用户说具体想干什么（说详细点：想做什么/解决什么问题/给谁用），从描述中判断领域'
+      : hasDomainClue
+        ? '文本含领域线索，可按文本判断领域方向'
+        : '文本无明显领域线索，但非模糊——进入需求打磨时由 CEO+专家进一步判断领域',
   }
 }
 
@@ -2234,21 +2239,31 @@ export function jarvisCommand(requirement) {
   const text = String(requirement ?? '').trim()
   if (!text) return { content: '用法：/jarvis <需求描述>（可模糊）' }
   const hit = identifyIndustry(text)
-  // 链路1 修复：回执末尾给出"接下来 5 分钟该做什么"的可执行清单（主面板不用自己推演，照做即可）
-  const nextActions = hit.vague
-    ? [
-        '① 用 jarvis_clarify analyze 把需求翻译成 5 角度候选问题（P1场景/P2现状/P3痛点/P4期望/P5验收）',
-        '② 用 jarvis_clarify ask 一次只问 1-2 个问题引导用户回答（开放→聚焦→确认）',
-        '③ 用户回答后 trigger 判蒸馏触发（T1-T5），confirm 三段式重述需求本质 → 用户确认后才进拆解',
-      ]
-    : [
-        '① 先查 <项目>/.jarvis/ 记忆库（cards/prototypes/process/project.md/board/lessons）——有直接复用，没有才从零蒸馏',
-        '② 用 jarvis_project 确认建队等级 → jarvis_process 定领域流程（阶段/闸门/红线/必须角色/会议触点）',
-        '③ 用 jarvis_distill_guide + jarvis_distill + jarvis_fidelity 现场蒸馏真实 CEO/子角色卡（web 查证，拒绝编造）',
-        '④ 用 jarvis_collab 定协同架构 → jarvis_meeting kickoff 全员会对齐 → 黑板(jarvis_board) 开跑',
-      ]
+  const vague = hit.vague
+  // 判领域分支：判不出 → 请用户说具体想干什么；能判 → 走猎头→CEO→专家流程
+  let actions = []
+  let guidance = ''
+  if (vague) {
+    // 判不出领域方向（乱用/你好/做个东西）→ 请用户说详细点，从描述判断领域
+    actions = [
+      '① 回复用户：「你想做什么/解决什么问题/给谁用？能具体说说吗」——请用户说详细点（不用问"哪个领域"这种抽象问题）',
+      '② 从用户的具体描述判断领域方向（如"给员工做考勤"→软件/HR；"养鸡场自动喂食"→农业/自动化）——循环请补充说到能判出',
+      '③ 领域判出后 → 蒸馏该领域猎头（人才调度层）→ 猎头供该领域 CEO → CEO 分析需求定一个领域专家 → 双人打磨需求',
+    ]
+    guidance = '⚠️ 判不出领域方向（需求太模糊/无领域线索）——先请用户说具体想干什么，从中判断领域，再启动人才'
+  } else {
+    // 领域可判（或小需求）→ 走完整人才流程
+    actions = [
+      '① 蒸馏该领域猎头（人才调度层——蒸馏自该领域知名猎头/人才寻访权威，过 distill 双闸）',
+      '② 猎头供该领域 CEO（按岗位画像找最合适的带队大佬）→ 贾维斯确认',
+      '③ CEO 分析需求 → 向猎头定一个领域专家搭档 → 猎头调度给 CEO 确认',
+      '④ CEO+专家 双人打磨需求问用户（各自看法→对齐→问清"为谁/解决什么/怎样算成功"）→ 需求清晰',
+      '⑤ 需求无问题 → CEO+专家定团队规模/人员列表 → 猎头逐个调度 → CEO+专家确认够格 → kickoff 开工',
+    ]
+    guidance = hit.domainDeterminable ? '✅ 领域可从文本判断，启动人才流程' : '（小需求/无领域线索但可直接做——按需走或直接做）'
+  }
   return {
-    content: `已收到需求[${text.slice(0, 120)}]（建议建队等级 ${hit.suggestion}）。\nJarvis 流程启动（Jarvis=主面板/对客户沟通；CEO=团队内角色。先查记忆 → 蒸馏 → 建队 → CEO 盯人换人 → 交付，单一 /jarvis 入口）：\n0. 【先查项目记忆库】先查 <项目>/.jarvis/：prototypes(真实人物原型)+cards(虚拟人物卡)+process(流程)+project.md(项目细节)+board(进度)+lessons(经验) → 有就直接读取继续（不用重分析源码）；没有才从零蒸馏\n1. 需求本质回归：先重述"为谁解决什么、怎样算成功"（可判定标准），未清晰前不开工\n2. 定领域流程：jarvis_process 按本需求定流程（阶段/闸门/红线/必须角色/会议触点）——插件无预设，可参考本项目沉淀（按本次需求修订）\n3. 【蒸馏 CEO 角色卡】CEO 是团队内角色，不是主面板——web 查证该领域真实大佬（长访谈/一手文章/决策记录优先，避开知乎/公众号/百度百科）→ 存 prototypes/ → **先 jarvis_distill_guide 提炼独有 HOW（决策触发词/独特取舍/领域黑话/反直觉/认知变化轨迹/失效边界 + 7品味原则 + 来源分级 + 验证锚点）→ 再写六段式 CEO 卡** → jarvis_distill 证据链硬闸 + jarvis_fidelity 保真度审计 双验 → 作为团队成员注入\n4. 定子角色 → 逐个 同样【distill_guide 提炼 HOW → 写卡 → distill 校验】+ 保真度审计双验（蒸馏方向：${hit.distillDirections[0]}）→ jarvis_collab 设计协同（四要素+每角色自己的协同段）\n5. kickoff 全员会（jarvis_meeting）：对齐目标/验收 + 领域流程闸门/红线 + 接口契约 → 决议写统一黑板（jarvis_board）\n6. 各角色独自思考/干活（关键决策 jarvis_think_deep）→ 所有问题/发现/阻塞写黑板\n7. 黑板有未决阻塞/分歧/接口变更 → 二次会（cycle）+ jarvis_review 裁决（吃 thinkA/thinkB + requirement）→ 循环到黑板收敛\n8. 【CEO 时刻盯人换人】CEO 是团队成员且持续在岗——用 jarvis_perf 多角度评估每个员工（成果质量/任务完成度/问题上行健康度[高频信号异常立即触发]/角色契合度/深度分），连续 2 次不达标 → 换人：离任(写依据) → remove_member → 归档 .jarvis/cards/ 历史 → jarvis_distill_guide 重提炼+重蒸馏更合适的真实大神 → distill 校验 → 新成员补位；其他岗位通力协作（开会/黑板/依赖/升级齐全）\n9. 问题上行：技术绕不开/无法抉择 → 禁止跳过 → jarvis_escalate 带 风险细节+已尝试+决策请求 上报 → 写黑板 → CEO 闭环\n10. 【交付版本管理】用 jarvis_release 与甲方契约化交付：new_version 打版本快照（冻结旧版/变更开新版）→ checklist 生成交付清单（需求本质逐条→交付物→自测，甲方逐条确认）→ status 版本状态（待确认/已确认/已否决+确认时限，超时默认通过或挂起）→ communication 记录与甲方沟通结论（只记结论入 project.md）。乙方永远能说清"交付了什么、等什么确认"，防"需求永远改/无法自证"\n11. 收口会（close）：对照领域闸门逐项验收 + 交付清单 → 交付报告（Jarvis 向客户汇报，客户确认即完成）\n12. 沉淀到项目：角色卡/原型/流程/组件/项目细节/沟通记录/经验 读写 <项目>/.jarvis/ —— 下次需求先查记忆直接复用（阶段零）\n（铁律：插件无预置角色卡/领域模板（领域无关）；捕捉 HOW 而非 WHAT；证据不足宁 60 分诚实不要 90 分编造；真实情况优先于角色卡；需求本质优先于一切；流程缺失 = 客户提 bug 的温床。）\n\n【接下来 5 分钟该做什么（照做即可）】${hit.vague ? '⚠️ 需求模糊，先澄清再建队：' : ''}\n${nextActions.join('\n')}`,
+    content: `已收到需求[${text.slice(0, 120)}]。\n${guidance}\n\n【接下来 5 分钟该做什么（照做即可）】\n${actions.join('\n')}\n\n（完整协议见 jarvis 技能：核心协议 5 步主干 + 判领域/猎头调度/CEO+专家打磨/三产物闸/测试返工/收口核对。铁律：真实优先不编造；做客户要的；卡不贵多贵有用。）`,
   }
 }
 
