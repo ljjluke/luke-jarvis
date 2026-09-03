@@ -11,7 +11,7 @@ luke-jarvis 把"完成一个需求"变成"经营一家微型公司"：
 
 ```
 用户说一个模糊需求
-  → 按领域+难度动态组建数字员工团队（CEO/人事/各岗位，全部蒸馏自真实人物）
+  → 按领域+难度动态组建数字员工团队（CEO/猎头/各岗位，全部蒸馏自真实人物）
   → 像真实公司一样：澄清→拆解→开会→各自思考→公屏协作→变更评审→绩效换人→交付
   → 交出可验收的成果 + 可复用的项目记忆
 ```
@@ -44,13 +44,13 @@ luke-jarvis 把"完成一个需求"变成"经营一家微型公司"：
 - 用户插话/新需求 → 登记**变更池** → 触发**全员变更评审会**（所有角色共同判断，非单点拍板）。
 - **影响核心体系** → 不打断当前 → 开发完 → 二次评估；**不影响（新功能/小功能）** → 直接分析分工追加任务；连续插话 → 暂存合并批量评估。
 
-### 6. 绩效换人 + 人事猎头补位（像真实公司 HR）
+### 6. 绩效换人 + 猎头补位（像真实公司猎头挖人）
 - **jarvis_perf 阶段化考核**：按阶段性产出考核（阶段未到=待考核，不计 0 产出；连续 2 次不达标才换人）。
-- 能力不行 → **通知人事（领域 HR 角色）猎头补位**：岗位画像 → 领域找真实权威 → 三重验证 → 选定大佬蒸馏补位；**换人前留书面交接**（无交接不换人）。
+- 能力不行 → **通知猎头（蒸馏自该领域知名猎头人物）补位**：岗位画像 → 寻访地图 → 对标评估 → 背景验证 → 够格判据 → 选定大佬蒸馏补位；**换人前留书面交接**（无交接不换人）。
 
 ### 7. 企业级治理（任何领域通用的版本与合规）
 - **版本管理**：任何领域交付物都版本化；`jarvis_release` 支持**回滚**（改错可 undo，必带原因留痕）。
-- **权限职责分离**：主面板/CEO/人事/员工边界清晰；考核者≠被考核者唯一裁决者。
+- **权限职责分离**：主面板/CEO/猎头/员工边界清晰；考核者≠被考核者唯一裁决者。
 - **风险登记册**（汇总+升级阈值）/ **数据分级**（公开/内部/机密）/ **成本核算**（ponder 满血成本可控+超支预警）。
 
 ### 8. 资源上报公屏 + 问题上行（防幻觉、不绕路）
@@ -85,7 +85,6 @@ luke-jarvis 提供 **19 个 jarvis_* 工具**：
 | jarvis_store | 项目记忆库（check/scaffold/save/reuse） |
 | jarvis_release | 版本交付（快照/清单/状态/回滚） |
 | jarvis_update | 版本检测 |
-| jarvis_board | 统一黑板读写 |
 
 ---
 
@@ -95,7 +94,7 @@ luke-jarvis 提供 **19 个 jarvis_* 工具**：
 |---|---|---|
 | Agent 预设 | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/` |
 | 技能（唯一入口） | `skills/jarvis.md` | `~/.dsh/skills/jarvis/SKILL.md` |
-| **ponder 满血（随包集成）** | `skills/ponder/` + `skills/ponder-stages/` | `~/.dsh/skills/ponder/` + `~/.dsh/skills/ponder-stages/` |
+| **ponder 满血（随包集成）** | `skills/ponder/`（自包含：SKILL.md + `stages/` 十阶段 + `engine/` 方法 + `resources/` + `scripts/` 含依赖） | `~/.dsh/skills/ponder/`（整个目录） |
 | 核心插件 | `src/host/plugin.js`、`src/client/plugin.js` | 注册为核心插件（见下） |
 
 ### 方式 A：预设使用（推荐）
@@ -108,10 +107,11 @@ cp -r preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/jarvis-org
 mkdir -p ~/.dsh/skills/jarvis
 cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
 
-# 3. ponder 满血（随包集成：装 jarvis 即自带）
-mkdir -p ~/.dsh/skills/ponder ~/.dsh/skills/ponder-stages
+# 3. ponder 满血（随包集成：装 jarvis 即自带，技能自包含单目录）
+#    复制整个 skills/ponder/ 目录（含 stages/engine/resources/scripts）即可全部可用
+rm -rf ~/.dsh/skills/ponder && mkdir -p ~/.dsh/skills/ponder
 cp -r skills/ponder/* ~/.dsh/skills/ponder/
-cp -r skills/ponder-stages/* ~/.dsh/skills/ponder-stages/
+#    （旧版若装过独立 ~/.dsh/skills/ponder-stages/ 目录可删除——十阶段已并入 ponder/stages/）
 ```
 
 ### 方式 B：插件包安装（核心工具 + /jarvis 命令）
@@ -128,7 +128,7 @@ pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
 /jarvis 我要做一个下沉市场的拼团电商小程序，2 人团 + 24h 成团，怎么设计？
 ```
 
-完整流程：需求本质回归 → CEO 定领域流程 → 查项目沉淀 → 现场蒸馏该领域 CEO/人事/子角色 → 全员 kickoff → 各角色 ponder 独立思考 → 贾维斯公屏协作 → 按需全员评审 → 收口交付 → 项目复盘沉淀。
+完整流程：需求本质回归 → CEO 定领域流程 → 查项目沉淀 → 现场蒸馏该领域 CEO/猎头/子角色 → 全员 kickoff → 各角色 ponder 独立思考 → 贾维斯公屏协作 → 按需全员评审 → 收口交付 → 项目复盘沉淀。
 
 ---
 
@@ -140,7 +140,7 @@ pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
 | 角色没跑 ponder | 未强制 | 第一次分析必须 ponder（run_id 溯源，无则打回） |
 | 需求模糊无处下手 | 未澄清 | jarvis_clarify 5 角度引导用户 |
 | 用户中途插话 | 需求变更 | 全员变更评审会分级处理 |
-| 员工能力不行 | 绩效不达标 | jarvis_perf 阶段考核 → 人事猎头补位 |
+| 员工能力不行 | 绩效不达标 | jarvis_perf 阶段考核 → 猎头补位 |
 | /jarvis 无响应 | 动态插件丢失 | 用 bundle 持久化安装 |
 
 ---
