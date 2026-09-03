@@ -1135,3 +1135,19 @@ test('syncCompanyState：工具动作自动更新公司状态（入职/开会/�
   assert.ok(state.recruiting.some((r) => r.position === '测试' && r.status === 'searching'), '招募同步猎头状态')
   assert.ok(state.updatedAt, '更新时间戳')
 })
+
+test('syncCompanyState：员工注入后 recruiting 自动 confirmed（防 3D 画面误显"还在找"）', async () => {
+  const files = new Map()
+  const sp = process.cwd() + '/.jarvis/company-state.json'
+  const fsSvc = {
+    async resolve(p) { return { path: p } },
+    async readText(t) { const f = files.get(t.path); return f ? f.content : '' },
+    async writeText(t, c) { files.set(t.path, { content: c }); return {} },
+  }
+  await syncCompanyState(fsSvc, { type: 'recruiting_started', position: 'CEO' })
+  await syncCompanyState(fsSvc, { type: 'recruiting_started', position: '测试' })
+  await syncCompanyState(fsSvc, { type: 'employee_hired', role: 'CEO', persona: 'X' })
+  const state = JSON.parse(files.get(sp).content)
+  assert.strictEqual(state.recruiting.find((r) => r.position === 'CEO').status, 'confirmed', '已注入岗位 recruiting 自动 confirmed')
+  assert.strictEqual(state.recruiting.find((r) => r.position === '测试').status, 'searching', '未注入岗位仍 searching')
+})

@@ -153,6 +153,17 @@ export async function syncCompanyState(fsSvc, action) {
       if (emp) { emp.status = 'terminated'; emp.terminatedAt = new Date().toISOString().slice(0, 10); emp.note = a.note || emp.note || '' }
     } else if (a.type === 'employee_hired' && a.role) {
       state.employees.push({ role: a.role, persona: a.persona || '', status: 'working', hiredAt: new Date().toISOString().slice(0, 10), replaces: a.replaces || '' })
+      // 注入完成 → 自动把匹配该岗位的 recruiting 标 confirmed（防 3D 画面显示"还在找"即使已入职）
+      const hiredRole = a.role
+      const replacedEmp = a.replaces || ''
+      for (const r of state.recruiting) {
+        if (r.status === 'searching' || r.status === 'interviewing') {
+          if (r.position === hiredRole || (replacedEmp && r.replacesEmp === replacedEmp)) {
+            r.status = 'confirmed'
+            r.hiredRole = hiredRole
+          }
+        }
+      }
     } else if (a.type === 'employee_reporting' && a.role) {
       const emp = state.employees.find((e) => e.role === a.role)
       if (emp) { emp.status = 'reporting'; emp.lastReportAt = new Date().toISOString().slice(0, 16) }
