@@ -49,7 +49,7 @@
 - **绩效不行就换**：CEO 时刻盯人（像老板巡视工位），产出不对客户要的=立即换人，猎头对标岗位找更厉害的大佬补位（有书面交接不留断层）
 
 ### 3. 🧠 ponder 满血十阶段随包自带（装 jarvis 就有，不用单独装）
-- interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis——**十阶段一个不少**
+- interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis——**十阶段一个不少**（[点此看 ponder 十阶段详解 →](skills/ponder/SKILL.md)）
 - 每个员工每个关键决策**以自己的人物视角跑完整十阶段**（run_id 溯源，没跑=没思考=打回）
 - 深度对抗：前提审视/八卦镜盲点/方案辩证/情景推演/辩论——不是"一个 AI 拍脑袋"
 
