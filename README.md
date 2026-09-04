@@ -110,6 +110,7 @@
 ### 给未来的 3D 办公室
 - **公司状态结构化**（employees/meetings/recruiting/tasks 表，工具动作自动同步；tasks 表由 `jarvis_taskgraph` 任务编排图写入——含任务 id/负责人/依赖链/验收/状态，依赖链可直接画成连线）
 - 3D 画面可显示：CEO 巡视工位/会议室灯/员工状态/猎头进度/任务看板——**逻辑已支持画面扩展**
+- **数据契约已沉淀**：`docs/3D-办公室-数据契约.md`——5 数据源全景（agent_teams state 端点 1s 轮询/team.json/inbox/company-state/角色卡）+ 点击员工面板字段设计 + 8 个实测坑 + 诚实边界（无屏幕级实时），实施时直接照做
 
 ---
 

@@ -481,7 +481,8 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 - **产出验证衔接**：验证产出有影子看**判断层是否按人物方法论做了选择**（不是执行层是否人工——执行 AI 化没问题，判断 AI 化才丢影子）。
 
 ### 🏢 公司状态（3D 办公室画面数据源——工具动作自动同步，画面实时反映真实动作）
-- **公司状态 = `<项目>/.jarvis/company-state.json`**（employees 员工表/meetings 会议表/recruiting 招募表/ceo/headhunter/phase）——3D 办公室 UI 轮询读它渲染（CEO 办公室/会议室/大厅工位/猎头状态都有数据）。
+- **⚠️ 3D 实施前必读 `docs/3D-办公室-数据契约.md`**（实测核对的数据源全景/点击交互面板字段/8 个坑/诚实边界——state 端点不返 output、company-state 常为空、name→卡非同名等，全部有实证）。
+- **定位修正（实测确认）**：company-state.json 是 3D 的**语义增强层**（绩效/会议/招募/CEO 巡视），**不是骨架**——骨架是 agent_teams 磁盘状态（`/plugins/dsh-agent-teams/state` + `.agent-teams/<team>/team.json` + inbox，真实项目一直在产生）。**公司状态 = `<项目>/.jarvis/company-state.json`**（employees 员工表/meetings 会议表/recruiting 招募表/ceo/headhunter/phase），jarvis 流程要让它有数据（员工动作时用 jarvis_company action 同步），3D 才有绩效/会议/招募语义可显示。
 - **工具动作自动同步（不用 CEO 手动记——画面反映真实动作）**：核心工具动作时自动更新公司状态——
   - `jarvis_perf` 评估后 → 员工 perfScore/strikes/状态（达标=working/待考核=on_probation/换人=terminated）——**CEO 评估完画面即时可见谁达标谁被开**；
   - `jarvis_meeting` 开会 → meetings 表 in_progress（画面显示"正在开会"）；close → done；
