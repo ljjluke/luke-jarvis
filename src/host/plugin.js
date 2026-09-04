@@ -2270,6 +2270,105 @@ export const TOOLS = [
   },
 
   {
+    name: 'jarvis_coverage',
+    description:
+      '覆盖核查器（收口前/阶段闸的硬校验——防"清单对清单"漏对应，领域无关：只核查 清单A→清单B 的逐条覆盖关系，不预设任何领域清单类型）。团队解决问题要全面不遗漏 → 靠"每条都有落点"的自动闸，不靠人眼数。输入若干清单（每条={id,status,refs}），自动核查：①**逐条覆盖**——每条源清单条目是否被目标清单引用（refs 非空）；②**悬空引用**——refs 指向的 id 在目标清单里不存在；③**未收口**——status 非终态(completed/通过/closed/done/confirmed/已确认)的条目数；④**无证据终态**——标终态但无 evidence 的条目（防"说完成但没证据"= 自报式通过）；⑤**覆盖率**——被覆盖条数/总数。**不做领域判断**：清单是什么（需求清单/问题清单/验收项/交付项…）由 CEO 现场定义，工具只查"引用闭合 + 状态收敛 + 终态有据"。典型用法：收口前把《需求规格》条目(源) 与《方案设计》落点/《测试验收单》用例/交付状态(目标) 做覆盖核查——任一需求条无落点/无测试/无交付证据 → 打回补链。',
+    parameters: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: '源清单 JSON 数组（被覆盖方）：[{id:"R1", title:"…", status:"open|completed|…"}]——如需求规格条目' },
+        targets: { type: 'string', description: '目标清单 JSON 对象（覆盖方，可多个）：{"方案设计":[{id:"D1", refs:["R1"], status:"completed", evidence:"…"}], "测试验收":[{id:"T1", refs:["R1"], status:"completed", evidence:"…"}]}——每个目标清单条目用 refs 声明覆盖了源清单哪些 id' },
+        label: { type: 'string', description: '本次核查场景名（如"收口前覆盖核查"），仅用于输出可读性' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          sourceCount: { type: 'number', description: '源清单条目数' },
+          uncovered: { type: 'array', items: { type: 'string' }, description: '未被任何目标覆盖的源条目（漏做/漏测——打回核心依据）' },
+          danglingRefs: { type: 'array', items: { type: 'string' }, description: '悬空引用（refs 指向不存在的源 id）' },
+          openItems: { type: 'array', items: { type: 'string' }, description: '未收口条目（status 非终态）' },
+          evidenceLess: { type: 'array', items: { type: 'string' }, description: '标终态但无证据的条目（防自报式通过）' },
+          coverage: { type: 'number', description: '覆盖率 0-1（被覆盖源条数/源总数）' },
+          ok: { type: 'boolean', description: '是否可过闸（全覆盖 + 无悬空 + 无未收口 + 终态有据）' },
+          verdict: { type: 'string' },
+        },
+        required: ['ok', 'verdict'],
+      },
+      render: (r) => `覆盖核查（${r.label || ''}）：${r.ok ? '✅ 可过闸' : '❌ 打回补链'} · 覆盖率 ${Math.round((r.coverage || 0) * 100)}%（${r.sourceCount ?? 0} 条源）\n未覆盖：${(r.uncovered ?? []).slice(0, 5).join('、') || '无'}\n未收口：${(r.openItems ?? []).slice(0, 5).join('、') || '无'}\n悬空：${(r.danglingRefs ?? []).slice(0, 3).join('、') || '无'}\n${r.verdict}`,
+    },
+    handler: async (args) => {
+      const label = String(args?.label ?? '覆盖核查')
+      let source = []
+      try { source = JSON.parse(String(args?.source ?? '[]')) } catch { source = [] }
+      let targets = {}
+      try { targets = JSON.parse(String(args?.targets ?? '{}')) } catch { targets = {} }
+      const issues = []
+      if (!Array.isArray(source)) issues.push('source 需为 JSON 数组')
+      if (targets && typeof targets !== 'object' || Array.isArray(targets)) issues.push('targets 需为 JSON 对象 {清单名: [条目]}')
+      // 源 id 全集 + 状态
+      const sourceIds = new Set()
+      const srcMeta = {}
+      for (const it of source) {
+        const id = String(it?.id ?? '').trim()
+        if (!id) { issues.push('source 存在无 id 条目'); continue }
+        sourceIds.add(id)
+        srcMeta[id] = { title: String(it?.title ?? '').slice(0, 40), status: String(it?.status ?? '').trim() }
+      }
+      const FINAL = /completed|通过|closed|done|confirmed|已确认|完成|收口|验收通过/
+      const covered = new Set()
+      const dangling = []
+      const openItems = []
+      const evidenceLess = []
+      const targetNames = Object.keys(targets || {})
+      for (const tname of targetNames) {
+        const tlist = Array.isArray(targets[tname]) ? targets[tname] : []
+        for (const t of tlist) {
+          const tid = String(t?.id ?? '').trim()
+          const tstatus = String(t?.status ?? '').trim()
+          const tev = String(t?.evidence ?? t?.result ?? '').trim()
+          const refs = Array.isArray(t?.refs) ? t.refs : []
+          const shown = (tid || '?') + '@' + tname
+          if (!FINAL.test(tstatus)) openItems.push(`${shown}（状态=${tstatus || '空'}）`)
+          else if (!tev && !String(t?.note ?? '').trim()) evidenceLess.push(`${shown} 标终态但无 evidence`)
+          for (const r of refs) {
+            const rs = String(r ?? '').trim()
+            if (!rs || rs === '-1') continue
+            if (sourceIds.has(rs)) covered.add(rs)
+            else dangling.push(`${shown} 引用 ${rs} 不存在`)
+          }
+        }
+      }
+      // 未覆盖 = 源里有、但没有任何目标条目 refs 它
+      const uncovered = []
+      for (const id of sourceIds) {
+        if (!covered.has(id)) uncovered.push(`${id}${srcMeta[id]?.title ? '「' + srcMeta[id].title + '」' : ''}（无任何方案/测试/交付落点）`)
+      }
+      const coverage = sourceIds.size ? covered.size / sourceIds.size : 0
+      const ok = issues.length === 0 && uncovered.length === 0 && dangling.length === 0 && openItems.length === 0 && evidenceLess.length === 0 && sourceIds.size > 0
+      const parts = []
+      if (uncovered.length) parts.push(`未覆盖 ${uncovered.length} 条`)
+      if (dangling.length) parts.push(`悬空引用 ${dangling.length} 条`)
+      if (openItems.length) parts.push(`未收口 ${openItems.length} 条`)
+      if (evidenceLess.length) parts.push(`终态无证据 ${evidenceLess.length} 条`)
+      return {
+        sourceCount: sourceIds.size,
+        uncovered: issues.length ? [] : uncovered,
+        danglingRefs: dangling,
+        openItems,
+        evidenceLess,
+        coverage: Math.round(coverage * 100) / 100,
+        ok,
+        verdict: ok
+          ? `✅ ${label}通过：${sourceIds.size} 条源全部被覆盖（覆盖率 ${Math.round(coverage * 100)}%），无悬空/未收口/无证据终态。可收口/过闸。`
+          : `⛔ ${label}未过（${parts.join('；') || (issues[0] || '参数错误')}）——打回补链：每条源清单条目必须有目标落点（方案/测试/交付），标终态必须带 evidence。不靠人眼数，逐条覆盖是硬闸。`,
+      }
+    },
+  },
+
+  {
     name: 'jarvis_taskgraph',
     description:
       '任务编排图校验器（CEO 派活前的硬产物闸——学 HuggingGPT 的依赖图思想：先拆结构化任务图再执行，防"口头派活依赖漏接/下游等上游/验收不明确"）：输入 CEO 拆出的任务清单 JSON，输出健康检查——每个任务(id/负责人/依赖/输入槽位/验收标准)，校验：①依赖闭环（无悬空依赖——每个依赖 id 都真实存在）；②无自依赖/循环依赖；③并行可行性（无依赖的独立任务可并行，不硬串行）；④每任务验收可判（验收标准非空且可判定）；⑤上下游产出传递（下游任务标注了"输入=上游 X 的产出"，防下游等不到上游交付）。**任务类型不预设枚举**（领域无关：CEO 按需求现场拆，不受限固定清单）。**校验器只做结构健康检查，不替代 CEO 判断**——结构问题(悬空/循环/无验收)打回重拆，拆图过闸才派活。产物沉淀 `<项目>/.jarvis/docs/任务编排-<需求关键词>.md`，且任务图可直接写入 company-state.json 的 tasks 表（3D 任务看板数据源）。',

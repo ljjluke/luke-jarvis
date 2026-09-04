@@ -126,6 +126,17 @@ const CASES = {
     { mode: 'action', actionType: 'recruiting_interviewing', position: '测试' }, // searching→interviewing
     { mode: 'action', actionType: 'meeting_started', meeting: '{"id":"m2","type":"cycle","topic":"对齐","attendees":["研发","测试"]}' }, // 参会员工联动
   ],
+  jarvis_coverage: [
+    {
+      label: '收口核查',
+      source: JSON.stringify([{ id: 'R1', title: '需求一' }, { id: 'R2', title: '需求二' }]),
+      targets: JSON.stringify({ '方案': [{ id: 'D1', refs: ['R1'], status: 'completed', evidence: '有' }, { id: 'D2', refs: ['R2'], status: 'completed', evidence: '有' }] }),
+    },
+    {
+      source: JSON.stringify([{ id: 'R1', title: '需求一' }, { id: 'R2', title: '需求二' }]),
+      targets: JSON.stringify({ '方案': [{ id: 'D1', refs: ['R1'], status: 'completed', evidence: '有' }] }), // R2 漏覆盖 → 打回
+    },
+  ],
   jarvis_taskgraph: [
     {
       requirement: '库存同步模块',

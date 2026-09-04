@@ -1329,3 +1329,74 @@ test('syncCompanyState：recruiting_interviewing 标 interviewing', async () => 
   const state = JSON.parse(files.get(sp).content)
   assert.strictEqual(state.recruiting.find((r) => r.position === 'CEO').status, 'interviewing', 'searching→interviewing')
 })
+
+// 覆盖核查器（领域无关：清单对清单覆盖——漏细节自动闸）
+test('jarvis_coverage：全覆盖可过闸（制造业场景验证领域无关）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_coverage')
+  assert.ok(def, 'jarvis_coverage 工具存在')
+  const r = await def.handler({
+    label: '产线改造收口核查',
+    source: JSON.stringify([
+      { id: 'R1', title: '传送带速度可调', status: 'open' },
+      { id: 'R2', title: '急停按钮覆盖全工位', status: 'open' },
+      { id: 'R3', title: '噪音低于85分贝', status: 'open' },
+    ]),
+    targets: JSON.stringify({
+      '方案设计': [
+        { id: 'D1', refs: ['R1'], status: 'completed', evidence: '图纸含变频器选型' },
+        { id: 'D2', refs: ['R2'], status: 'completed', evidence: '图纸含急停回路' },
+        { id: 'D3', refs: ['R3'], status: 'completed', evidence: '图纸含隔音方案' },
+      ],
+      '测试验收': [
+        { id: 'T1', refs: ['R1'], status: 'completed', evidence: '实测 0.5-2m/s 可调' },
+        { id: 'T2', refs: ['R2'], status: 'completed', evidence: '逐工位按下急停验证' },
+        { id: 'T3', refs: ['R3'], status: 'completed', evidence: '分贝仪实测 82dB' },
+      ],
+    }),
+  })
+  assert.strictEqual(r.ok, true, '全覆盖应过闸')
+  assert.strictEqual(r.coverage, 1, '覆盖率 100%')
+  assert.deepStrictEqual(r.uncovered, [], '无未覆盖')
+})
+
+test('jarvis_coverage：漏覆盖/悬空/无证据 打回（软件场景）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_coverage')
+  const r = await def.handler({
+    label: '收口前核查',
+    source: JSON.stringify([
+      { id: 'R1', title: '登录', status: 'open' },
+      { id: 'R2', title: '注册', status: 'open' },
+      { id: 'R3', title: '找回密码', status: 'open' },
+    ]),
+    targets: JSON.stringify({
+      '方案设计': [
+        { id: 'D1', refs: ['R1'], status: 'completed', evidence: '登录方案' },
+        // D2 漏了：R2 注册无方案落点
+        { id: 'D3', refs: ['R3'], status: 'completed', evidence: '找回密码方案' },
+      ],
+      '测试验收': [
+        { id: 'T1', refs: ['R1'], status: 'completed', evidence: '登录测过' },
+        // T2 也漏 R2：R2 在方案和测试都无落点 → 真·漏覆盖
+        { id: 'T4', refs: ['R9'], status: 'completed', evidence: '悬空引用' }, // R9 不存在
+        { id: 'T3', refs: ['R3'], status: 'completed' }, // 无 evidence
+      ],
+    }),
+  })
+  assert.strictEqual(r.ok, false, '有缺口应打回')
+  assert.ok(r.uncovered.some((u) => u.includes('R2')), '漏覆盖 R2: ' + r.uncovered.join('|'))
+  assert.ok(r.danglingRefs.some((d) => d.includes('R9')), '悬空引用 R9: ' + r.danglingRefs.join('|'))
+  assert.ok(r.evidenceLess.some((e) => e.includes('T3')), 'T3 终态无证据: ' + r.evidenceLess.join('|'))
+  assert.ok(r.coverage < 1, '覆盖率不足 100%')
+})
+
+test('jarvis_coverage：未收口条目拦截 + 空源报错', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_coverage')
+  const r1 = await def.handler({
+    source: JSON.stringify([{ id: 'R1', title: '需求A' }]),
+    targets: JSON.stringify({ '方案': [{ id: 'D1', refs: ['R1'], status: 'in_progress' }] }),
+  })
+  assert.strictEqual(r1.ok, false, '方案 in_progress 未收口应打回')
+  assert.ok(r1.openItems.some((o) => o.includes('D1')), '报 D1 未收口')
+  const r2 = await def.handler({ source: '[]', targets: '{}' })
+  assert.strictEqual(r2.ok, false, '空源应打回')
+})
