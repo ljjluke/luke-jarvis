@@ -1267,3 +1267,65 @@ test('jarvis_taskgraph：inputs 引用必须 ∈ deps（自引用/悬空引用/�
   ]) })
   assert.strictEqual(r4.ok, true, 'inputs ∈ deps 应放行')
 })
+
+// 链路修复：会议联动员工状态（开会=离开工位，散会=回工位）
+test('syncCompanyState：meeting_started/done 联动参会员工 status=meeting/working', async () => {
+  const files = new Map()
+  const sp = process.cwd() + '/.jarvis/company-state.json'
+  const fsSvc = {
+    async resolve(p) { return { path: p } },
+    async readText(t) { const f = files.get(t.path); return f ? f.content : '' },
+    async writeText(t, c) { files.set(t.path, { content: c }); return {} },
+  }
+  await syncCompanyState(fsSvc, { type: 'employee_hired', role: '研发', persona: 'X' })
+  await syncCompanyState(fsSvc, { type: 'employee_hired', role: '测试', persona: 'Y' })
+  await syncCompanyState(fsSvc, { type: 'meeting_started', meeting: { id: 'm1', type: 'kickoff', topic: '对齐', attendees: ['研发', '测试'] } })
+  let state = JSON.parse(files.get(sp).content)
+  assert.strictEqual(state.employees.find((e) => e.role === '研发').status, 'meeting', '参会员工开会中=meeting')
+  assert.strictEqual(state.employees.find((e) => e.role === '测试').status, 'meeting', '参会员工2开会中=meeting')
+  assert.strictEqual(state.meetings.find((m) => m.id === 'm1').status, 'in_progress', '会议 in_progress')
+  await syncCompanyState(fsSvc, { type: 'meeting_done', meetingId: 'm1' })
+  state = JSON.parse(files.get(sp).content)
+  assert.strictEqual(state.employees.find((e) => e.role === '研发').status, 'working', '散会回工位 working')
+  assert.strictEqual(state.meetings.find((m) => m.id === 'm1').status, 'done', '会议 done')
+})
+
+// 链路修复：开除自动触发猎头补位（无 recruiting 记录→新增 searching；有→置回 searching）
+test('syncCompanyState：employee_terminated 自动触发 recruiting 补位', async () => {
+  const files = new Map()
+  const sp = process.cwd() + '/.jarvis/company-state.json'
+  const fsSvc = {
+    async resolve(p) { return { path: p } },
+    async readText(t) { const f = files.get(t.path); return f ? f.content : '' },
+    async writeText(t, c) { files.set(t.path, { content: c }); return {} },
+  }
+  // 场景A：无 recruiting 记录 → 开除自动新增补位条
+  await syncCompanyState(fsSvc, { type: 'employee_hired', role: '测试', persona: 'X' })
+  await syncCompanyState(fsSvc, { type: 'employee_terminated', role: '测试', note: '连续不达标' })
+  let state = JSON.parse(files.get(sp).content)
+  assert.strictEqual(state.employees.find((e) => e.role === '测试').status, 'terminated', '员工标 terminated')
+  assert.ok(state.recruiting.some((r) => r.position === '测试' && r.status === 'searching'), '自动新增补位 recruiting searching')
+  // 场景B：有 confirmed 记录 → 开除置回 searching（防画面显示"还在招"但人还在）
+  await syncCompanyState(fsSvc, { type: 'employee_hired', role: '研发', persona: 'Y' })
+  await syncCompanyState(fsSvc, { type: 'employee_terminated', role: '研发' })
+  state = JSON.parse(files.get(sp).content)
+  const rec = state.recruiting.find((r) => r.position === '研发')
+  assert.ok(rec && rec.status === 'searching', '已有 recruiting 置回 searching')
+})
+
+// 链路修复：recruiting_interviewing 补全状态机 searching→interviewing
+test('syncCompanyState：recruiting_interviewing 标 interviewing', async () => {
+  const files = new Map()
+  const sp = process.cwd() + '/.jarvis/company-state.json'
+  const fsSvc = {
+    async resolve(p) { return { path: p } },
+    async readText(t) { const f = files.get(t.path); return f ? f.content : '' },
+    async writeText(t, c) { files.set(t.path, { content: c }); return {} },
+  }
+  await syncCompanyState(fsSvc, { type: 'recruiting_started', position: 'CEO', targetPersona: '某大佬' })
+  const noRec = await syncCompanyState(fsSvc, { type: 'recruiting_interviewing', position: '不存在岗' })
+  assert.strictEqual(noRec, false, '无 searching 记录不可转 interviewing')
+  await syncCompanyState(fsSvc, { type: 'recruiting_interviewing', position: 'CEO' })
+  const state = JSON.parse(files.get(sp).content)
+  assert.strictEqual(state.recruiting.find((r) => r.position === 'CEO').status, 'interviewing', 'searching→interviewing')
+})

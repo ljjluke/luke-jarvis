@@ -124,26 +124,44 @@ async function writeCompanyState(fsSvc, state) {
 
 /**
  * 工具动作自动同步公司状态（3D 画面反映真实动作，不靠 CEO 手动 update）：
- *   action.meeting_started/meeting_done → meetings 表更新
+ *   action.meeting_started/meeting_done → meetings 表更新 + 参会员工 status=meeting/恢复 working
  *   action.employee_evaluated {role, score, strikes, status} → employees 表更新(perfScore/strikes/status)
- *   action.employee_terminated {role} → employees 表标 terminated
- *   action.employee_hired {role, persona} → employees 表加人
+ *   action.employee_terminated {role} → employees 表标 terminated + 自动触发猎头补位(recruiting 置回/新增 searching)
+ *   action.employee_hired {role, persona} → employees 表加人 + 匹配 recruiting 自动 confirmed
  *   action.employee_reporting {role} → employees 表标 reporting
  *   action.employee_started {role} → employees 表标 working（领任务开工，状态从 idle/报到 变干活）
- *   action.recruiting_started {position} → recruiting 表加条
+ *   action.recruiting_started {position} → recruiting 表加条(searching)
+ *   action.recruiting_interviewing {position} → 匹配 recruiting 标 interviewing（猎头开始面试）
  */
 export async function syncCompanyState(fsSvc, action) {
   if (!fsSvc || typeof fsSvc.readText !== 'function' || typeof fsSvc.writeText !== 'function') return false
   try {
     const state = await readCompanyState(fsSvc)
     const a = action || {}
+    // 会议：标会议状态 + 参会员工联动（进会议室=离开工位；散会=回工位继续干）
     if (a.type === 'meeting_started' && a.meeting) {
       const m = state.meetings.find((x) => x.id === a.meeting.id)
-      if (m) m.status = 'in_progress'
-      else state.meetings.push({ id: a.meeting.id || 'm' + (state.meetings.length + 1), type: a.meeting.type || '', topic: a.meeting.topic || '', attendees: a.meeting.attendees || [], status: 'in_progress' })
+      const attendees = (a.meeting.attendees || []).map((x) => String(x).trim()).filter(Boolean)
+      if (m) { m.status = 'in_progress'; if (attendees.length) m.attendees = attendees }
+      else state.meetings.push({ id: a.meeting.id || 'm' + (state.meetings.length + 1), type: a.meeting.type || '', topic: a.meeting.topic || '', attendees, status: 'in_progress' })
+      // 参会员工（角色名匹配）从工位状态 → meeting（3D：工位灯变"开会中"）
+      const CEO_ROLES = new Set(['CEO', 'ceo', '老板', '主面板'])
+      for (const emp of state.employees) {
+        if (attendees.includes(emp.role) && !CEO_ROLES.has(emp.role)) {
+          emp.status = 'meeting'; emp._prevStatus = emp._prevStatus || 'working'
+        }
+      }
     } else if (a.type === 'meeting_done' && a.meetingId) {
       const m = state.meetings.find((x) => x.id === a.meetingId)
+      const attendees = (m && Array.isArray(m.attendees) ? m.attendees : []).map((x) => String(x).trim()).filter(Boolean)
       if (m) m.status = 'done'
+      // 散会 → 参会员工恢复干活状态（3D：从会议室回工位）
+      const CEO_ROLES = new Set(['CEO', 'ceo', '老板', '主面板'])
+      for (const emp of state.employees) {
+        if (attendees.includes(emp.role) && !CEO_ROLES.has(emp.role) && emp.status === 'meeting') {
+          emp.status = 'working'; emp.lastMeetingAt = new Date().toISOString().slice(0, 16)
+        }
+      }
     } else if (a.type === 'employee_evaluated' && a.role) {
       const emp = state.employees.find((e) => e.role === a.role)
       const rec = { role: a.role, persona: (emp && emp.persona) || a.persona || '', perfScore: a.score, strikes: a.strikes, status: a.status || (emp && emp.status) || 'working', note: a.note || '' }
@@ -152,6 +170,15 @@ export async function syncCompanyState(fsSvc, action) {
     } else if (a.type === 'employee_terminated' && a.role) {
       const emp = state.employees.find((e) => e.role === a.role)
       if (emp) { emp.status = 'terminated'; emp.terminatedAt = new Date().toISOString().slice(0, 10); emp.note = a.note || emp.note || '' }
+      // 开除/换人 → 自动触发猎头补位：已有该岗位 recruiting 记录则置回 searching，没有则新增一条
+      const role = a.role
+      const activeRec = state.recruiting.find((r) => r.position === role && (r.status === 'confirmed' || r.status === 'searching' || r.status === 'interviewing') && r.hiredRole !== role)
+      if (activeRec) {
+        activeRec.status = 'searching'; activeRec.hiredRole = undefined
+      } else {
+        const exists = state.recruiting.some((r) => r.position === role && r.status !== 'cancelled')
+        if (!exists) state.recruiting.push({ id: 'r' + (state.recruiting.length + 1), position: role, targetPersona: a.targetPersona || '', candidates: [], status: 'searching', replacesEmp: a.replaces || role, reason: '补位：' + (a.note || '员工离任') })
+      }
     } else if (a.type === 'employee_hired' && a.role) {
       state.employees.push({ role: a.role, persona: a.persona || '', status: 'working', hiredAt: new Date().toISOString().slice(0, 10), replaces: a.replaces || '' })
       // 注入完成 → 自动把匹配该岗位的 recruiting 标 confirmed（防 3D 画面显示"还在找"即使已入职）
@@ -173,6 +200,11 @@ export async function syncCompanyState(fsSvc, action) {
       if (emp) { emp.status = 'reporting'; emp.lastReportAt = new Date().toISOString().slice(0, 16); if (a.note) emp.lastReport = a.note }
     } else if (a.type === 'recruiting_started' && a.position) {
       state.recruiting.push({ id: 'r' + (state.recruiting.length + 1), position: a.position, targetPersona: a.targetPersona || '', candidates: [], status: 'searching', replacesEmp: a.replacesEmp || '' })
+    } else if (a.type === 'recruiting_interviewing' && a.position) {
+      // 猎头开始面试：searching → interviewing（3D：猎头状态从"在找"变"面试中"）
+      const recs = state.recruiting.filter((r) => r.position === a.position && r.status === 'searching')
+      if (recs.length) recs.forEach((r) => { r.status = 'interviewing'; r.interviewAt = new Date().toISOString().slice(0, 16) })
+      else return false // 没有 searching 的该岗位记录可转 interviewing——不改
     } else {
       return false // 未知动作不改
     }
@@ -2140,8 +2172,13 @@ export const TOOLS = [
         ceo: { type: 'string', description: 'CEO 当前状态 JSON（update 用）：{persona,currentAction,location}——location∈ceo_office/hall/meeting_room' },
         headhunter: { type: 'string', description: '猎头当前状态 JSON（update 用）：{persona,currentAction}' },
         phase: { type: 'string', description: '项目当前阶段（如 kickoff/开发/测试/收口）' },
-        actionType: { type: 'string', description: '单动作类型（mode=action 用）：employee_hired(入职, 配role/persona/replaces) / employee_started(开工领任务, 配role/currentWork) / employee_reporting(汇报, 配role/note=汇报内容) / employee_terminated(开除, 配role/note=离任原因) / recruiting_started(开招募, 配position/targetPersona/replacesEmp)——自动同步状态防 3D 画面失真' },
+        actionType: { type: 'string', description: '单动作类型（mode=action 用）：employee_hired(入职, 配role/persona/replaces) / employee_started(开工领任务, 配role/currentWork) / employee_reporting(汇报, 配role/note=汇报内容) / employee_terminated(开除, 配role/note=离任原因——自动触发猎头补位) / employee_evaluated(绩效评估同步, 配role/score/strikes/status) / recruiting_started(开招募, 配position/targetPersona/replacesEmp) / recruiting_interviewing(猎头开始面试, 配position) / meeting_started(开会, 配meeting={id,type,topic,attendees}——参会员工自动标meeting) / meeting_done(散会, 配meetingId)——自动同步状态防 3D 画面失真' },
         note: { type: 'string', description: '汇报内容/离任原因等备注（mode=action 用）' },
+        meeting: { type: 'string', description: '会议信息 JSON（meeting_started 用）：{id,type,topic,attendees:[角色名]}——参会员工自动标 meeting' },
+        meetingId: { type: 'string', description: '会议 id（meeting_done 用）' },
+        score: { type: 'number', description: '绩效分（employee_evaluated 用）' },
+        strikes: { type: 'number', description: '不达标次数（employee_evaluated 用）' },
+        status: { type: 'string', description: '评估后状态 working/on_probation/terminated（employee_evaluated 用）' },
         role: { type: 'string', description: '动作针对的员工角色（mode=action 用）' },
         persona: { type: 'string', description: '入职员工人物（employee_hired 用）' },
         currentWork: { type: 'string', description: '当前任务（employee_started 用）' },
@@ -2202,12 +2239,16 @@ export const TOOLS = [
         state.updatedAt = new Date().toISOString()
       } else if (mode === 'action') {
         // 单动作局部同步（员工入职/开工/汇报/开除等）——复用 syncCompanyState，只改对应表不覆盖他表
-        const act = { type: args.actionType, role: args.role, persona: args.persona, currentWork: args.currentWork, replaces: args.replaces, position: args.position, targetPersona: args.targetPersona, replacesEmp: args.replacesEmp, note: args.note }
-        const actionTypes = ['employee_hired', 'employee_started', 'employee_reporting', 'employee_terminated', 'recruiting_started']
+        const act = { type: args.actionType, role: args.role, persona: args.persona, currentWork: args.currentWork, replaces: args.replaces, position: args.position, targetPersona: args.targetPersona, replacesEmp: args.replacesEmp, note: args.note, score: args.score, strikes: args.strikes, status: args.status, meetingId: args.meetingId, meeting: args.meeting ? (typeof args.meeting === 'string' ? (() => { try { return JSON.parse(args.meeting) } catch { return null } })() : args.meeting) : null }
+        const actionTypes = ['employee_hired', 'employee_started', 'employee_reporting', 'employee_terminated', 'employee_evaluated', 'recruiting_started', 'recruiting_interviewing', 'meeting_started', 'meeting_done']
         if (!actionTypes.includes(args.actionType)) return { snapshot: state, updated: false, storage: stateFile, verdict: `未知 actionType：${args.actionType || '(空)'}（支持 ${actionTypes.join('/')}）——未改动` }
         if (args.actionType === 'employee_hired' && !args.role) return { snapshot: state, updated: false, storage: stateFile, verdict: 'employee_hired 缺 role（入职谁）——未改动' }
         if ((args.actionType === 'employee_started' || args.actionType === 'employee_reporting' || args.actionType === 'employee_terminated') && !args.role) return { snapshot: state, updated: false, storage: stateFile, verdict: `${args.actionType} 缺 role——未改动` }
         if (args.actionType === 'recruiting_started' && !args.position) return { snapshot: state, updated: false, storage: stateFile, verdict: 'recruiting_started 缺 position——未改动' }
+        if ((args.actionType === 'recruiting_interviewing') && !args.position) return { snapshot: state, updated: false, storage: stateFile, verdict: 'recruiting_interviewing 缺 position——未改动' }
+        if (args.actionType === 'meeting_started' && !args.meeting) return { snapshot: state, updated: false, storage: stateFile, verdict: 'meeting_started 缺 meeting(含 attendees)——未改动' }
+        if (args.actionType === 'meeting_done' && !args.meetingId) return { snapshot: state, updated: false, storage: stateFile, verdict: 'meeting_done 缺 meetingId——未改动' }
+        if (args.actionType === 'employee_evaluated' && (!args.role || args.score === undefined)) return { snapshot: state, updated: false, storage: stateFile, verdict: 'employee_evaluated 缺 role/score——未改动' }
         const ok = await syncCompanyState(fsSvc, act)
         if (!ok) return { snapshot: state, updated: false, storage: stateFile, verdict: `action ${args.actionType} 同步失败（无 fs 或动作未生效）` }
         return { snapshot: state, updated: true, storage: stateFile, verdict: `action ${args.actionType} 已同步（状态局部更新，不覆盖他表）` }

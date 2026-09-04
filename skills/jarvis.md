@@ -492,13 +492,15 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 - **员工状态更新约定（3D 数据源要完整——入职/开工/汇报/开除 都更新状态，不然画面是空的）**：
   - **员工入职**（猎头推荐→CEO 确认→贾维斯注入）→ 更新 employees 加人（status=working，工位亮绿）+ 对应 recruiting 自动 confirmed（syncCompanyState employee_hired 已自动处理）；
   - **员工领任务开工** → 更新该员工 status=working（在工位干活）；**阶段性汇报** → status=reporting（画面闪烁，CEO 可来看）；**会议中** → status=meeting（离开工位进会议室）；**空闲/等任务** → status=idle；
-  - **被评估** → perf 自动同步 perfScore/strikes（达标=working/待考核=on_probation）；**开除/换人** → perf 自动同步 terminated（工位空，触发猎头补位 recruiting=searching）；
+  - **被评估** → perf 自动同步 perfScore/strikes（达标=working/待考核=on_probation）；**开除/换人** → perf 自动同步 terminated（工位空）→ **自动触发猎头补位**：无该岗 recruiting 记录则自动新增 searching，有则置回 searching（syncCompanyState employee_terminated 已自动处理，不用手动开招募）；
   - **谁更新/怎么更新（角色真实入口 = `jarvis_company`(mode=action)，不是内部函数）**：
     - 员工开工 → `jarvis_company`(mode=action, actionType=employee_started, role=自己, currentWork=任务)——状态标 working；
     - 员工汇报 → mode=action, actionType=employee_reporting, role=自己——状态标 reporting；
     - 员工入职 → 贾维斯在注入后 mode=action, actionType=employee_hired, role/persona/replaces（自动标 working + 对应 recruiting confirmed）；
-    - 员工开除 → CEO 评估后 mode=action, actionType=employee_terminated, role/note（自动标 terminated，触发补位）；
-    - 会议中 → 各参会角色在开会期间 status=meeting（`jarvis_meeting` 已自动标 meetings 表 in_progress，员工本人如离开工位可再 action 同步自己）；
+    - 员工开除 → CEO 评估后 mode=action, actionType=employee_terminated, role/note（自动标 terminated，自动触发猎头补位 recruiting searching）；
+    - 员工被评估 → mode=action, actionType=employee_evaluated, role/score/strikes/status（perf 已自动同步，手动补场景用）；
+    - 猎头找到候选人开始面试 → mode=action, actionType=recruiting_interviewing, position（searching→interviewing，画面从"在找"变"面试中"）；
+    - 会议中 → `jarvis_meeting` 开会已**自动联动**：参会员工 status=meeting（离开工位进会议室），散会自动回 working——不用员工手动同步；
     - CEO 走动/巡视 → `jarvis_company`(mode=update, ceo={location:…})；评估 → `jarvis_perf`（自动同步）。
     - **动作后不更新状态 = 3D 画面失真**（显示旧状态）——每个角色动作后自问"这步改没改变我的状态？改了就要用 jarvis_company(action/update) 同步"。
 - **3D 模拟盘可渲染的完整场景**（状态齐全后）：CEO 从办公室出来→走进大厅巡视（ceo.location=hall）→ 逐个工位看（employee reporting 闪烁的=在汇报）→ 评估不行→perf→terminated→工位空→猎头办公室亮（recruiting=searching）→ 找到新人→confirmed→工位恢复——**整条链每步状态变化 3D 都能显示**。

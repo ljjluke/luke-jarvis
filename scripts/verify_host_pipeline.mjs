@@ -122,6 +122,9 @@ const CASES = {
   jarvis_company: [
     { mode: 'snapshot' },
     { mode: 'update', employees: '[{"id":"e1","role":"研发","persona":"Martin Fowler","status":"working"}]', meetings: '[{"id":"m1","type":"kickoff","status":"in_progress"}]', phase: '开发' },
+    { mode: 'action', actionType: 'employee_terminated', role: '研发', note: '不达标' }, // 自动触发补位
+    { mode: 'action', actionType: 'recruiting_interviewing', position: '测试' }, // searching→interviewing
+    { mode: 'action', actionType: 'meeting_started', meeting: '{"id":"m2","type":"cycle","topic":"对齐","attendees":["研发","测试"]}' }, // 参会员工联动
   ],
   jarvis_taskgraph: [
     {
