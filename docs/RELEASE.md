@@ -3,7 +3,7 @@
 ## 一、发布三步
 
 1. **固化代码**（本仓库已做完）：
-   - `src/host/plugin.js`（21 工具 + /jarvis 命令：project/store/process/distill/distill_guide/review/fidelity/collab/think/think_deep/meeting/board/clarify/release/perf/escalate/capability/essence/update/company/taskgraph，铁律内嵌；完整清单以 `TOOLS` 导出为准）
+   - `src/host/plugin.js`（22 工具 + /jarvis 命令：project/store/process/distill/distill_guide/review/fidelity/collab/think/think_deep/meeting/board/clarify/release/perf/escalate/capability/essence/update/company/taskgraph/coverage，铁律内嵌；完整清单以 `TOOLS` 导出为准）
    - `preset/`（jarvis-org 预设：persona + 铁律 + 工具行）
    - `skills/（jarvis 唯一入口：老板协议+蒸馏方法论+项目记忆库+两层架构）
    - **无 `roles/` 静态卡目录**（领域无关设计：插件不携带任何角色卡/领域模板，领域内容来自「项目沉淀 .jarvis/ + 现场蒸馏」）
