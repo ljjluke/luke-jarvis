@@ -410,6 +410,19 @@ export function assessCardDepth(card, isCeo) {
   const hasHonestyDepth = /(信息截止[:：]?\s*(20\d\d|202\d|至今|某月|v\d|版本)|截至\s*20\d\d|推测成分[:：]?\s*(已标注|已标)|做不到[:：])/.test(text)
   if (!hasHonestyDepth) issues.push('诚实边界缺具体信息截止（应写"信息截止到 20XX-XX"或"截至版本"，不是只说"有推测"）')
 
+  // ── 6b. 职业底线（学 agent-qa 实证：报告真相/验证用户实际感受/歧义问清/判失败有证据——比"红线"主动）──
+  //   真大佬的卡应写出"他面对过关压力/模糊/失败时怎么保证真实负责"（红线=不许做什么；职业底线=必须怎么想）
+  // 职业底线 = "主动的职业操守"（报告真相/验证用户所见/宁诚实不编造…）——不含被动红线词（不虚报/不假装是红线，不是职业底线）
+  const PROFESSION_HIT = /职业底线|报告真相|报告真实|不让测试通过|验证用户(实际|所见)|用户实际(看到|感受)|客户实际(看到|感受)|宁[可愿]?.*分诚实|宁可.*不要.*编造|真相优先|职业操守|以用户所见|对使用者负责|对客户负责.*真实/
+  // 红线（决策红线段）里的"不虚报/不假装"是"不许做什么"，不算主动职业底线——用上下文排除：若整卡只在"决策红线"后出现被动词，不算命中
+  const hasPassiveOnly = /决策红线[\s\S]{0,200}不虚报|决策红线[\s\S]{0,200}不假装|决策红线[\s\S]{0,200}不硬撑/
+  let hasProfession = PROFESSION_HIT.test(text)
+  // 若唯一命中的是被动红线表述（决策红线段内的不虚报/不假装），不算主动职业底线
+  if (hasProfession && !/职业底线|报告真相|报告真实|不让测试通过|验证用户(实际|所见)|宁[可愿]?.*分诚实/.test(text)) {
+    hasProfession = false
+  }
+  if (!hasProfession) issues.push('建议含"职业底线"（该人物怎么保证产出真实/负责/不糊弄：真相优先/验证用户实际感受/歧义问清/判失败有证据/先查自身——红线是不许做什么，职业底线是他必须怎么想。例：测试大师"报告真相不让测试通过"）')
+
   // ── 评分（0-100）──
   let score = 0
   score += filled * 6            // 六段实质内容 36
@@ -419,14 +432,15 @@ export function assessCardDepth(card, isCeo) {
   if (url && !hasReservedDomain) score += 10 // source 域名 10
   if (hasVerifyTrace) score += 8 // 查证痕迹 8
   if (hasHonestyDepth) score += 6 // 诚实边界 6
-  score = Math.round(score)
+  if (hasProfession) score += 5  // 职业底线（cap 保证不超 100）
+  score = Math.min(100, Math.round(score))
   const verdict =
     score >= 75
       ? `深度合格（${score}/100）：六段有实质内容、方法论含 HOW、证据链维度齐全、有反例边界与查证痕迹。`
       : score >= 55
         ? `深度一般（${score}/100）：结构齐全但内容偏浅，建议补实后再用。`
         : `深度不足（${score}/100）：属于"标题齐全内容空洞"的浅层卡——蒸馏人不许把浅卡当成品交付。`
-  return { score, issues, filled, hasHow, dimsCovered, hasBoundary, hasVerifyTrace, verdict }
+  return { score, issues, filled, hasHow, dimsCovered, hasBoundary, hasVerifyTrace, hasProfession, verdict }
 }
 
 /** 蒸馏独特性引导器（蒸馏能力核心：借鉴 distilly 24k★ 方法论，引导捕捉"这个大佬独有的 HOW"）。
@@ -514,6 +528,18 @@ export function distillGuide(role, material, industry) {
       '  [人工] 必须真实人工/真实验证（真测试/真部署/真人确认）——不许 AI 假装完成。\n' +
       '  红线：判断被 AI 代=丢影子；执行不 AI 化=工具太重；[人工] 环节 AI 冒充=一票否决。\n' +
       '  反馈格式：每条工作方式标 [判断]/[AI执行]/[人工]，如 {"workHabits":[{"habit":"先量化再动手","execMode":"判断","aiNote":"量化可用AI分析提速但「量什么」是判断"}]}。',
+
+    professionTrace:
+      '🛡️ **职业底线提炼（该人物"怎么保证自己产出的真实/负责/不糊弄"——比红线更主动：红线是不许做什么，职业底线是他必须怎么想）**：每个专业领域真正厉害的人物，都有"职业操守"——面对"过关压力 vs 真相"时他怎么做。蒸馏任何角色（不只测试）都要提炼，学 agent-qa 源码实证的测试职业素养（报告真相/验证用户所见/歧义问清/失败有证据），抽象为领域无关的通用职业底线：\n' +
+      '  ① **真相优先于过关**：他面对"显得完成 vs 真实情况"怎么选（如测试大师"报告真相，不让测试通过"；质量大师"不虚报合格"；医生"不隐瞒误诊"）——他宁可承认没做完也不假装做完；\n' +
+      '  ② **验证用户/客户实际感受到的**：他不只用内部技术指标自证，会站在使用者角度验证真实体验（测试看用户所见、产品问用户感受、制造查客户使用）——不被"指标达标"骗过"体验有问题"；\n' +
+      '  ③ **歧义先问清不瞎猜**：目标不唯一/信息不足时他怎么做（问清/上报/暂停），不硬猜硬干；\n' +
+      '  ④ **判失败/判不合格要有证据**：他什么时候认定"这个不行"（有可复现证据/验证矛盾/确证缺失），不轻易下结论也不硬撑；\n' +
+      '  ⑤ **先排除自身问题再归咎对方**：出错时他先查自己（自己的理解/操作/假设对不对），再判对方问题；\n' +
+      '  ⑥ **区分问题类型**：他把失败/缺陷分类（产品问题 vs 我的问题 vs 环境问题），分类指向修复方向，不笼统说"失败了"；\n' +
+      '  ⑦ **经验沉淀**：他做过的事会沉淀成方法/清单/教训，下次直接复用，不每次从零。\n' +
+      '  做法：从素材找这位人物"面对压力/错误/模糊/失败时的真实选择"（访谈/著作/决策记录里他对"该不该糊弄/该不该凑合/该不该硬撑"的态度）→ 提炼成他的职业底线清单。\n' +
+      '  产出格式：{"professionLines":[{"line":"职业底线(如 报告真相不让测试通过)","evidence":"出自素材哪段/他哪个真实选择","applyTo":"这个角色干活时怎么用(如 QA 测出问题必须报不因进度压力放水)"}]}。',
 
     sourceCheck: src
       ? `素材已提供（${src} 字符）：从中逐条找上面 6 类证据，每条标注"出自素材哪段/哪个出处"，并给素材质量分级（一手/二手）。`
@@ -858,6 +884,7 @@ export const TOOLS = [
           fingerprintTrace: { type: 'string', description: '产出指纹提炼：从真实作品/成就提炼该人物产出的可辨识特征（对照指纹能看出产出像不像他做的）' },
           workbenchTrace: { type: 'string', description: '工作台需求反馈：人物卡自己反馈这领域做这活要什么环境/工具（不许默认 Linux 万能/不许乱搞）' },
           aiDisplacementTrace: { type: 'string', description: 'AI 执行平替：人物保留判断/审美/决策，执行从人工工具平移到 AI 工具（每条工作方式标 判断/AI执行/人工）' },
+          professionTrace: { type: 'string', description: '职业底线：该人物怎么保证产出真实/负责/不糊弄（真相优先/验证用户实际感受/歧义问清/判失败有证据/先查自身/区分问题类型/经验沉淀）' },
           antiGeneric: { type: 'string' },
           personBar: { type: 'string', description: '选人闸：蒸馏前先确认该人物是该领域真正厉害的人物（可命名贡献/公认度/排他性），防止注入"真实但平庸"的人' },
           sourceCheck: { type: 'string' },
@@ -866,7 +893,7 @@ export const TOOLS = [
         required: ['purpose', 'steps', 'respondAs'],
       },
       render: (r) =>
-        `【${r.role ?? '角色'} 蒸馏引导 · 捕捉独有 HOW】\n目的：${r.purpose}\n品味原则：${(r.tastePrinciples || []).map((x) => '  · ' + x).join('\n')}\n来源分级：${(r.sourceHierarchy || []).map((x) => '  · ' + x).join('\n')}\n黑名单源：${(r.sourceBlacklist || []).join('、')}\n推荐源：${(r.sourceRecommended || []).join('、')}\n步骤：${(r.steps || []).map((x) => '  ' + x).join('\n')}\n决策启发式：${r.decisionHeuristics}\n验证锚点：${r.validationAnchors}\n防通用：${r.antiGeneric}\n${r.sourceCheck}\n响应格式：${r.respondAs}`,
+        `【${r.role ?? '角色'} 蒸馏引导 · 捕捉独有 HOW】\n目的：${r.purpose}\n品味原则：${(r.tastePrinciples || []).map((x) => '  · ' + x).join('\n')}\n来源分级：${(r.sourceHierarchy || []).map((x) => '  · ' + x).join('\n')}\n黑名单源：${(r.sourceBlacklist || []).join('、')}\n推荐源：${(r.sourceRecommended || []).join('、')}\n步骤：${(r.steps || []).map((x) => '  ' + x).join('\n')}\n决策启发式：${r.decisionHeuristics}\n验证锚点：${r.validationAnchors}\n防通用：${r.antiGeneric}\n职业底线：${r.professionTrace}\n${r.sourceCheck}\n响应格式：${r.respondAs}`,
     },
     handler: async (args) => {
       const role = String(args.role ?? '').trim()

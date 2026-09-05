@@ -1400,3 +1400,28 @@ test('jarvis_coverage：未收口条目拦截 + 空源报错', async () => {
   const r2 = await def.handler({ source: '[]', targets: '{}' })
   assert.strictEqual(r2.ok, false, '空源应打回')
 })
+
+// 职业底线（学 agent-qa 实证：报告真相/验证用户实际感受——比红线主动）
+test('assessCardDepth：卡含职业底线加分，缺则提示', async () => {
+  const base = `身份定位：测试工程师
+思维模型：测试要找全问题；先按清单逐项执行
+核心方法论：①按测试计划逐项跑 ②记录结果写报告 ③问题反馈修复
+代表作品：某知名测试方法论
+决策红线：不虚报合格；环境不可用如实上报
+语言风格：先结论后证据
+证据链：著作/对话/表达/他者/决策/时间线 六维都有内容
+诚实边界：信息截止 2026-09，推测成分已标注
+保真度：一手 60% 二手 40%
+source: https://example-real-source.com/article
+防冒名声明：只借鉴框架`
+  // 无职业底线 → issues 里有提示
+  const r1 = await assessCardDepth(base, false)
+  assert.ok(r1.issues.some((i) => i.includes('职业底线')), '缺职业底线应提示')
+  const score1 = r1.score
+  // 加职业底线 → 提示消失、分数提高
+  const withProf = base + `\n职业底线：报告真相不让测试通过（测出问题必须报，不因进度压力放水）；验证用户实际看到的画面，不被指标达标骗过体验有问题`
+  const r2 = await assessCardDepth(withProf, false)
+  assert.ok(!r2.issues.some((i) => i.includes('职业底线')), '含职业底线不再提示')
+  assert.ok(r2.hasProfession === true, 'hasProfession=true')
+  assert.ok(r2.score >= score1, '职业底线加分或持平: ' + score1 + '→' + r2.score)
+})
