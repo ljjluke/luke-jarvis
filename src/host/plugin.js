@@ -553,7 +553,7 @@ export const TOOLS = [
   {
     name: 'jarvis_project',
     description:
-      '贾维斯接单入口（领域无关）：对用户原始需求做建队分级建议（S/M/L）——S=直接做、M=精简公司、L=全链公司。插件不预设任何行业/人物（领域由 CEO 结合本项目情况现场判断）。CEO 用本工具决定"这单要不要建队、建多大规模"，再走现场蒸馏（jarvis_distill）与项目沉淀（jarvis_store）。',
+      '贾维斯接单入口（领域无关）：对用户原始需求做建队分级建议（S/M/L）——S=直接做、M=精简公司、L=全链公司。插件不预设任何行业/人物（领域由 CEO 结合本项目情况现场判断）。CEO 用本工具决定"这单要不要建队"（团队大小由后续需求拆解出的环节定，不预设人数），再走现场蒸馏（jarvis_distill）与项目沉淀（jarvis_store）。',
     parameters: {
       type: 'object',
       properties: {
@@ -2563,8 +2563,8 @@ export function identifyIndustry(text) {
     : len <= 5
       ? 'S：直接做（不需要建队）'
       : len < 40
-        ? 'M：精简公司（2-4 人，现场蒸馏子角色）'
-        : 'L：全链公司（4-7 人，现场蒸馏 CEO+子角色）'
+        ? 'M：精简公司（现场蒸馏子角色；团队大小由需求拆解出的环节定，不预设人数）'
+        : 'L：全链公司（现场蒸馏带队者+子角色；团队大小由需求拆解出的环节定，不预设人数）'
   return {
     industry: '由 CEO 现场判断（插件不预设领域，避免套模板）',
     suggestion,

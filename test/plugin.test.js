@@ -1425,3 +1425,10 @@ source: https://example-real-source.com/article
   assert.ok(r2.hasProfession === true, 'hasProfession=true')
   assert.ok(r2.score >= score1, '职业底线加分或持平: ' + score1 + '→' + r2.score)
 })
+
+// 团队大小不由 S/M/L 预设人数决定（由需求拆解出的环节定，领域无关）
+test('identifyIndustry：分级建议不预设团队人数', async () => {
+  const r1 = await identifyIndustry('我要做一个完整的电商平台，支持多商户入驻、订单管理、支付、物流跟踪、售后、优惠券营销、数据分析、客服系统、发票管理')
+  assert.ok(!/2-4 人|4-7 人|\d-\d 人/.test(r1.suggestion), '不应预设人数: ' + r1.suggestion)
+  assert.ok(/不预设人数|拆解出的环节/.test(r1.suggestion), '应说明人数由拆解决定: ' + r1.suggestion)
+})
