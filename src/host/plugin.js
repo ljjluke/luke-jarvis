@@ -1693,6 +1693,7 @@ export const TOOLS = [
           resolutions: { type: 'string', description: '决议记录模板' },
           actions: { type: 'string', description: '会后任务模板（谁负责什么）' },
           respondAs: { type: 'string', description: '要求输出纪要 JSON 的结构' },
+          realMeetingCheck: { type: 'string', description: '真会议执行清单：开会必须真拉每个成员用自己的卡+ponder 独立给观点质疑并留痕，缺任一项=假开会' },
         },
         required: ['goal', 'resolutions'],
       },
@@ -1746,7 +1747,14 @@ export const TOOLS = [
         protocol: m.protocol + (agenda ? `\n议程：${agenda}` : '') + (ctx ? `\n上下文：${ctx}` : ''),
         resolutions: m.resolutions,
         actions: m.actions,
-        respondAs: `完成本次「${type}」会后，以 JSON 输出纪要：{"date":"","type":"${type}","attendees":["${attendees}"],"agenda":["…"],"resolutions":["按模板逐条"],"boardUpdates":["写回黑板的条目"],"actions":[{"who":"角色","what":"会后负责什么"}]}`,
+        realMeetingCheck: '真会议执行清单（开会 = 做完这些才算开，缺任一项 = 假开会 = 不算开）：\n' +
+          '  ① 把议题逐个 send_message 发给每个与会成员（不是自己心里过一遍）；\n' +
+          '  ② 每个成员用自己的角色卡思维 + ponder 独立给观点/质疑（不同角色对同一议题的不同视角：验收的质疑「这怎么验」、实现的质疑「这改得动吗」、独立的质疑「用户会满意吗」）——**收集每个成员的独立观点，不许只自己宣布**；\n' +
+          '  ③ 观点/质疑汇总到黑板（谁提了什么，留痕）；\n' +
+          '  ④ 分歧项 jarvis_review 裁决（吃双方观点+requirement）；\n' +
+          '  ⑤ 决议落黑板 + 会后任务（谁负责什么）。\n' +
+          '  自检：本次会有没有至少一个成员提出过质疑/不同观点？没有 = 全员附和 = 不算评审，重开。',
+        respondAs: `完成本次「${type}」会后，以 JSON 输出纪要：{"date":"","type":"${type}","attendees":["${attendees}"],"agenda":["…"],"memberViews":[{"role":"角色","view":"他用自己的卡+ponder 对议题的独立观点/质疑"}],"disputes":[{"issue":"分歧","resolvedBy":"jarvis_review 裁决结果"}],"resolutions":["按模板逐条"],"boardUpdates":["写回黑板的条目"],"actions":[{"who":"角色","what":"会后负责什么"}]}——纪要必须含每个成员的观点/质疑（没有=假开会）`,
       }
     },
   },
