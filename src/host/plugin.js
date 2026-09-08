@@ -2476,6 +2476,13 @@ export const TOOLS = [
         const acc = String(t?.acceptance ?? '').trim()
         if (!acc) issues.push(`任务 ${id} 缺验收标准（acceptance——没有"怎样算完成"的任务不许派）`)
         else if (/^\s*(做完|搞定|弄好|完成|做好|差不多|尽量|尽快|看着办|随便)\s*$/.test(acc)) issues.push(`任务 ${id} 验收标准不可判定：「${acc}」是空泛词——须写明可检查的结果（如"输出文档含 X 节/代码过 Y 测试/页面能 Z"）`)
+        // scan 教训（实现A 画蛇添足）：标题/验收暗示"替代/重建/对齐旧版/重做"的任务，验收若没写清"对齐参照基准的什么结构"→ 实现照做也错
+        else {
+          const titleText = String(t?.title ?? '')
+          const altSignal = /重做|移植|重建|复刻|替代|迁移|对齐旧|对照旧|同旧|按旧|还原/.test(titleText + ' ' + acc)
+          const hasRefAlign = /(对齐|对照|一致|同旧|同原|参照|按旧|结构|形态|页签|布局|样式)/.test(acc)
+          if (altSignal && !hasRefAlign) issues.push(`任务 ${id} 是替代/重建/对齐类（${titleText.slice(0, 30)}），验收标准没写"与参照基准对齐的什么结构/形态"（scan 教训：验收只写"分类型表单"漏了"UI 结构对齐旧版页签形态"，实现就画蛇添足加错东西——替代类任务的验收必须含结构对齐约束，如"UI 结构对齐旧版两页签形态、不加基准没有的"）`)
+        }
         const deps = Array.isArray(t?.deps) ? t.deps : []
         const realDeps = deps.map(normId).filter((d) => d && d !== '-1' && d !== 'none')
         for (const d of deps) {

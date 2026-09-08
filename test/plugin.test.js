@@ -1454,3 +1454,19 @@ source: https://example-real.com/x
   assert.ok(r2.hasDeepChain === true, '含深度动作链应识别')
   assert.ok(r2.score >= r1.score, '深度链加分: ' + r1.score + '→' + r2.score)
 })
+
+// scan 教训：替代/重做类任务验收标准必须含"结构对齐参照基准"（防实现画蛇添足）
+test('jarvis_taskgraph：重做/对齐类任务验收须含结构对齐约束', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  // 1) 标题说"对齐旧版"但验收没写结构对齐 → 打回
+  const r1 = await def.handler({ tasksJson: JSON.stringify([
+    { id: 'T1', title: '认证新增重做-对齐旧版两区结构', assignee: '实现A', acceptance: '分类型表单+测试按钮' },
+  ]) })
+  assert.strictEqual(r1.ok, false, '验收缺结构对齐应打回')
+  assert.ok(r1.issues.some((i) => i.includes('结构/形态') || i.includes('画蛇添足')), '提示结构对齐: ' + r1.issues.join('|'))
+  // 2) 验收含结构对齐 → 放行
+  const r2 = await def.handler({ tasksJson: JSON.stringify([
+    { id: 'T1', title: '认证新增重做', assignee: '实现A', acceptance: 'UI 结构对齐旧版两页签形态，不加基准没有的' },
+  ]) })
+  assert.strictEqual(r2.ok, true, '验收含结构对齐应放行')
+})
