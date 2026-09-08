@@ -423,6 +423,12 @@ export function assessCardDepth(card, isCeo) {
   }
   if (!hasProfession) issues.push('建议含"职业底线"（该人物怎么保证产出真实/负责/不糊弄：真相优先/验证用户实际感受/歧义问清/判失败有证据/先查自身——红线是不许做什么，职业底线是他必须怎么想。例：测试大师"报告真相不让测试通过"）')
 
+  // ── 6c. 深度分析动作链（防"卡只有标签没深度"——狮子搏兔亦需全力：分析须有把事彻底想透的动作链）──
+  //   卡的核心方法论除了"先做A再做B"流程，须有"深挖信号"（对照基准/逐项找全/追根因/找全遗漏）——只贴标签没深挖动作=浅层卡
+  const DEEP_CHAIN = /立基准|参照|对照|逐项|逐[字词字段规则环节部分]|找全|不漏|全覆盖|追(问|到|根)|根因|影响面|反(问|查)|自查|还有哪|遗漏|闭环|严重度|边界情况|异常处理|用户(视角|角度|实际|会)/
+  const hasDeepChain = DEEP_CHAIN.test(methodologyText)
+  if (!hasDeepChain) issues.push('核心方法论只有表层流程没有"深度分析动作链"（狮子搏兔亦需全力：应有 立基准→逐项对照找全→追问根因→自查遗漏 这类把事想透的动作——如"对照基准逐项查差异/追到根因/反问哪块没查"；只写"先做A再做B"=浅层，小任务也要深度分析）')
+
   // ── 评分（0-100）──
   let score = 0
   score += filled * 6            // 六段实质内容 36
@@ -432,7 +438,8 @@ export function assessCardDepth(card, isCeo) {
   if (url && !hasReservedDomain) score += 10 // source 域名 10
   if (hasVerifyTrace) score += 8 // 查证痕迹 8
   if (hasHonestyDepth) score += 6 // 诚实边界 6
-  if (hasProfession) score += 5  // 职业底线（cap 保证不超 100）
+  if (hasProfession) score += 5  // 职业底线
+  if (hasDeepChain) score += 5  // 深度分析动作链
   score = Math.min(100, Math.round(score))
   const verdict =
     score >= 75
@@ -440,7 +447,7 @@ export function assessCardDepth(card, isCeo) {
       : score >= 55
         ? `深度一般（${score}/100）：结构齐全但内容偏浅，建议补实后再用。`
         : `深度不足（${score}/100）：属于"标题齐全内容空洞"的浅层卡——蒸馏人不许把浅卡当成品交付。`
-  return { score, issues, filled, hasHow, dimsCovered, hasBoundary, hasVerifyTrace, hasProfession, verdict }
+  return { score, issues, filled, hasHow, dimsCovered, hasBoundary, hasVerifyTrace, hasProfession, hasDeepChain, verdict }
 }
 
 /** 蒸馏独特性引导器（蒸馏能力核心：借鉴 distilly 24k★ 方法论，引导捕捉"这个大佬独有的 HOW"）。
@@ -540,6 +547,18 @@ export function distillGuide(role, material, industry) {
       '  ⑦ **经验沉淀**：他做过的事会沉淀成方法/清单/教训，下次直接复用，不每次从零。\n' +
       '  做法：从素材找这位人物"面对压力/错误/模糊/失败时的真实选择"（访谈/著作/决策记录里他对"该不该糊弄/该不该凑合/该不该硬撑"的态度）→ 提炼成他的职业底线清单。\n' +
       '  产出格式：{"professionLines":[{"line":"职业底线(如 报告真相不让测试通过)","evidence":"出自素材哪段/他哪个真实选择","applyTo":"这个角色干活时怎么用(如 QA 测出问题必须报不因进度压力放水)"}]}。',
+
+    deepAnalysisTrace:
+      '🔬 **深度分析动作链（防"人物卡分析问题浅层"——蒸馏的核心缺口：卡里只有思维标签/方法论标签，没有"把一件事彻底想透"的完整动作链）**：真人厉害不只在"怎么想"，更在遇到核心任务时**自动走一套把问题分析到透的动作**（多年经验形成的深度习惯）。**铁律：狮子搏兔亦需全力——无论项目大小/任务大小，都要最深度分析透彻，不许因为"小需求/小改动"就浅层分析、表层就觉得透了**（小问题里的细节缺失，和大事一样会让用户验收时发现问题）。蒸馏任何角色必须提炼：**他做这类核心任务时，怎么系统地把事情彻底分析清楚**——写成可执行的完整动作链（不是标签，是"先做什么→再做什么→直到什么才算分析透"）。\n' +
+      '  深度动作链的通用骨架（任何领域，按角色核心任务填具体动作）：\n' +
+      '  ① **立基准/找参照**：分析"新东西/现状"前先找到"该对什么负责"的基准（原物/规格/标准/用户期望）——没有基准的分析是飘的；\n' +
+      '  ② **逐项对照找全**：对着基准**逐构成部分/逐规则/逐环节/逐交互点**查一遍（不只用户提过的点）——找"该有却没有/不一样"的全部差异，**主动找全不等人列举**；\n' +
+      '  ③ **每个发现追问到底**：对每个可疑点问"为什么会这样/影响什么/还有哪会同样问题"——追到根因和影响面，不浮于表面；\n' +
+      '  ④ **分级与闭环**：发现的问题标严重度（用户会不会觉得有问题）、标怎么解决（自己修/需上报/需裁决），**每个都闭环不悬空**；\n' +
+      '  ⑤ **自查"分析透了吗"**：反问"基准里还有哪块没查？用户实际用会碰到什么我没想的？"——直到找不出遗漏才算分析完；\n' +
+      '  ⑥ **真实验证（静态核对 ≠ 验证——scan 教训：测试"读代码 diff"就判通过，用户一用发现问题）**：他的分析/判断**必须靠真实运行/真实使用验证**（把东西跑起来用、真实环境试、真机走查），**不许"看代码/看文档/能编译"就当验证过**——静态只能证明"看起来对"，真实验证才证明"用起来对"。\n' +
+      '  做法：从素材找这位大佬"做核心任务时的完整过程/方法"（访谈讲他怎么做一个东西/著作写他的工作方法/决策记录）→ 提炼成他的**深度动作链**（遇核心任务→他先做什么→再…→直到怎么算透）。\n' +
+      '  产出格式：{"deepAnalysisChain":{"task":"他的核心任务类型","chain":["①立基准…","②逐项对照…","③追问到底…"],"completeWhen":"怎么算分析透了(找不出遗漏/基准全覆盖)"}}。',
 
     sourceCheck: src
       ? `素材已提供（${src} 字符）：从中逐条找上面 6 类证据，每条标注"出自素材哪段/哪个出处"，并给素材质量分级（一手/二手）。`
@@ -885,6 +904,7 @@ export const TOOLS = [
           workbenchTrace: { type: 'string', description: '工作台需求反馈：人物卡自己反馈这领域做这活要什么环境/工具（不许默认 Linux 万能/不许乱搞）' },
           aiDisplacementTrace: { type: 'string', description: 'AI 执行平替：人物保留判断/审美/决策，执行从人工工具平移到 AI 工具（每条工作方式标 判断/AI执行/人工）' },
           professionTrace: { type: 'string', description: '职业底线：该人物怎么保证产出真实/负责/不糊弄（真相优先/验证用户实际感受/歧义问清/判失败有证据/先查自身/区分问题类型/经验沉淀）' },
+          deepAnalysisTrace: { type: 'string', description: '深度分析动作链：他做核心任务时怎么把问题彻底分析透（立基准/逐项对照找全/追问到底/分级闭环/自查透没）——防卡只有标签没有深度' },
           antiGeneric: { type: 'string' },
           personBar: { type: 'string', description: '选人闸：蒸馏前先确认该人物是该领域真正厉害的人物（可命名贡献/公认度/排他性），防止注入"真实但平庸"的人' },
           sourceCheck: { type: 'string' },
@@ -893,7 +913,7 @@ export const TOOLS = [
         required: ['purpose', 'steps', 'respondAs'],
       },
       render: (r) =>
-        `【${r.role ?? '角色'} 蒸馏引导 · 捕捉独有 HOW】\n目的：${r.purpose}\n品味原则：${(r.tastePrinciples || []).map((x) => '  · ' + x).join('\n')}\n来源分级：${(r.sourceHierarchy || []).map((x) => '  · ' + x).join('\n')}\n黑名单源：${(r.sourceBlacklist || []).join('、')}\n推荐源：${(r.sourceRecommended || []).join('、')}\n步骤：${(r.steps || []).map((x) => '  ' + x).join('\n')}\n决策启发式：${r.decisionHeuristics}\n验证锚点：${r.validationAnchors}\n防通用：${r.antiGeneric}\n职业底线：${r.professionTrace}\n${r.sourceCheck}\n响应格式：${r.respondAs}`,
+        `【${r.role ?? '角色'} 蒸馏引导 · 捕捉独有 HOW】\n目的：${r.purpose}\n品味原则：${(r.tastePrinciples || []).map((x) => '  · ' + x).join('\n')}\n来源分级：${(r.sourceHierarchy || []).map((x) => '  · ' + x).join('\n')}\n黑名单源：${(r.sourceBlacklist || []).join('、')}\n推荐源：${(r.sourceRecommended || []).join('、')}\n步骤：${(r.steps || []).map((x) => '  ' + x).join('\n')}\n决策启发式：${r.decisionHeuristics}\n验证锚点：${r.validationAnchors}\n防通用：${r.antiGeneric}\n职业底线：${r.professionTrace}\n深度动作链：${r.deepAnalysisTrace}\n${r.sourceCheck}\n响应格式：${r.respondAs}`,
     },
     handler: async (args) => {
       const role = String(args.role ?? '').trim()

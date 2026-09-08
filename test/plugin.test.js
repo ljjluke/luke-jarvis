@@ -1432,3 +1432,25 @@ test('identifyIndustry：分级建议不预设团队人数', async () => {
   assert.ok(!/2-4 人|4-7 人|\d-\d 人/.test(r1.suggestion), '不应预设人数: ' + r1.suggestion)
   assert.ok(/不预设人数|拆解出的环节/.test(r1.suggestion), '应说明人数由拆解决定: ' + r1.suggestion)
 })
+
+// 深度分析动作链（狮子搏兔亦需全力——卡须有把事想透的动作链，防只有表层流程）
+test('assessCardDepth：核心方法论含深度分析动作链 vs 只有表层流程', async () => {
+  const shallow = `身份定位：开发
+思维模型：按需求做
+核心方法论：先做A再做B然后提交
+代表作品：某作品
+决策红线：不造假
+语言风格：简洁
+证据链：著作/对话/表达/他者/决策/时间线 都有内容
+诚实边界：信息截止 2026-09
+保真度：一手60%
+source: https://example-real.com/x
+防冒名声明：只借鉴框架`
+  const r1 = await assessCardDepth(shallow, false)
+  assert.ok(!r1.hasDeepChain, '表层流程不算深度分析')
+  assert.ok(r1.issues.some((i) => i.includes('深度分析动作链')), '应提示缺深度分析')
+  const deep = shallow.replace('核心方法论：先做A再做B然后提交', '核心方法论：①先立基准（对照原物/规格该对什么负责）②逐项对照找全差异（不只用户提的点，主动找全不等人列举）③每个可疑点追根因（为什么/影响什么/还有哪同样）④分级闭环（严重度+怎么解决每个不悬空）⑤自查遗漏（哪块没查/用户会碰到什么）⑥真实验证（跑起来真实用，静态看代码不算验证）')
+  const r2 = await assessCardDepth(deep, false)
+  assert.ok(r2.hasDeepChain === true, '含深度动作链应识别')
+  assert.ok(r2.score >= r1.score, '深度链加分: ' + r1.score + '→' + r2.score)
+})
