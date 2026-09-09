@@ -292,6 +292,7 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 
 - **每个成员收到任务后，对关键决策（选型/定价/风控规则/对外承诺/高赌注方案/分歧裁决）必须先跑 ponder 满血版**：用 `skill` 工具加载 ponder 技能（DSH 平台级十阶段推理管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，十阶段资源全部在 ponder 技能包内自包含：`stages/*.json` 每阶段提示 + `engine/*.md` 深度方法 + `scripts/step-guard.cjs` 进度守卫 + `scripts/_lib/` 运行依赖，随 luke-jarvis 安装即自带，无需单独装 ponder），**step-guard.cjs init 开始本次 run → 十阶段全量跑完**（子 agent 全部返回才进下一步），**把本角色卡六段式作为"人物视角"注入画像**（确保十阶段以该人物方法论驱动，不是通用分析师思考），产出按衔接契约喂 `jarvis_review`（含 run_id 溯源）。
 - **强制执行（第一次分析需求必须 ponder）**：每个角色**第一次分析需求时**，用 `jarvis_think_deep(force=true)`——**必须真实加载 ponder 跑完整十阶段并返回 run_id**；无 run_id 且无显式 skipReason → 视为未完成（CEO 打回重跑）。**第一次不 ponder = 贴标签 = 不合格**。这是强制闸，不是靠自觉。
+- **ponder 必须挖"需求没提到的细节"（用户重点强调——scan 全程的表格丑/布局乱/字段缺/交互不顺，全是需求没明说但用户会在意的，角色 ponder 应该自己挖出来，不是等用户指出）**：每个角色跑 ponder 分析需求/任务时，**interview/发散/盲点阶段必须主动找"需求文本没写、但用户实际用会不满意的地方"**——以用户视角发散：这页/这功能用户打开会觉得什么不对？交互顺不顺？样式乱不乱？边界情况（空/错/快/慢）用户会碰什么？跨页/跨功能一致不一致？**产出"未提及细节清单"**（需求没说但发现的问题/风险/该补的），随方案/任务分析一起交——**ponder 的 interview 问的不是用户（用户已给需求不打扰），是"以用户身份审需求/方案找没说的漏洞"**；CEO 收任务分析时核"ponder 有没有挖出未提及细节"——没挖 = ponder 白跑 = 打回（用户不会满意的点，角色要在交付前自己发现）。
 - **满血不阉割**：禁止只跑 interview+converge 两段或跳过八卦镜/辩论等阶段——那达不到思考效果；任何角色的独立思考产出（counter/realityCheck/conclusion）必须可溯源到 ponder 十阶段（run_id + 阶段产出摘录）。
 - 产出是结构化 JSON（含 `counter/realityCheck/confidence`），**不是一句结论**——推理链必须可见。
 - 成员之间有分歧（如产品 vs 风控、测试 vs 研发）→ 各自先跑 ponder，把双方思考帧喂给 `jarvis_review` 裁决（传 `thinkA/thinkB` + **必传 requirement**）。裁决优先级铁律：**需求本质 > 真实情况 > 用户需求 > 专业判断**。谁没提供思考帧只亮结论，CEO 要打回让其补齐——防一面之词。
