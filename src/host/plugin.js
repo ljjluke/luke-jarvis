@@ -1362,7 +1362,7 @@ export const TOOLS = [
       return {
         role: roleName,
         stakes,
-        ponderGuide: `【${roleName} · ${stakes} 赌注深度思考 · 必须加载 ponder 技能（满血版）】\n${depthNote}${forceNote}\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.cjs init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.cjs 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）——${stakes !== 'high' ? '各阶段 agent 规模按低赌注精简（如 bagua 4 维/辩论 2 立论）但阶段一个不少' : '阶段与 agent 规模全量' }；\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；${stakes === 'high' ? 'high 须含可谬自评（见上）。' : ''}\n5. 把 run_id 与阶段产出溯源一并写入输出（供 jarvis_review 防贴标签校验——有 run_id 才算真跑过 ponder）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）降级为知识库推演但标注"受限环境推演"。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","skipReason":"降级原因或空"}。`,
+        ponderGuide: `【${roleName} · ${stakes} 赌注深度思考 · 必须加载 ponder 技能（满血版）】\n${depthNote}${forceNote}\n1. 用 skill 工具加载 ponder 技能（DSH 平台级十阶段管线，工具已注册）——step-guard.cjs init 开始本次 run；\n1a. per-run 隔离（防多成员并发互相覆盖 step-guard.json——runtime-paths.cjs 原生支持 PONDER_DATA_DIR env 覆盖 dataRoot）：本次 run 用独立数据目录 PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ 或按 run_id 隔离的临时目录，跑完把 run_id 与阶段产出写回项目；禁止多成员共用同一全局 step-guard.json；\n2. 把本角色卡六段式全文（roleCard）作为 ponder 画像的"人物视角"注入（先于/并入 interview 五诊：思维模型=该人物怎么看问题、核心方法论=该人物的 HOW、决策红线=该人物不做什么）【本卡方法论=${howText}】，确保十阶段（shensi 前提审视/bagua 8 维盲点/plans 方案/synthesis 结论）全程以该人物方法论驱动，而不是通用分析师思考；\n3. 跑完整十阶段：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（**严格按此固定顺序，不得乱序、不得合并评分与推演、一个阶段都不能少**；子 agent 必须全部返回才进下一步；每步 step-guard before/after 记录）——${stakes !== 'high' ? '各阶段 agent 规模按低赌注精简（如 bagua 4 维/辩论 2 立论）但阶段一个不少' : '阶段与 agent 规模全量' }；\n3a. **提交前自检（必做，防"声称跑完实际乱序/缺阶段"）**：跑 step-guard.cjs verify <run_id> --evidence <本次数据目录>——只有 verdict=PASS（十阶段按序完整、子 agent 数达标、阶段产出落盘）才允许上报"ponder 已完成"；FAIL 先补齐再交。**step-guard 的 completed 是集合、看不出顺序，所以"全部 RECORDED"这句话本身证明不了按序跑全。**\n4. 产出按衔接契约回填：counter←divergence+bagua+debate 汇总去重、realityCheck←interview+无知自检、confidence←converge/certainty（0-1 映射 low/medium/high）、conclusion←synthesis、limits←各阶段 epistemic_status；${stakes === 'high' ? 'high 须含可谬自评（见上）。' : ''}\n5. 把 run_id、**本次 PONDER_DATA_DIR（数据目录路径）**与阶段产出目录一并写入输出——CEO/贾维斯会用 jarvis_ponder_check 工具拿这三样核验（run_id 只证明"跑过一次"，不证明"按序跑全十阶段"）；\n6. 若 ponder 技能不可用（无 skill 工具/运行时缺失）或用户明示成本优先 → 允许降级，但必须显式声明 skipReason 并上报留痕（评审按"未做深度对抗"降级标注置信度），禁止静默降级；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）降级为知识库推演但标注"受限环境推演"。\n最终按衔接契约输出 JSON：{"premises":[…],"perspective":"以角色卡方法论的第一判断","counter":[…],"failure":"失败路径","realityCheck":[…],"limits":"诚实边界","conclusion":"保留结论","confidence":"low|medium|high","runId":"ponder run_id","ponderDataDir":"本次数据目录路径","evidenceDir":"阶段产出目录路径","skipReason":"降级原因或空"}。`,
         premises: `（已转 ponder 十阶段，本字段不适用——见 ponderGuide）`,
         perspective: `（已转 ponder 十阶段——以「${roleName}」角色卡方法论【${howText}】注入画像驱动全程）`,
         counter: `（已转 ponder 十阶段——由 divergence/bagua/debate 产出反方）`,
@@ -1371,6 +1371,165 @@ export const TOOLS = [
         limits: `（已转 ponder 十阶段——由各阶段 epistemic_status 汇总诚实边界）`,
         conclusion: `（已转 ponder 十阶段——由 synthesis 产出收敛结论${stakes === 'high' ? '+可谬自评' : ''}）`,
         respondAs: `按 ponder 十阶段跑完后按衔接契约回填 JSON（见 ponderGuide 第 6 步）。`,
+      }
+    },
+  },
+
+  {
+    name: 'jarvis_ponder_check',
+    description:
+      'ponder 真实性核验器（防"声称跑完十阶段但实际乱序/缺阶段/无产出"——**成员汇报"ponder 已跑完"时必须用它校验，不许听自报**）：读取该 run 的 step-guard 状态 + 项目阶段产出，四查：①**完整性**（十阶段 interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis 是否全部记录，缺哪些）；②**顺序**（sequence 记录的先后是否符合固定顺序——completed 只是集合看不出顺序，无 sequence 记录=顺序无法核验）；③**子 agent 数**（各阶段是否达下限：bagua≥8/plans≥5/score≥3/simulate≥3/debate≥3）；④**产出证据**（给了 evidenceDir 就逐阶段查产出文件是否真落盘——记录完成却无产出=存疑）。另查 run_id 是否与声称一致（不一致=状态被别的 run 覆盖，本轮不可信）与 superseded_run（非空=init 覆盖过别人进度，多 agent 共用状态文件，须 per-run 隔离 PONDER_DATA_DIR）。verdict=PASS 才算真跑完；FAIL/无法核验 → 打回重跑，不许当"已深度思考"。',
+    parameters: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string', description: '成员声称的 ponder run_id（如 run_mtveu8l8_vdkc）——不传则只核验当前状态文件的完整性/顺序，无法比对声称' },
+        dataDir: { type: 'string', description: '该 run 的 step-guard 数据目录（PONDER_DATA_DIR，默认 ~/.dsh/data/ponder）——多成员并发时每人应隔离到自己的目录，核验要指向本人目录' },
+        evidenceDir: { type: 'string', description: '阶段产出目录（如 <项目>/.jarvis/ponder-runs/<run_id>/）——传了就核验每阶段产出文件是否真落盘' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          verdict: { type: 'string', description: 'PASS / FAIL' },
+          runId: { type: 'string' },
+          runIdMatch: { type: 'boolean', description: '声称的 run_id 是否与状态文件一致' },
+          completedCount: { type: 'number' },
+          totalCount: { type: 'number' },
+          missing: { type: 'array', items: { type: 'string' }, description: '未执行的阶段' },
+          orderVerifiable: { type: 'boolean', description: '顺序是否可核验（无 sequence 记录=不可核验）' },
+          orderViolations: { type: 'array', items: { type: 'string' }, description: '顺序违规明细' },
+          agentShortfalls: { type: 'array', items: { type: 'string' }, description: '子 agent 数不足的阶段' },
+          evidenceMissing: { type: 'array', items: { type: 'string' }, description: '记录完成但无产出文件的阶段' },
+          issues: { type: 'array', items: { type: 'string' }, description: '核验发现的问题' },
+          action: { type: 'string', description: '处置建议（通过/打回重跑/要求补证据）' },
+        },
+        required: ['verdict', 'issues', 'action'],
+      },
+      render: (r) =>
+        `【ponder 核验 · ${r.runId ?? '当前状态'} → ${r.verdict}】\n`
+        + `完成 ${r.completedCount ?? '?'}/${r.totalCount ?? 10} 阶段${r.missing?.length ? `（缺：${r.missing.join('、')}）` : ''}\n`
+        + `顺序：${r.orderVerifiable ? (r.orderViolations?.length ? '⚠️ 违规 ' + r.orderViolations.join('；') : '✅ 按序') : '⚠️ 无顺序记录，无法核验'}\n`
+        + `${r.agentShortfalls?.length ? '子 agent 不足：' + r.agentShortfalls.join('；') + '\n' : ''}`
+        + `${r.evidenceMissing?.length ? '产出缺失：' + r.evidenceMissing.join('；') + '\n' : ''}`
+        + `问题：${(r.issues ?? []).join(' | ') || '无'}\n处置：${r.action ?? ''}`,
+    },
+    handler: async (args) => {
+      const path = _require('node:path')
+      const fs = _require('node:fs')
+      const os = _require('node:os')
+
+      const STEPS = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']
+      const LABELS = {
+        interview: '需求打磨', shensi: '神思', divergence: '发散', bagua: '八卦镜', plans: '方案',
+        converge: '收敛', score: '方案评分', simulate: '推演', debate: '辩论', synthesis: '综合',
+      }
+      const MIN_AGENTS = { interview: 0, shensi: 0, divergence: 0, bagua: 8, plans: 5, converge: 0, score: 3, simulate: 3, debate: 3, synthesis: 0 }
+      const EXPECT_FILES = {
+        interview: ['stage-interview.json', 'context.md'], shensi: ['stage-shensi.json'],
+        divergence: ['stage-divergence.json'], bagua: ['stage-bagua.json'], plans: ['stage-plans.json'],
+        converge: ['stage-converge.json'], score: ['stage-score.json'], simulate: ['stage-simulate.json'],
+        debate: ['stage-debate.json'], synthesis: ['stage-synthesis.json', 'end-state.md'],
+      }
+
+      const claimed = String(args.runId ?? '').trim() || null
+      const home = os.homedir ? os.homedir() : '/root'
+      const dataDir = String(args.dataDir ?? '').trim() || path.join(home, '.dsh/data/ponder')
+      const evidenceDir = String(args.evidenceDir ?? '').trim() || null
+
+      // 读状态文件（新命名 step-guard.cjson，兼容旧 step-guard.json）
+      let state = null
+      for (const f of ['step-guard.cjson', 'step-guard.json']) {
+        const p = path.join(dataDir, f)
+        try {
+          if (fs.existsSync(p)) {
+            const parsed = JSON.parse(fs.readFileSync(p, 'utf8'))
+            if (parsed && parsed.run_id) { state = parsed; break }
+          }
+        } catch { /* 试下一个 */ }
+      }
+
+      if (!state) {
+        return {
+          verdict: 'FAIL',
+          runId: claimed ?? undefined,
+          completedCount: 0,
+          totalCount: STEPS.length,
+          missing: STEPS,
+          orderVerifiable: false,
+          orderViolations: [],
+          agentShortfalls: [],
+          evidenceMissing: [],
+          issues: [`在 ${dataDir} 找不到有效 run 记录（step-guard.cjson/json 缺失或为空）——**声称跑过 ponder 但无任何记录 = 未跑**；若用了 per-run 隔离目录，先核对 dataDir 是否指对`],
+          action: '⛔ 打回重跑：要求该角色真实加载 ponder 跑完整十阶段（并在其隔离目录留下 step-guard 记录 + 阶段产出）',
+        }
+      }
+
+      const issues = []
+      const runIdMatch = claimed ? claimed === state.run_id : null
+      if (claimed && !runIdMatch) issues.push(`run_id 不匹配：声称 ${claimed}，实际状态文件 ${state.run_id}（状态已被别的 run 覆盖，声称的 run 无法核验）`)
+      if (state.superseded_run) issues.push(`本轮 init 覆盖过上一轮未完成的 ${state.superseded_run}（多 agent 共用同一状态文件——须 per-run 隔离 PONDER_DATA_DIR，否则顺序/完整性不可信）`)
+
+      const completed = Array.isArray(state.completed) ? state.completed : []
+      const missing = STEPS.filter((s) => !completed.includes(s))
+      if (missing.length > 0) issues.push(`缺 ${missing.length} 个阶段未执行：${missing.map((s) => `${LABELS[s]}(${s})`).join('、')}`)
+
+      const seq = Array.isArray(state.sequence) ? state.sequence : null
+      const orderViolations = []
+      if (seq) {
+        let lastIdx = -1
+        seq.forEach((e, i) => {
+          const idx = STEPS.indexOf(e && e.step)
+          if (idx === -1) return
+          if (idx < lastIdx) orderViolations.push(`第 ${i + 1} 步 ${LABELS[e.step]}(${e.step}) 出现在 ${LABELS[STEPS[lastIdx]]}(${STEPS[lastIdx]}) 之后——违反固定顺序`)
+          else lastIdx = idx
+        })
+        if (orderViolations.length > 0) issues.push(`顺序违规 ${orderViolations.length} 处：${orderViolations.join('；')}`)
+      } else {
+        issues.push('无顺序记录（completed 只是集合、看不出先后）——**顺序无法核验**，不能判定"按序跑完十阶段"')
+      }
+
+      const agentShortfalls = []
+      STEPS.forEach((s) => {
+        if (!completed.includes(s)) return
+        const need = MIN_AGENTS[s] || 0
+        const got = Number((state.agents && state.agents[s]) || 0)
+        if (got < need) agentShortfalls.push(`${LABELS[s]}(${s}) 需 ${need} 个，实际 ${got} 个`)
+      })
+      if (agentShortfalls.length > 0) issues.push(`子 agent 数不足：${agentShortfalls.join('；')}`)
+
+      const evidenceMissing = []
+      if (evidenceDir) {
+        STEPS.forEach((s) => {
+          if (!completed.includes(s)) return
+          const cands = EXPECT_FILES[s] || []
+          const hit = cands.some((f) => { try { return fs.existsSync(path.join(evidenceDir, f)) } catch { return false } })
+          if (!hit) evidenceMissing.push(`${LABELS[s]}(${s})，未见 ${cands.join('/')}`)
+        })
+        if (evidenceMissing.length > 0) issues.push(`阶段产出证据缺失：${evidenceMissing.join('；')}（记录了完成却无产出文件=存疑）`)
+      } else {
+        issues.push('未提供 evidenceDir——只核验了 step-guard 记录，**未核验阶段产出是否真落盘**（应收该角色项目 .jarvis/ponder-runs/<run_id>/）')
+      }
+
+      const ok = missing.length === 0 && orderViolations.length === 0 && agentShortfalls.length === 0
+        && (!claimed || runIdMatch) && (evidenceDir ? evidenceMissing.length === 0 : true)
+
+      return {
+        verdict: ok ? 'PASS' : 'FAIL',
+        runId: state.run_id,
+        runIdMatch: runIdMatch === null ? undefined : runIdMatch,
+        completedCount: completed.length,
+        totalCount: STEPS.length,
+        missing,
+        orderVerifiable: !!seq,
+        orderViolations,
+        agentShortfalls,
+        evidenceMissing,
+        issues,
+        action: ok
+          ? '✅ 核验通过：十阶段按序完整执行、子 agent 数达标' + (evidenceDir ? '、阶段产出齐全' : '（本次未核验产出文件，建议下次带 evidenceDir）')
+          : '⛔ 打回：不许把"声称已完成"当"已深度思考"——要求该角色补齐缺失阶段/按其隔离目录重跑并留下顺序记录与阶段产出，再交核验',
       }
     },
   },

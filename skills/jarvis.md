@@ -294,7 +294,7 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 ## 角色思考协议（防幻觉，**每个角色满血 ponder 必用**）
 
 - **每个成员收到任务后，对关键决策（选型/定价/风控规则/对外承诺/高赌注方案/分歧裁决）必须先跑 ponder 满血版**：用 `skill` 工具加载 ponder 技能（DSH 平台级十阶段推理管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，十阶段资源全部在 ponder 技能包内自包含：`stages/*.json` 每阶段提示 + `engine/*.md` 深度方法 + `scripts/step-guard.cjs` 进度守卫 + `scripts/_lib/` 运行依赖，随 luke-jarvis 安装即自带，无需单独装 ponder），**step-guard.cjs init 开始本次 run → 十阶段全量跑完**（子 agent 全部返回才进下一步），**把本角色卡六段式作为"人物视角"注入画像**（确保十阶段以该人物方法论驱动，不是通用分析师思考），产出按衔接契约喂 `jarvis_review`（含 run_id 溯源）。
-- **强制执行（第一次分析需求必须 ponder）**：每个角色**第一次分析需求时**，用 `jarvis_think_deep(force=true)`——**必须真实加载 ponder 跑完整十阶段并返回 run_id**；无 run_id 且无显式 skipReason → 视为未完成（CEO 打回重跑）。**第一次不 ponder = 贴标签 = 不合格**。这是强制闸，不是靠自觉。
+- **强制执行（第一次分析需求必须 ponder）**：每个角色**第一次分析需求时**，用 `jarvis_think_deep(force=true)`——**必须真实加载 ponder 跑完整十阶段并返回 run_id**；无 run_id 且无显式 skipReason → 视为未完成（CEO 打回重跑）。**第一次不 ponder = 贴标签 = 不合格**。这是强制闸，不是靠自觉。**收产出时必须用 `jarvis_ponder_check` 核验（见下"十阶段固定顺序+必过核验"）——run_id 只证明"跑过一次"，不证明"按序跑全十阶段"。**
 - **ponder 必须挖"需求没提到的细节"（用户重点强调——scan 全程的表格丑/布局乱/字段缺/交互不顺，全是需求没明说但用户会在意的，角色 ponder 应该自己挖出来，不是等用户指出）**：每个角色跑 ponder 分析需求/任务时，**interview/发散/盲点阶段必须主动找"需求文本没写、但用户实际用会不满意的地方"**——以用户视角发散：这页/这功能用户打开会觉得什么不对？交互顺不顺？样式乱不乱？边界情况（空/错/快/慢）用户会碰什么？跨页/跨功能一致不一致？**产出"未提及细节清单"**（需求没说但发现的问题/风险/该补的），随方案/任务分析一起交——**ponder 的 interview 问的不是用户（用户已给需求不打扰），是"以用户身份审需求/方案找没说的漏洞"**；CEO 收任务分析时核"ponder 有没有挖出未提及细节"——没挖 = ponder 白跑 = 打回（用户不会满意的点，角色要在交付前自己发现）。
 - **满血不阉割**：禁止只跑 interview+converge 两段或跳过八卦镜/辩论等阶段——那达不到思考效果；任何角色的独立思考产出（counter/realityCheck/conclusion）必须可溯源到 ponder 十阶段（run_id + 阶段产出摘录）。
 - 产出是结构化 JSON（含 `counter/realityCheck/confidence`），**不是一句结论**——推理链必须可见。
@@ -302,6 +302,12 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 - **每一条重要决策定稿前跑 `jarvis_essence` 四查**（回归本质/防迎合/防幻觉/真实优先），PASS 才进贾维斯公屏/发布；迎合=打回，编造=一票否决。这是老板不可让渡的闸门。
 - **深度思考 ≠ 慢，但满血不阉割**：低赌注小事可跑精简轮次（十阶段内控制 agent 规模），但**不得跳过阶段或用轻量七段替代**；绝不允许"为了显得认真"贴 ponder 标签（有 run_id 才算真跑）。
 - **ponder 是每个角色的必尽义务，不是可选项**：**每个角色、每一个关键决策/任务分析，都必须真实跑 ponder 满血十阶段并带回 run_id**——不存在"这个任务小/不重要就不用 ponder"；低赌注只是精简 agent 规模，**绝不减阶段、绝不省 ponder**。产出无 run_id（且无显式 skipReason）= 视为未做深度思考，CEO 一律打回重跑。**"每个角色都会用 ponder"是硬性要求，靠 force 闸 + run_id 校验强制，不靠自觉。**
+- **十阶段是"固定顺序 + 一个不能少"，且必须过核验才算真跑（lyj 会话教训：成员汇报"ponder 十阶段已满血跑完（10/10，step-guard 全部 RECORDED）、30 个子 agent"，实际核查——收敛(converge)的记录早于方案(plans)=乱序、辩论(debate)只有手写产出文件而无执行/存储调用、评分(score)/推演(simulate)阶段无产出落盘；step-guard 的 completed 只是个"集合"、看不出先后，所以"全部 RECORDED"这句话本身证明不了按序跑全）**：
+  - **顺序**：十阶段必须严格按 `interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis` 依次跑（发散吃神思、八卦镜吃发散、方案吃完八卦镜、收敛才评分——**顺序错了等于没思考**：方案都没出就"收敛"、没评分就"推演"都是走过场）；**评分与推演是两个独立阶段**，谁都不能替代谁，也不能合并。
+  - **完整性**：十阶段一个不能少（低赌注只精简各阶段内的子 agent 规模，**阶段数不变**）。
+  - **核验（硬闸·不许听自报）**：**成员汇报"ponder 已跑完"时，CEO/贾维斯必须用 `jarvis_ponder_check` 核验**（传该成员的 `runId` + `dataDir` + 项目的 `evidenceDir`）——它四查：完整性（缺哪些阶段）、顺序（有无乱序，无顺序记录=顺序无法核验）、子 agent 数（bagua≥8/plans≥5/score≥3/simulate≥3/debate≥3）、阶段产出是否真落盘；另查 run_id 是否与声称一致（不一致=状态被别的 run 覆盖）。**`verdict=PASS` 才算真跑完**；FAIL 或"顺序无法核验"→ **打回重跑/补证据，不许把"声称已完成"当"已深度思考"**（这与前面"静态核对≠测过"同族：**自报记录≠真实执行**）。
+  - **per-run 隔离（否则核验无从谈起）**：**每个成员的每次 run 必须用独立数据目录 `PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/`** —— step-guard 状态是单文件，多成员/子 agent 并发若共用全局目录会互相覆盖（`init` 直接抹掉别人的进度），记录必然不可信；跑完把 run_id、该目录路径与阶段产出一起回报，供 `jarvis_ponder_check` 核验。
+  - **step-guard 自查可用**：`node <ponder技能>/scripts/step-guard.cjs verify [run_id] --evidence <产出目录>` 可在提交前自检（它会报缺失阶段/乱序/子 agent 不足/产出缺失）；**自检不通过不许上报"已完成"**。
 - **受限环境降级声明（web_search 不可用）**：ponder 的查证类阶段（bagua 8 维引源、divergence 查资料）在无 web 环境下降级为基于成员知识库推演——产出必须标注"受限环境推演"来源，不得静默冒充已查证；决策风险随 stakes 告知用户。
 
 ## 问题上行铁律（不许跳过问题，防客户提 bug）

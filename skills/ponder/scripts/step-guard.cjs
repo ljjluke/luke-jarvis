@@ -125,21 +125,46 @@ function normalizeStepName(step) {
 /**
  * init — 初始化新运行
  */
+/**
+ * 归档被覆盖的上一轮 run（防"init 静默抹掉进度"——多成员/子 agent 各自 init 会覆盖
+ * 同一状态文件，顺序校验形同虚设、记录不可信）。归档后 verify 可发现"状态曾被覆盖"。
+ */
+function archivePreviousRun(prev) {
+  try {
+    if (!prev || !prev.run_id) return null;
+    if (((prev.completed || []).length) === 0) return null;
+    var dir = path.join(DATA_DIR, 'step-guard-archive');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    var f = path.join(dir, prev.run_id + '.json');
+    if (!fs.existsSync(f)) fs.writeFileSync(f, JSON.stringify(prev, null, 2) + '\n', 'utf-8');
+    return prev.run_id;
+  } catch (e) {
+    return null;
+  }
+}
+
 function init(question) {
+  var prev = loadState();
+  var superseded = archivePreviousRun(prev);
   var state = {
     run_id: generateRunId(),
     question: question || '',
     completed: [],
     agents: {},
     certainties: {},
+    sequence: [], // 顺序记录：每次 after 追加 {step, at} —— 顺序可事后核验（completed 只是集合）
+    superseded_run: superseded || null, // 非空=本轮 init 覆盖了上一轮未完成的 run（状态可信度受损信号）
     started_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
   };
   saveState(state);
   return {
     verdict: 'INITIALIZED',
     run_id: state.run_id,
     total_steps: STEPS.length,
-    message: '运行已初始化，从 ' + LABELS[STEPS[0]] + '(' + STEPS[0] + ') 开始',
+    superseded_run: superseded || null,
+    message: '运行已初始化，从 ' + LABELS[STEPS[0]] + '(' + STEPS[0] + ') 开始'
+      + (superseded ? '（⚠️ 已覆盖上一轮未完成的 ' + superseded + '，已归档）' : ''),
   };
 }
 
@@ -270,6 +295,15 @@ function after(step, agentCount, certainty) {
   // 记录
   state.completed.push(stdStep);
   state.agents[stdStep] = parsedAgentCount;
+  // 顺序记录（append-only）：completed 是集合、看不出顺序，sequence 可核验真实先后
+  if (!Array.isArray(state.sequence)) state.sequence = [];
+  state.sequence.push({
+    step: stdStep,
+    at: new Date().toISOString(),
+    agents: parsedAgentCount,
+    certainty: (certainty !== undefined && certainty !== null) ? parseFloat(certainty) : null,
+  });
+  state.updated_at = new Date().toISOString();
   // 记录确定性（可选，0-1浮点数，不传则不记录）
   if (certainty !== undefined && certainty !== null) {
     state.certainties[stdStep] = parseFloat(certainty);
@@ -310,6 +344,140 @@ function after(step, agentCount, certainty) {
     remaining: remaining,
     upstream_certainties: state.certainties,
     message: LABELS[stdStep] + ' 已完成 (' + state.completed.length + '/' + STEPS.length + ')' + certaintySummary + nextMsg,
+  };
+}
+
+/**
+ * verify — 核验一次 run 是否真实、按序、完整跑完（防"声称 RECORDED 但实际缺阶段/乱序"）
+ *
+ * 四查：
+ *  ① 完整性：十阶段是否全部记录（missing 列出缺哪些）
+ *  ② 顺序：sequence 记录的先后是否与 STEPS 固定顺序一致（completed 是集合，看不出顺序）
+ *  ③ 子 agent 数：各阶段记录数是否达到 MIN_AGENTS（"喊了 8 个"与"下限要求"对齐）
+ *  ④ 证据：给了 evidenceDir 时，逐阶段检查产出文件是否存在（stage-<step>.json / end-state.md / outcome.json）
+ *
+ * 另查：run_id 是否与调用方声称的一致（不一致=状态被别的 run 覆盖，本轮记录不可信）；
+ *       superseded_run 是否非空（非空=本轮 init 覆盖过别人的进度，状态可信度受损）。
+ */
+function verify(opts) {
+  opts = opts || {};
+  var state = loadState();
+  var claimed = opts.runId || opts.run_id || null;
+  var evidenceDir = opts.evidenceDir || opts.evidence || null;
+  var issues = [];
+
+  if (!state.run_id) {
+    return {
+      verdict: 'FAIL',
+      reason: 'NO_RUN',
+      message: '⛔ 当前无 run 记录——该 ponder run 不存在或状态文件已被清除（声称跑过但无记录=未跑）',
+      issues: ['无 run 记录'],
+    };
+  }
+
+  // run_id 一致性（防状态被别的 run 覆盖后拿来冒充）
+  var runIdMatch = claimed ? (claimed === state.run_id) : null;
+  if (claimed && !runIdMatch) {
+    issues.push('run_id 不匹配：声称 ' + claimed + '，实际状态文件是 ' + state.run_id + '（状态已被别的 run 覆盖，声称的 run 无法核验）');
+  }
+  if (state.superseded_run) {
+    issues.push('本轮 init 覆盖过上一轮未完成的 ' + state.superseded_run + '（多 agent 共用同一状态文件，记录可信度受损——须 per-run 隔离 PONDER_DATA_DIR）');
+  }
+
+  // ① 完整性
+  var completed = state.completed || [];
+  var missing = STEPS.filter(function(s) { return completed.indexOf(s) === -1; });
+  if (missing.length > 0) {
+    issues.push('缺 ' + missing.length + ' 个阶段未执行：' + missing.map(function(s) { return LABELS[s] + '(' + s + ')'; }).join('、'));
+  }
+
+  // ② 顺序（sequence 有则严格核验；无则如实报"无法核验顺序"）
+  var seq = Array.isArray(state.sequence) ? state.sequence : null;
+  var orderViolations = [];
+  var orderVerifiable = !!seq;
+  if (seq) {
+    var lastIdx = -1;
+    for (var i = 0; i < seq.length; i++) {
+      var idx = STEPS.indexOf(seq[i].step);
+      if (idx === -1) continue;
+      if (idx < lastIdx) {
+        orderViolations.push('第 ' + (i + 1) + ' 步 ' + LABELS[seq[i].step] + '(' + seq[i].step + ') 出现在 ' + LABELS[STEPS[lastIdx]] + '(' + STEPS[lastIdx] + ') 之后——违反固定顺序');
+      } else {
+        lastIdx = idx;
+      }
+    }
+    if (orderViolations.length > 0) {
+      issues.push('顺序违规 ' + orderViolations.length + ' 处：' + orderViolations.join('；'));
+    }
+  } else {
+    issues.push('无顺序记录（sequence 缺失，多为旧版记录或状态被覆盖）——**顺序无法核验**，不能判定"按序跑完"');
+  }
+
+  // ③ 子 agent 数
+  var agentShortfalls = [];
+  STEPS.forEach(function(s) {
+    if (completed.indexOf(s) === -1) return;
+    var need = MIN_AGENTS[s] || 0;
+    var got = (state.agents && state.agents[s]) || 0;
+    if (got < need) agentShortfalls.push(LABELS[s] + '(' + s + ') 需 ' + need + ' 个，实际 ' + got + ' 个');
+  });
+  if (agentShortfalls.length > 0) issues.push('子 agent 数不足：' + agentShortfalls.join('；'));
+
+  // ④ 证据文件（可选）
+  var evidence = null;
+  if (evidenceDir) {
+    evidence = { dir: evidenceDir, present: [], missing: [] };
+    var expect = {
+      interview: ['stage-interview.json', 'context.md'],
+      shensi: ['stage-shensi.json'],
+      divergence: ['stage-divergence.json'],
+      bagua: ['stage-bagua.json'],
+      plans: ['stage-plans.json'],
+      converge: ['stage-converge.json'],
+      score: ['stage-score.json'],
+      simulate: ['stage-simulate.json'],
+      debate: ['stage-debate.json'],
+      synthesis: ['stage-synthesis.json', 'end-state.md'],
+    };
+    STEPS.forEach(function(s) {
+      if (completed.indexOf(s) === -1) return;
+      var cands = expect[s] || [];
+      var hit = cands.filter(function(f) { return fs.existsSync(path.join(evidenceDir, f)); });
+      if (hit.length > 0) evidence.present.push(s + '→' + hit.join(','));
+      else evidence.missing.push(s + '（未见 ' + cands.join('/') + '）');
+    });
+    if (evidence.missing.length > 0) {
+      issues.push('阶段产出证据缺失：' + evidence.missing.join('；') + '（记录了完成但无产出文件=存疑）');
+    }
+  } else {
+    issues.push('未提供 evidenceDir——只核验了 step-guard 记录，**未核验阶段产出是否真实落盘**（建议传项目 .jarvis/ponder-runs/<run_id>/）');
+  }
+
+  var ok = missing.length === 0 && orderViolations.length === 0 && agentShortfalls.length === 0
+    && (!claimed || runIdMatch) && (evidence ? evidence.missing.length === 0 : true);
+
+  return {
+    verdict: ok ? 'PASS' : 'FAIL',
+    run_id: state.run_id,
+    claimed_run_id: claimed,
+    run_id_match: runIdMatch,
+    question: state.question,
+    completed_count: completed.length,
+    total_count: STEPS.length,
+    completed: completed,
+    missing: missing,
+    order_verifiable: orderVerifiable,
+    order_violations: orderViolations,
+    sequence: seq,
+    agent_shortfalls: agentShortfalls,
+    agents: state.agents,
+    certainties: state.certainties,
+    evidence: evidence,
+    superseded_run: state.superseded_run || null,
+    issues: issues,
+    message: ok
+      ? '✅ 核验通过：十阶段按序完整执行、子 agent 数达标' + (evidence ? '、阶段产出齐全' : '（未核验产出文件）')
+      : '⛔ 核验不通过：' + issues.join(' | '),
   };
 }
 
@@ -388,6 +556,15 @@ function main() {
     case 'status':
       result = status();
       break;
+    case 'verify':
+      result = verify({
+        runId: args[1] && args[1].indexOf('--') !== 0 ? args[1] : null,
+        evidenceDir: (function() {
+          var i = args.indexOf('--evidence');
+          return i !== -1 ? args[i + 1] : null;
+        })(),
+      });
+      break;
     case 'reset':
       result = reset();
       break;
@@ -400,6 +577,7 @@ function main() {
           '  node step-guard.cjs before <步骤名>           — 检查前置步骤是否完成',
           '  node step-guard.cjs after <步骤名> [子agent数] [certainty] — 记录步骤完成(可选:确定性0-1)',
           '  node step-guard.cjs status                    — 查看当前运行进度',
+          '  node step-guard.cjs verify [run_id] [--evidence <目录>] — 核验完整/顺序/子agent数/产出证据',
           '  node step-guard.cjs reset                    — 清除运行状态',
         ],
         steps: STEPS,
@@ -411,4 +589,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { init, before, after, status, reset, STEPS, LABELS, normalizeStepName };
+module.exports = { init, before, after, status, verify, reset, STEPS, LABELS, MIN_AGENTS, normalizeStepName };

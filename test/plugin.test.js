@@ -8,6 +8,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
@@ -1469,4 +1472,96 @@ test('jarvis_taskgraph：重做/对齐类任务验收须含结构对齐约束', 
     { id: 'T1', title: '认证新增重做', assignee: '实现A', acceptance: 'UI 结构对齐旧版两页签形态，不加基准没有的' },
   ]) })
   assert.strictEqual(r2.ok, true, '验收含结构对齐应放行')
+})
+
+// ── ponder 真实性核验（lyj 会话教训：成员声称"十阶段全跑完/step-guard 全部 RECORDED"，
+//    实际乱序（converge 早于 plans）、debate 无执行调用、score/simulate 无产出文件）──
+
+test('jarvis_ponder_check：无任何 run 记录 → FAIL（声称跑过=未跑）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponder-none-'))
+  const r = await def.handler({ runId: 'run_ghost', dataDir: tmp })
+  assert.strictEqual(r.verdict, 'FAIL')
+  assert.ok(r.issues.some((i) => /找不到有效 run 记录|未跑/.test(i)), '应判无记录=未跑: ' + r.issues.join('|'))
+  fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+test('jarvis_ponder_check：十阶段按序 + 子agent达标 + 产出齐全 → PASS', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponder-ok-'))
+  const ev = path.join(tmp, 'evidence')
+  fs.mkdirSync(ev, { recursive: true })
+  const STEPS = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']
+  const AG = { bagua: 8, plans: 6, score: 4, simulate: 4, debate: 8 }
+  const FILES = {
+    interview: 'context.md', shensi: 'stage-shensi.json', divergence: 'stage-divergence.json',
+    bagua: 'stage-bagua.json', plans: 'stage-plans.json', converge: 'stage-converge.json',
+    score: 'stage-score.json', simulate: 'stage-simulate.json', debate: 'stage-debate.json',
+    synthesis: 'end-state.md',
+  }
+  for (const s of STEPS) fs.writeFileSync(path.join(ev, FILES[s]), '{}')
+  const state = {
+    run_id: 'run_ok', question: 'q', completed: STEPS, agents: AG, certainties: {},
+    sequence: STEPS.map((s, i) => ({ step: s, at: new Date(Date.now() + i * 1000).toISOString(), agents: AG[s] || 0 })),
+    superseded_run: null,
+  }
+  fs.writeFileSync(path.join(tmp, 'step-guard.cjson'), JSON.stringify(state))
+  const r = await def.handler({ runId: 'run_ok', dataDir: tmp, evidenceDir: ev })
+  assert.strictEqual(r.verdict, 'PASS', '按序完整+产出齐全应通过: ' + r.issues.join('|'))
+  assert.strictEqual(r.orderVerifiable, true)
+  fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+test('jarvis_ponder_check：顺序违规（converge 早于 plans）→ FAIL 且点名', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponder-order-'))
+  const state = {
+    run_id: 'run_bad_order',
+    completed: ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis'],
+    agents: { bagua: 8, plans: 6, score: 4, simulate: 4, debate: 8 },
+    // 真实 lyj 会话顺序：converge 先于 plans
+    sequence: ['interview', 'shensi', 'divergence', 'bagua', 'converge', 'plans', 'score', 'simulate', 'debate', 'synthesis']
+      .map((s) => ({ step: s, at: new Date().toISOString() })),
+  }
+  fs.writeFileSync(path.join(tmp, 'step-guard.cjson'), JSON.stringify(state))
+  const r = await def.handler({ runId: 'run_bad_order', dataDir: tmp })
+  assert.strictEqual(r.verdict, 'FAIL')
+  assert.ok(r.orderViolations.some((v) => /收敛.*方案|converge|plans/.test(v)), '应点名乱序: ' + r.orderViolations.join('|'))
+  fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+test('jarvis_ponder_check：缺阶段 / 无顺序记录 / 子agent不足 / 产出缺失 → FAIL 逐项报出', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponder-miss-'))
+  const ev = path.join(tmp, 'evidence')
+  fs.mkdirSync(ev, { recursive: true })
+  fs.writeFileSync(path.join(ev, 'context.md'), '{}') // 只有 interview 产出
+  const state = {
+    run_id: 'run_partial',
+    completed: ['interview', 'shensi', 'bagua'],   // 缺 7 个阶段；bagua 只报 3 个 agent
+    agents: { bagua: 3 },
+    // 无 sequence（旧记录/被覆盖）
+  }
+  fs.writeFileSync(path.join(tmp, 'step-guard.cjson'), JSON.stringify(state))
+  const r = await def.handler({ runId: 'run_partial', dataDir: tmp, evidenceDir: ev })
+  assert.strictEqual(r.verdict, 'FAIL')
+  assert.ok(r.missing.includes('debate') && r.missing.includes('score'), '应列出缺失阶段: ' + r.missing.join(','))
+  assert.strictEqual(r.orderVerifiable, false, '无 sequence 应判顺序不可核验')
+  assert.ok(r.issues.some((i) => /顺序无法核验/.test(i)), '应报顺序无法核验')
+  assert.ok(r.agentShortfalls.some((a) => /bagua|八卦镜/.test(a)), '应报子 agent 不足')
+  assert.ok(r.evidenceMissing.length > 0, '应报产出缺失')
+  fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+test('jarvis_ponder_check：run_id 不匹配（状态被别的 run 覆盖）→ FAIL', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ponder-clob-'))
+  fs.writeFileSync(path.join(tmp, 'step-guard.cjson'), JSON.stringify({
+    run_id: 'run_other', completed: ['interview'], agents: {},
+  }))
+  const r = await def.handler({ runId: 'run_claimed', dataDir: tmp })
+  assert.strictEqual(r.verdict, 'FAIL')
+  assert.strictEqual(r.runIdMatch, false)
+  assert.ok(r.issues.some((i) => /run_id 不匹配|覆盖/.test(i)), '应报 run_id 不匹配: ' + r.issues.join('|'))
+  fs.rmSync(tmp, { recursive: true, force: true })
 })
