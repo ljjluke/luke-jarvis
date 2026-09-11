@@ -2602,11 +2602,24 @@ export const TOOLS = [
           issues: { type: 'array', items: { type: 'string' }, description: '健康检查问题（空=无问题）' },
           ok: { type: 'boolean', description: '任务图是否可派活' },
           parallelGroups: { type: 'array', items: { type: 'string' }, description: '可并行的任务组建议' },
+          staffing: {
+            type: 'object',
+            additionalProperties: true,
+            description: '编制健康报告：assignees(参与角色)/distribution(各角色任务数)/executorCount(执行角色数)/maxLoad(单人最大负载)——防"单一角色包办全部任务"',
+          },
           verdict: { type: 'string' },
         },
         required: ['ok', 'verdict'],
       },
-      render: (r) => `任务编排图：${r.ok ? '✅ 可派活' : '❌ 打回重拆'}（${r.taskCount} 任务）\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n并行建议：${(r.parallelGroups ?? []).join(' / ')}`,
+      render: (r) => {
+        const dist = r.staffing && r.staffing.distribution
+          ? Object.entries(r.staffing.distribution).map(([k, v]) => k + ':' + v).join(', ')
+          : ''
+        const staffLine = r.staffing
+          ? '\n编制：' + (r.staffing.executorCount ?? '?') + ' 个执行角色 / 单人最大负载 ' + (r.staffing.maxLoad ?? '?') + ' 任务' + (dist ? '（' + dist + '）' : '')
+          : ''
+        return `任务编排图：${r.ok ? '✅ 可派活' : '❌ 打回重拆'}（${r.taskCount} 任务）\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n并行建议：${(r.parallelGroups ?? []).join(' / ')}${staffLine}`
+      },
     },
     handler: async (args) => {
       const req = String(args?.requirement ?? '')
@@ -2721,12 +2734,39 @@ export const TOOLS = [
           else if (group.length === 1 && lv === 0) parallelGroups.push(`首批开工：${group[0]}`)
         }
       }
+      // ── 编制健康检查（lyj 教训：用户点名批评"分析人员只有 CEO 吗？"——建队只配 CEO+猎头，
+      //    8 个任务 6 个压在 CEO 一人身上，CEO 成瓶颈、用户点名要的产出拖了三轮。
+      //    拆图时若任务集中在单一执行者身上 = 编制不足，必须先配齐角色再派活。）──
+      const byAssignee = {}
+      for (const t of tasks) {
+        const a = normId(t?.assignee)
+        if (!a) continue
+        byAssignee[a] = (byAssignee[a] || 0) + 1
+      }
+      const assigneeNames = Object.keys(byAssignee)
+      const staffingReport = {
+        assignees: assigneeNames,
+        distribution: byAssignee,
+        executorCount: assigneeNames.length,
+        maxLoad: assigneeNames.length ? Math.max(...assigneeNames.map((a) => byAssignee[a])) : 0,
+      }
+      if (tasks.length >= 3 && assigneeNames.length === 1) {
+        issues.push(`编制不足：${tasks.length} 个任务全部由「${assigneeNames[0]}」一人承担（只有 1 个执行者）——**建队必须先按拆解出的环节配齐角色再派活**（该角色若同时是带队者，其职责是带队/把关/盯人，不该是唯一执行者；lyj 教训：只配 CEO+猎头就开工，用户点名批评"分析人员只有 CEO 吗？"，CEO 成瓶颈导致点名要的产出拖了三轮）。先拆岗位《员工需求单》→ 猎头寻访 → 注入执行角色，再派任务`)
+      } else if (tasks.length >= 4 && assigneeNames.length > 0) {
+        const ranked = [...assigneeNames].sort((a, b) => byAssignee[b] - byAssignee[a])
+        const top = ranked[0]
+        const share = byAssignee[top] / tasks.length
+        if (share > 0.6) {
+          issues.push(`编制瓶颈：「${top}」一人承担 ${byAssignee[top]}/${tasks.length} 个任务（${Math.round(share * 100)}%）——单点过载会拖垮交付（lyj 教训：6/8 任务压 CEO 一人，用户点名要的产出拖了三轮、次晨用户发"？"追问）。按环节补充执行角色分担，或说明为何该角色必须一人承担`)
+        }
+      }
       const ok = issues.length === 0
       return {
         taskCount: tasks.length,
         issues,
         ok,
         parallelGroups,
+        staffing: staffingReport,
         verdict: ok
           ? `任务编排图合格（${tasks.length} 任务）：依赖无悬空/无循环、每任务有负责人+可判定验收、独立任务可并行。可派活（agent_teams_create_task 逐个建，dependencies 按 deps 接）。任务图沉淀 docs/任务编排-*.md 并写入 company-state tasks 表（3D 看板可渲染）。`
           : `任务编排图待修（${issues.length} 项）：${issues.slice(0, 5).join('；')}。打回 CEO 重拆——任务图有结构问题不许派活（悬空依赖=下游等不到；循环=永远不开始；无验收=做完不知道算不算完）。`,

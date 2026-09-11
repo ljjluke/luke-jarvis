@@ -1565,3 +1565,51 @@ test('jarvis_ponder_check：run_id 不匹配（状态被别的 run 覆盖）→ 
   assert.ok(r.issues.some((i) => /run_id 不匹配|覆盖/.test(i)), '应报 run_id 不匹配: ' + r.issues.join('|'))
   fs.rmSync(tmp, { recursive: true, force: true })
 })
+
+// ── 编制健康（lyj 教训：用户点名批评"分析人员只有 CEO 吗？"——
+//    建队只配 CEO+猎头，8 个任务 6 个压 CEO 一人，CEO 成瓶颈、点名要的产出拖了三轮）──
+
+test('jarvis_taskgraph 编制闸：单一执行者包办全部任务 → 打回（编制不足）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  const r = await def.handler({
+    requirement: '态感平台参与策略',
+    tasksJson: JSON.stringify([
+      { id: 'T1', title: '需求判读', assignee: 'CEO', acceptance: '输出判读文档含逐条结论' },
+      { id: 'T2', title: '开源调研', assignee: 'CEO', acceptance: '输出调研文档含候选台账' },
+      { id: 'T3', title: '参与策略建议', assignee: 'CEO', acceptance: '输出策略文档含路径对比' },
+    ]),
+  })
+  assert.strictEqual(r.ok, false, '只有 1 个执行者应打回')
+  assert.ok(r.issues.some((i) => /编制不足/.test(i)), '应报编制不足: ' + r.issues.join('|'))
+  assert.strictEqual(r.staffing.executorCount, 1, '编制报告应给出执行角色数')
+})
+
+test('jarvis_taskgraph 编制闸：单角色承担 >60% → 报瓶颈但不误伤正常分工', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  // CEO 承担 5/6 = 83% → 报瓶颈
+  const overloaded = [
+    { id: 'T1', title: '需求判读', assignee: 'CEO', acceptance: '输出判读文档含逐条结论' },
+    { id: 'T2', title: '开源调研', assignee: '专家A', acceptance: '输出调研文档含候选台账' },
+    { id: 'T3', title: '合规核对', assignee: 'CEO', acceptance: '输出核对表含逐条依据' },
+    { id: 'T4', title: '数据接入方案', assignee: 'CEO', acceptance: '输出方案含接口契约' },
+    { id: 'T5', title: '处置链设计', assignee: 'CEO', acceptance: '输出设计含闭环路径' },
+    { id: 'T6', title: '收口评审', assignee: 'CEO', acceptance: '输出评审报告含逐项核对' },
+  ]
+  const r1 = await def.handler({ requirement: 'x', tasksJson: JSON.stringify(overloaded) })
+  assert.strictEqual(r1.ok, false, 'CEO 83% 应报瓶颈')
+  assert.ok(r1.issues.some((i) => /编制瓶颈/.test(i)), '应报编制瓶颈: ' + r1.issues.join('|'))
+  assert.strictEqual(r1.staffing.maxLoad, 5)
+
+  // 均衡分工（3 人各 2 个）→ 不报编制问题
+  const balanced = [
+    { id: 'T1', title: '需求判读', assignee: '专家A', acceptance: '输出判读文档含逐条结论' },
+    { id: 'T2', title: '开源调研', assignee: '专家B', acceptance: '输出调研文档含候选台账' },
+    { id: 'T3', title: '合规核对', assignee: '专家C', acceptance: '输出核对表含逐条依据' },
+    { id: 'T4', title: '数据接入方案', assignee: '专家A', acceptance: '输出方案含接口契约' },
+    { id: 'T5', title: '处置链设计', assignee: '专家B', acceptance: '输出设计含闭环路径' },
+    { id: 'T6', title: '收口评审', assignee: '专家C', acceptance: '输出评审报告含逐项核对' },
+  ]
+  const r2 = await def.handler({ requirement: 'x', tasksJson: JSON.stringify(balanced) })
+  assert.ok(!r2.issues.some((i) => /编制/.test(i)), '均衡分工不应报编制问题: ' + r2.issues.join('|'))
+  assert.strictEqual(r2.staffing.executorCount, 3)
+})
