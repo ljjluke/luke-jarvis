@@ -1613,3 +1613,36 @@ test('jarvis_taskgraph 编制闸：单角色承担 >60% → 报瓶颈但不误�
   assert.ok(!r2.issues.some((i) => /编制/.test(i)), '均衡分工不应报编制问题: ' + r2.issues.join('|'))
   assert.strictEqual(r2.staffing.executorCount, 3)
 })
+
+// ── 成员协议传递（lyj 教训：35 个会话只有 CEO 一个跑了 ponder——
+//    协议只在主会话、成员看不到，派活不带须知 → 成员全成执行手）──
+
+test('jarvis_member_brief：生成含 ponder 十阶段执行路径的成员须知（派活必带）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  assert.ok(def, 'jarvis_member_brief 工具应存在')
+  const r = await def.handler({ roleName: '猎头', projectDir: '/tmp/proj', task: 'T4 专家寻访' })
+  assert.strictEqual(r.mustRunPonder, true, '每个成员都必须跑 ponder')
+  // 十阶段固定顺序
+  for (const s of ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']) {
+    assert.ok(r.brief.includes(s), `须知应含阶段 ${s}`)
+  }
+  // skill-free 执行路径（成员常无 skill 工具）
+  assert.ok(/step-guard\.cjs init/.test(r.brief), '须知应给 bash 直跑路径: step-guard init')
+  assert.ok(/step-guard\.cjs verify/.test(r.brief), '须知应含提交前 verify 自检')
+  assert.ok(/PONDER_DATA_DIR/.test(r.brief), '须知应含 per-run 隔离数据目录')
+  // 协议要点
+  assert.ok(/jarvis_board|黑板/.test(r.brief), '须知应含黑板要求')
+  assert.ok(/jarvis_escalate|三件套/.test(r.brief), '须知应含问题上行')
+  // 回报格式：run_id 必带（供核验）
+  assert.ok(/run_id/.test(r.brief), '须知应要求回报 run_id')
+  assert.ok(r.sendsBack.some((s) => /runId/.test(s)), 'sendsBack 应含 runId')
+  // 注入的任务
+  assert.ok(r.brief.includes('T4 专家寻访'), '须知应带上本次任务')
+})
+
+test('jarvis_member_brief：无 skill 工具也能跑（不给成员留"没工具所以没ponder"的借口）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '数据接入与范式化专家', ponderDir: '/opt/skills/ponder' })
+  assert.ok(r.brief.includes('/opt/skills/ponder/scripts/step-guard.cjs'), '须知应使用传入的 ponderDir 给出绝对路径')
+  assert.ok(/没有 skill 工具也能跑/.test(r.brief), '须知应明确声明无 skill 工具时的替代路径')
+})

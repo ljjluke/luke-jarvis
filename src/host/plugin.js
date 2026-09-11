@@ -1299,6 +1299,110 @@ export const TOOLS = [
   },
 
   {
+    name: 'jarvis_member_brief',
+    description:
+      '成员开工须知生成器（**派活必带**——lyj 教训：jarvis 协议只在 captain 会话里、成员会话看不到协议全文，结果整个项目 35 个会话里只有 CEO 一个真跑了 ponder，猎头/各专家 0 次；CEO 那 30 个子 agent 是"他一个人的思考过程"，不等于"各角色独立视角"）——**captain/CEO 每次派活（create_task 描述 或 send_message）必须把本工具生成的须知原文附上**，成员才知道：开工前先按自己的角色卡跑 ponder 满血十阶段（而不是等着被指挥）、怎么在**没有 skill 工具**的成员环境里照样跑（直接用 bash 调 step-guard + 读 stages/*.json）、产出要回传 run_id/dataDir/evidenceDir 供核验、以及黑板/问题上行三件套/资源上报/回报格式等协议要点。不附须知 = 成员退回"执行手"模式（只照消息干活、不做独立判断）= 全公司只有 CEO 一个有脑子的缺陷。',
+    parameters: {
+      type: 'object',
+      properties: {
+        roleName: { type: 'string', description: '成员在团队里的职位名（如 猎头/合规与信创涉密专家/开发-前端A）' },
+        task: { type: 'string', description: '本次派给他的任务（写清交付物与验收）——须知会带上"你的本次任务"一节' },
+        stakes: { type: 'string', description: '本次任务赌注 high/medium/low（默认 medium）——决定 ponder 深度说明' },
+        projectDir: { type: 'string', description: '项目目录（默认当前工作目录）——用于给出黑板/产出/ponder 数据目录路径' },
+        ponderDir: { type: 'string', description: 'ponder 技能目录（默认 ~/.dsh/skills/ponder）——成员无 skill 工具时按此路径用 bash 直接跑' },
+      },
+      required: ['roleName'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          brief: { type: 'string', description: '可直接粘贴进任务描述/消息的完整成员开工须知' },
+          mustRunPonder: { type: 'boolean', description: '是否必须跑 ponder（本单恒为 true——每个成员都要）' },
+          sendsBack: { type: 'array', items: { type: 'string' }, description: '成员回报必须带的字段' },
+          verdict: { type: 'string' },
+        },
+        required: ['brief', 'verdict'],
+      },
+      render: (r) => `【成员开工须知（派活必带）】\n${r.brief}`,
+    },
+    handler: async (args) => {
+      const os = _require('node:os')
+      const path = _require('node:path')
+      const role = String(args.roleName ?? '成员').trim() || '成员'
+      const task = String(args.task ?? '').trim()
+      const stakes = String(args.stakes ?? 'medium').trim()
+      const home = os.homedir ? os.homedir() : '/root'
+      const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+      const ponderDir = String(args.ponderDir ?? '').trim() || path.join(home, '.dsh/skills/ponder')
+      const dataDirHint = projectDir + '/.jarvis/ponder-runs/<你的 run_id>/'
+      const sg = ponderDir + '/scripts/step-guard.cjs'
+
+      const brief = [
+        `【${role} · 开工须知（本项目团队正式成员，不是执行手）】`,
+        '',
+        '## 一、你首先是个"有判断的人"，不是等指令的手',
+        '- 你以**该领域真实专家**的身份承接这块工作：先按**你的角色卡方法论**独立判断"这活该怎么做、客户真正要什么、哪里有坑"，再动手；不许只照着派活消息机械执行。',
+        '- **发现派活/方案有问题（方向错/漏项/不可行），先质疑再干**（写黑板 + 直接找派活人/CEO 沟通），不许"明知不对也照做"。',
+        '',
+        '## 二、开工第一件事：跑 ponder 满血十阶段（每个成员都要，不是只有 CEO 跑）',
+        `- 先对本次任务/关键决策跑 **ponder 十阶段**（固定顺序、一个不能少）：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis（本单赌注=${stakes}：low 可精简各阶段子 agent 规模，**但阶段不省**）。`,
+        '- **把本角色卡六段式作为"人物视角"注入画像**（思维模型/方法论/红线），确保十阶段以该人物方法论驱动，而不是通用分析师思考。',
+        '- **没有 skill 工具也能跑**（成员环境常缺 skill 工具——直接用 bash，效果相同）：',
+        '```bash',
+        '# 1) 起一个隔离数据目录（防与其他成员互相覆盖）',
+        `export PONDER_DATA_DIR="${dataDirHint}"`,
+        'mkdir -p "$PONDER_DATA_DIR"',
+        '# 2) 初始化本次 run（记下返回的 run_id）',
+        `node ${sg} init "<本次任务/决策摘要>"`,
+        '# 3) 逐阶段执行：每阶段前 before、做完 after（阶段名与顺序固定）',
+        `node ${sg} before interview`,
+        `#    …按 ${ponderDir}/stages/<阶段>.json 的提示跑该阶段（配合 engine/*.md 的方法）…`,
+        `node ${sg} after interview 0 0.45`,
+        '#    …shensi/divergence/bagua/plans/converge/score/simulate/debate/synthesis 依次同样处理',
+        '#      （子 agent 下限：bagua≥8、plans≥5、score≥3、simulate≥3、debate≥3）…',
+        '# 4) 提交前自检（必须 PASS 才能上报"已完成"）',
+        `node ${sg} verify <run_id> --evidence "$PONDER_DATA_DIR"`,
+        '```',
+        `- **阶段产出要落盘**到 ${dataDirHint}（各阶段 JSON + 结论），并把 **run_id + PONDER_DATA_DIR + 产出目录**一起回报——派活方会用 jarvis_ponder_check 核验（只看 run_id 不够，还会查**顺序/完整性/子 agent 数/产出文件**）。`,
+        '- 低赌注任务可精简子 agent 规模；**任何情况下都不许静默跳过**——真跑不了（运行时缺失/成本受限）必须显式说明 skipReason。',
+        '',
+        '## 三、协议要点（成员会话看不到 jarvis 协议全文，这里给你必备项）',
+        `- **黑板即真相**：问题/发现/决策/风险/阻塞/资源需求/接口变更 → 一律用 jarvis_board 写进 ${projectDir}/.jarvis/board.json（别只在消息里说，消息会淹没）。`,
+        '- **问题上行三件套**：技术绕不开/自己无法抉择 → jarvis_escalate 上报，必须带 ①问题 ②已尝试的方案 ③风险细节（后果/影响范围/时限）④需要领导决策什么——**缺项会被打回**；不许沉默、降级、假装解决。',
+        '- **资源需求**：缺数据/权限/凭据/环境/工具 → 写黑板登记（要什么+用于哪步+没有会怎样），不要幻觉跳过。',
+        '- **需要时找专业同事直连**：跨角色的接口/口径问题直接 agent_teams_send_message 找当事人（不必事事经 captain/CEO 中转）；分歧各自跑 ponder 后交 jarvis_review 裁决。',
+        '- **不要自己发挥**：成果要对照需求/参照基准做（功能对齐、不加基准里没有的东西）；拿不准先问，不凭感觉加。',
+        '- **有问题早暴露**：不等到交付才说"做不了/有风险"——卡住、超期、要改范围，第一时间说，并给出新时间点。',
+        '',
+        '## 四、回报格式（完成或阶段成果都按此报）',
+        '```',
+        `【${role} · 阶段成果/完成】`,
+        '1. 交付物：<路径>（写清在哪、是什么）',
+        '2. 结论：<核心判断 3 条以内，先结论后依据>',
+        '3. 证据：<实测数据/截图/来源 URL——不许只有"我做完了">',
+        '4. ponder：run_id=<...> | dataDir=<...> | evidenceDir=<...> | verify=PASS（十阶段按序完整）',
+        '5. 未提及细节/盲点：<你主动挖出的"需求没说但客户会在意"的点>',
+        '6. 阻塞/风险：<有则写：卡在哪+已试什么+要谁给什么+预计何时给；无则写"无">',
+        '```',
+        '- **声称"已完成/已改好"之前，先自己回看产物确认它真的变了且符合要求**（文件读回/看 diff；改在副本/备份上=没改）；没成功就如实说没成功。',
+        '',
+        task ? '## 五、你的本次任务\n' + task : '## 五、你的本次任务\n（见派活消息/任务描述）',
+        '',
+        '> 派活方提示：本须知由 jarvis_member_brief 生成，**每次派活都应附带**（成员看不到 jarvis 协议，不附 = 成员只能当执行手）。',
+      ].join('\n')
+
+      return {
+        brief,
+        mustRunPonder: true,
+        sendsBack: ['runId', 'dataDir(PONDER_DATA_DIR)', 'evidenceDir(阶段产出目录)', '交付物路径', '阻塞/风险'],
+        verdict: `已生成「${role}」成员开工须知：含 ponder 十阶段执行路径（skill-free bash 版）、协议要点、回报格式${task ? '、本次任务' : ''}——派活时原文附上（create_task 描述 或 send_message）。`,
+      }
+    },
+  },
+
+  {
     name: 'jarvis_think_deep',
     description:
       '角色深度思考器（ponder 满血入口引导器，防幻觉核心）：**每个角色的独立思考必须加载 ponder 技能跑完整十阶段**（DSH 平台级：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，十阶段资源全部在 ponder 技能包内自包含随 luke-jarvis 自带：stages/*.json + engine/*.md + scripts/step-guard.cjs + scripts/_lib/，子 agent 具备 skill 工具），step-guard.cjs init 开始本次 run，把本角色卡六段式作为"人物视角"注入画像后十阶段全量跑完，产出按衔接契约回填（counter←divergence/bagua/debate、realityCheck←interview/无知自检、confidence←converge/certainty、conclusion←synthesis、limits←epistemic_status）。**满血不阉割**：禁止只跑 interview+converge 两段或用轻量七段替代（那达不到思考效果）；低赌注（low）可精简各阶段内 agent 规模但不得跳过阶段。产出带 run_id 溯源，可直接喂给 jarvis_review 做分歧裁决双方依据（thinkA/thinkB）。铁律：真实情况优先于角色卡；宁 60 分诚实不要 90 分编造；跳过 ponder 必须显式声明 skipReason（技能不可用/用户成本优先）并留痕，禁止静默降级；web_search 受限时查证类阶段降级为知识库推演但标注"受限环境推演"。',
