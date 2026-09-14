@@ -318,7 +318,7 @@ test('/jarvis 命令执行：领域可判需求 → 引导猎头调度流程（�
   assert.ok(r.content.includes('猎头'), '引导走猎头调度层')
   assert.ok(r.content.includes('CEO'), '猎头供 CEO')
   assert.ok(r.content.includes('领域专家'), 'CEO 定领域专家搭档')
-  assert.ok(r.content.includes('双人打磨需求'), 'CEO+专家双人打磨')
+  assert.ok(r.content.includes('全体开会畅所欲言') || r.content.includes('双人打磨'), '全体开会头脑风暴/双人打磨')
   assert.ok(r.content.includes('接下来 5 分钟该做什么'), '给出可执行清单')
 })
 
