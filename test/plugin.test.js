@@ -1650,23 +1650,22 @@ test('jarvis_member_brief：无 skill 工具也能跑（不给成员留"没工�
 // ── 提问硬闸（lyj 教训：用户给了 6 条详细需求，团队 0 次提问直接勘察/蒸馏/建队/派活，
 //    全程没问用户任何问题，用户质问"得到用户需求后都没有问问题了？没有疑问直接开干吗？"）──
 
-test('/jarvis 命令执行：需求再详细，第一步也必须是提问（ask_user_question 问用户，先问后建队）', () => {
-  // 模拟 lyj 那种"很长很详细"的需求——详细 ≠ 已吃透
+test('/jarvis 命令执行：需求再详细，第一步也是按角色卡深度思考（真疑问才问，无疑问不硬问）', () => {
+  // 模拟 lyj 那种"很长很详细"的需求——思考驱动，不机械提问
   const detailReq = '客户有6大类的数据采集来源，例如卫星通信、运营商网络通信、国内的关键基础设施、海外的关键基础设施等，6类数据有各自的承建方来采集，数据汇总到态势感知平台；客户自己会建设一个大的数据中台，存储容量现在1PB未来10PB；平台建设完后要给领导展现，客户计划做9米高展示大厅，前端客户自己做；我方可以争取的机会是数据清洗和范式化、态势感知后端、对前端接口、数据分析和关联规则；发现有问题后需要处置，由平台下发到安全设备处置，这块也需要我方做；态势感知还需要挂图作战和红蓝对抗两个功能模块'
   const r = jarvisCommand(detailReq)
-  // 第一步必须是提问
-  const first = r.content.indexOf('第一步')
-  assert.ok(r.content.includes('提问'), '应引导先提问: ' + r.content.slice(0, 200))
-  assert.ok(r.content.includes('ask_user_question'), '应明确用 ask_user_question 工具问用户')
-  assert.ok(r.content.includes('需求描述详细 ≠ 已吃透'), '应指出详细≠吃透')
-  assert.ok(r.content.includes('用户回答前不建队'), '用户回答前不建队')
-  assert.ok(r.content.includes('直到连续两轮用户无新信息'), '应要求穷尽提问直到无新信息')
-  assert.ok(r.content.includes('没问过用户一轮 = 缺陷'), '没提问=缺陷')
-  // 提问要在建队/蒸馏之前（⓪ 排在最前）
-  assert.ok(first < r.content.indexOf('蒸馏该领域猎头'), '提问必须排在建队之前')
+  // 第一步是"按角色卡深度思考"（不是机械"必须提问"）
+  assert.ok(r.content.includes('深度思考需求'), '应引导先按角色卡深度思考: ' + r.content.slice(0, 200))
+  assert.ok(r.content.includes('真疑问'), '思考产物=理解+真疑问清单')
+  assert.ok(r.content.includes('有真疑问才用 `ask_user_question`'), '有真疑问才问用户')
+  assert.ok(r.content.includes('思考后确实无疑问（需求详细自洽）就直接进下一步'), '无疑问不硬问')
+  assert.ok(r.content.includes('不许硬凑问题打扰用户'), '不许硬凑问题')
+  assert.ok(r.content.includes('没经过角色卡深度思考就建队 = 缺陷'), '没思考=缺陷（而非没提问=缺陷）')
+  // 思考要在建队/蒸馏之前（⓪ 排在最前）
+  assert.ok(r.content.indexOf('第一步') < r.content.indexOf('蒸馏该领域猎头'), '思考必须排在建队之前')
 })
 
-test('/jarvis 命令执行：判不出领域也要先提问（不是干等用户自己说）', () => {
+test('/jarvis 命令执行：判不出领域也要先思考再提问（不是干等用户自己说）', () => {
   const r = jarvisCommand('做个东西')
   assert.ok(r.content.includes('先提问'), '模糊需求也要先提问')
   assert.ok(r.content.includes('ask_user_question'), '用工具问')
