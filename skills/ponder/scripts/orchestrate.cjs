@@ -126,6 +126,72 @@ function storeStep(stepName, questionType, stepOutputJson, userRequest, knowledg
     return result;
   }
 
+  // 0.5 八卦镜完整性硬闸：产出必须覆盖全部 8 个维度（F1-F8），每个维度有实质盲点内容，
+  //     不许"起了8个子agent但总结只挑部分维度/只列维度名没内容/另起炉灶写自己的八项"。
+  //     （用户实测发现：真实 run 有只输出 4 维/维度 blindspot 为空/字段名不符 schema 的情况——
+  //       schema minItems:8 从不校验，LLM 总结时自由挑选。此闸把"覆盖全部盲点"变成硬约束。）
+  if (stdStep === 'bagua' && validJson && orderValid) {
+    var baguaIssues = [];
+    var dims = null;
+    if (Array.isArray(output.dimensions)) dims = output.dimensions;
+    else if (Array.isArray(output.八维度)) dims = output.八维度;
+    // 期望的 8 个维度名（支持中英文/别名，宽松匹配）
+    var expectedFacets = [
+      { keys: ['F1', '驱动力', '驱动力', 'driving', 'motivation', 'force'] },
+      { keys: ['F2', '基础', '基础', 'foundation', 'base', 'ground'] },
+      { keys: ['F3', '变化', '变化', 'change', 'uncertain', 'variation'] },
+      { keys: ['F4', '渗透', '渗透', 'penetration', 'propagat', 'spread'] },
+      { keys: ['F5', '风险', '风险', 'risk', 'vulnerab'] },
+      { keys: ['F6', '依附', '依附', 'dependency', 'support', 'depend'] },
+      { keys: ['F7', '边界', '边界', 'boundary', 'constraint', 'limit'] },
+      { keys: ['F8', '平衡', '平衡', 'convergence', 'balance', 'stakeholder'] },
+    ];
+    var covered = new Array(expectedFacets.length).fill(false);
+    var coveredIdx = new Array(expectedFacets.length).fill(null);
+    if (!dims || dims.length === 0) {
+      baguaIssues.push('八卦镜产出没有任何维度（dimensions/八维度 为空）——8 个子 agent 的盲点必须全部收进产出');
+    } else {
+      for (var di = 0; di < dims.length; di++) {
+        var d = dims[di] || {};
+        var name = String(d.name || d.维度 || d.facet || '').toLowerCase();
+        var content = String(d.blindspot || d.key || d.产出 || d.insight || d.content || '').trim();
+        // 找它匹配哪个期望维度
+        for (var fi = 0; fi < expectedFacets.length; fi++) {
+          var matched = expectedFacets[fi].keys.some(function(k) { return name.indexOf(k.toLowerCase()) !== -1; });
+          if (matched) {
+            if (covered[fi] && coveredIdx[fi] !== di) {
+              // 同一维度出现多次不报错，只取第一次
+            } else {
+              covered[fi] = true;
+              coveredIdx[fi] = di;
+            }
+            if (content.length < 8) baguaIssues.push('维度 ' + (d.name || d.维度 || ('第' + (di + 1) + '项')) + ' 的盲点内容为空/过短（盲点要有实质内容，不只是维度名）');
+            break;
+          }
+        }
+        // 有 name 但没匹配到任何期望维度 → 可能是另起炉灶的自定义维度
+        if (name && expectedFacets.every(function(f, i) { return !f.keys.some(function(k) { return name.indexOf(k.toLowerCase()) !== -1; }); })) {
+          baguaIssues.push('维度 "' + (d.name || d.维度) + '" 不在八卦镜 8 维度（F1驱动力/F2基础/F3变化/F4渗透/F5风险/F6依附/F7边界/F8平衡）中——需按 8 维度框架输出，不许另起炉灶');
+        }
+      }
+      // 缺了哪些维度
+      var missingFacets = [];
+      for (var fi2 = 0; fi2 < expectedFacets.length; fi2++) {
+        if (!covered[fi2]) missingFacets.push(expectedFacets[fi2].keys[0] + '(' + expectedFacets[fi2].keys[1] + ')');
+      }
+      if (missingFacets.length > 0) baguaIssues.push('八卦镜缺 ' + missingFacets.length + ' 个维度未覆盖：' + missingFacets.join('、') + '——**有多少盲点就对应解决多少，8 个维度的盲点一个不能少**');
+    }
+    if (baguaIssues.length > 0) {
+      result.bagua_incomplete = true;
+      result.bagua_issues = baguaIssues;
+      result.invalid_json = false;
+      result.step_guard = 'BLOCKED';
+      result.message = '⛔ 八卦镜完整性未过（' + baguaIssues.length + ' 项）：' + baguaIssues.join(' | ') + '。请把 8 个维度子 agent 的盲点全部收进产出（覆盖 F1-F8、每维有实质盲点内容）后再存。';
+      console.log(JSON.stringify(result));
+      return result;
+    }
+  }
+
   // 1. 存步骤产出到MMA
   try {
     var knowledge = require('./_lib/knowledge.cjs');
