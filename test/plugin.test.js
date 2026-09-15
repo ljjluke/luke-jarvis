@@ -1670,3 +1670,17 @@ test('/jarvis 命令执行：判不出领域也要先思考再提问（不是干
   assert.ok(r.content.includes('先提问'), '模糊需求也要先提问')
   assert.ok(r.content.includes('ask_user_question'), '用工具问')
 })
+
+// ── 查证通道矩阵（防"信息缺失→LLM脑补补齐"）：成员须知必须带查证怎么查，且领域无关 ──
+
+test('jarvis_member_brief：成员须知含查证通道矩阵（搜索不可用→降级链→禁脑补）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '成员A', task: '调研任务' })
+  assert.ok(r.brief.includes('查证通道矩阵'), '须知应含查证矩阵')
+  assert.ok(r.brief.includes('web_search'), '应先真调默认搜索工具')
+  assert.ok(r.brief.includes('web_fetch 抓已知 URL'), '降级链①')
+  assert.ok(r.brief.includes('公开检索端点'), '降级链②')
+  assert.ok(r.brief.includes('绝不脑补补齐'), '严禁脑补补齐')
+  assert.ok(r.brief.includes('编造来源=一票否决'), '编造来源一票否决')
+  assert.ok(r.brief.includes('按你职责查你该查的方向'), '角色按职责查不同方向')
+})
