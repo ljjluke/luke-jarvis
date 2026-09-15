@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>贾维斯（jarvis）需求交付全流程</title>
+<style>
+  :root { --ink:#1a2332; --sub:#5b6b7f; --line:#c3ccd8; --bg:#f4f7fb; --card:#ffffff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; background:var(--bg); color:var(--ink); padding:32px 24px 80px; }
+  h1 { text-align:center; font-size:26px; margin-bottom:6px; }
+  .subtitle { text-align:center; color:var(--sub); font-size:14px; margin-bottom:30px; }
+  .lane { max-width:1240px; margin:0 auto 26px; }
+  .lane-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+  .lane-num { width:34px; height:34px; border-radius:50%; background:#2b5fd9; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:16px; flex-shrink:0; }
+  .lane-title { font-size:17px; font-weight:700; }
+  .lane-tag { font-size:12px; color:#fff; background:#8a94a6; border-radius:10px; padding:2px 10px; }
+  .flow { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .node { background:var(--card); border:1.5px solid var(--line); border-radius:10px; padding:10px 14px; font-size:13px; max-width:230px; box-shadow:0 1px 3px rgba(0,0,0,.05); }
+  .node b { display:block; font-size:13.5px; margin-bottom:3px; }
+  .node .d { color:var(--sub); font-size:11.5px; line-height:1.45; }
+  .node.actor { border-color:#2b5fd9; background:#eef3ff; }
+  .node.gate { border-color:#c7741f; background:#fff6ea; }
+  .node.out { border-color:#1f9d55; background:#eafaf0; }
+  .node.warn { border-color:#c7352f; background:#fff0ee; }
+  .node.cycle { border-color:#7a4fd0; background:#f4f0ff; }
+  .arrow { color:#8a94a6; font-size:16px; font-weight:700; flex-shrink:0; }
+  .note { background:#fff; border-left:3px solid #2b5fd9; padding:8px 12px; font-size:12px; color:var(--sub); max-width:260px; border-radius:4px; }
+  .legend { max-width:1240px; margin:10px auto 0; display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--sub); }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .swatch { width:14px; height:14px; border-radius:3px; display:inline-block; border:1px solid var(--line); }
+  .footer { max-width:1240px; margin:34px auto 0; font-size:12px; color:var(--sub); line-height:1.7; border-top:1px solid var(--line); padding-top:14px; }
+</style>
+</head>
+<body>
+<h1>贾维斯（Jarvis）数字员工公司 · 需求交付全流程</h1>
+<div class="subtitle">用户从提出需求 → 到验收收口 → 复盘的完整工作链路（领域无关：软件/制造/开店/医院…同一套机制）</div>
+
+<div class="legend">
+  <span><i class="swatch" style="background:#eef3ff;border-color:#2b5fd9"></i>角色动作</span>
+  <span><i class="swatch" style="background:#fff6ea;border-color:#c7741f"></i>闸门/校验</span>
+  <span><i class="swatch" style="background:#eafaf0;border-color:#1f9d55"></i>产出物</span>
+  <span><i class="swatch" style="background:#f4f0ff;border-color:#7a4fd0"></i>循环</span>
+  <span><i class="swatch" style="background:#fff0ee;border-color:#c7352f"></i>红线/缺陷</span>
+</div>
+
+<!-- ═══ 阶段零 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">0</span><span class="lane-title">阶段零 · 项目记忆库 & 判领域</span><span class="lane-tag">入口</span></div>
+  <div class="flow">
+    <div class="node actor"><b>用户提出需求</b><span class="d">可能详细、可能模糊（"做个东西"/"你好"）</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>贾维斯查 .jarvis/ 记忆库</b><span class="d">有无项目沉淀（卡/流程/教训）？有则复用+修订，无则从零</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>判领域方向</b><span class="d">能判：直接走人才流程<br>判不出：请用户说具体想干什么（"想做什么/解决什么问题/给谁用"）→ 从描述中判领域</span></div>
+    <div class="arrow">→</div>
+    <div class="node out"><b>领域已定</b><span class="d">记录需求原文（事实源）+ 项目目录骨架</span></div>
+  </div>
+</div>
+
+<!-- ═══ 阶段一 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">1</span><span class="lane-title">阶段一 · 需求打磨（理解透彻才开工）</span><span class="lane-tag">最关键</span></div>
+  <div class="flow">
+    <div class="node actor"><b>蒸馏猎头 → 猎头供 CEO</b><span class="d">猎头=人才调度层（唯一入口）；CEO=该领域公司内部老大（真实大佬，过 distill 双闸）</span></div>
+    <div class="arrow">→</div>
+    <div class="node actor"><b>CEO 定领域专家搭档</b><span class="d">需求最需要的子领域专业视角，猎头调度给 CEO 确认</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>① 独立思考·真疑问才问</b><span class="d">CEO+专家按角色卡深度思考 → 审视用户信息本身（矛盾/不可行/前提错/更优解）→ 真疑问才用 ask_user_question 问（每轮≤2问）；思考后无疑问就直接进，不硬凑问题</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>② 蒸馏团队 → 全员各自 ponder</b><span class="d">每个角色先把需求思考透、有自己的见解（理解需求后才提建议）</span></div>
+    <div class="arrow">→</div>
+    <div class="node cycle"><b>③ 全体开会畅所欲言（头脑风暴）</b><span class="d">按角色工作方式风格自由发言；每个提议走"提议→任何人可解答/同意/反驳→全员表态"，辩到多数认同或 CEO 裁决；挑战用户信息本身</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>④ 归拢</b><span class="d">共识 + 分歧点 + 待用户确认清单 → 写贾维斯公屏；产出"最好的结果"（坏方案淘汰、好方案吸收胜出）</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>澄清完成判定</b><span class="d">需求本质（为谁/解决什么/怎样算成功）+ 边界 + 优先级 + 约束 + 用户对账确认；缺一继续问</span></div>
+    <div class="arrow">→</div>
+    <div class="node out"><b>《需求规格》产物闸</b><span class="d">功能清单每条带可判定验收标准 + 参照基准（替代类需求必立）+ 用户确认项 vs CEO 推断项<br>⚠️ 没规格不进拆解</span></div>
+  </div>
+</div>
+
+<!-- ═══ 阶段二三 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">2-3</span><span class="lane-title">阶段二·拆解 + 阶段三·领域流程</span><span class="lane-tag">拆解</span></div>
+  <div class="flow">
+    <div class="node"><b>CEO/架构师拆解</b><span class="d">把需求拆成功能块/任务（不许随便拆）</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>jarvis_taskgraph 结构闸</b><span class="d">依赖闭环/无循环/每任务有可判定验收/输入来源明确/编制健康（不许 CEO 一人包办全部）</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>CEO 定领域流程</b><span class="d">jarvis_process：必经阶段/验收闸门/红线/必须角色/会议触点（按本项目需求特性，不照搬）</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>可行性闸</b><span class="d">需求超出领域技术边界 → 反馈用户"不可行+依据+替代方向"，不可行项不进任务 DAG</span></div>
+  </div>
+</div>
+
+<!-- ═══ 阶段四 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">4</span><span class="lane-title">阶段四 · 建队与派活</span><span class="lane-tag">组建</span></div>
+  <div class="flow">
+    <div class="node actor"><b>CEO 写《员工需求单》</b><span class="d">角色/职责范围/能力经历/思维方式/红线/输出物（详细到猎头能对标真人）</span></div>
+    <div class="arrow">→</div>
+    <div class="node actor"><b>猎头逐岗寻访真实权威</b><span class="d">三重验证（真实存在/方法论独有/对照需求单逐条适配）→ 候选人对标"满足/不满足哪几条+证据"</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>CEO 逐个确认够格</b><span class="d">不满足 → 通知猎头重找，不拿"将就的人"交差；卡过 distill 双闸 + fidelity 保真度</span></div>
+    <div class="arrow">→</div>
+    <div class="node out"><b>agent_teams 建队</b><span class="d">name=该领域真实职位名（CEO/厂长/店长…，禁止英文代号）；协同架构设计（jarvis_collab 四要素）</span></div>
+    <div class="arrow">→</div>
+    <div class="node actor"><b>CEO 设计任务清单 + 派活</b><span class="d">任务名/负责人/依赖/验收标准；**派活必带 jarvis_member_brief 开工须知**（含 ponder 执行路径/协议要点/回报格式）；编制硬闸：人配齐才开工</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>《方案设计》产物闸</b><span class="d">总体方案/接口契约/逐条需求→实现落点/风险对策/验证方式；没方案不许写实现</span></div>
+  </div>
+</div>
+
+<!-- ═══ 阶段五 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">5</span><span class="lane-title">阶段五 · 会议驱动协作循环（核心执行期）</span><span class="lane-tag">执行循环</span></div>
+  <div class="flow">
+    <div class="node actor"><b>Kickoff 全员会</b><span class="d">目标/验收标准/领域流程红线/各角色报位置与接口契约</span></div>
+    <div class="arrow">→</div>
+    <div class="node actor"><b>各自独思/干活</b><span class="d">关键决策跑 ponder 满血十阶段（有 run_id 才算真跑）；产出写贾维斯公屏</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>测试角色先出《测试验收单》</b><span class="d">需求规格每条功能映射测试项+整体验收项（流程/边界/异常）</span></div>
+    <div class="arrow">→</div>
+    <div class="node cycle"><b>开发-测试迭代循环</b><span class="d">实现（对照参照基准，禁止自己发挥）→ 独立验证 → 缺陷反馈 → 修复重打包 → 回归 → 直到测试通过</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>黑板即真相 + 按需二次会</b><span class="d">问题/发现/决策/风险/阻塞集中 jarvis_board；阻塞未决或未决项≥3 → cycle 会；分歧双方 ponder 后 jarvis_review 裁决</span></div>
+    <div class="arrow">→</div>
+    <div class="node warn"><b>红线条条</b><span class="d">问题上行三件套（不许沉默绕行）/ 资源需求上公屏（不许幻觉跳过）/ 卡住不猜着做 / 慢要查根因上报</span></div>
+  </div>
+</div>
+
+<!-- ═══ 阶段六 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">6</span><span class="lane-title">阶段六 · 盯控与接管</span><span class="lane-tag">质量保障</span></div>
+  <div class="flow">
+    <div class="node"><b>CEO 全程盯控</b><span class="d">agent_teams_status 定期看进度；员工卡住/产出不合格 → 介入</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>jarvis_perf 阶段考核</b><span class="d">需求对齐度（最重要，做偏=立即换人）/成果质量/完成度/问题上行健康度/角色卡契合度</span></div>
+    <div class="arrow">→</div>
+    <div class="node cycle"><b>治理分级 L1-L5</b><span class="d">先纠偏 → 纠偏无效才升级 → 连续2次不达标/需求对齐度=0 → 猎头补位（先交接文档再换人）</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>员工主动猎头补强</b><span class="d">卡覆盖不了的专业缺口 → 申请现场蒸馏该方向真实大佬作横向支援</span></div>
+  </div>
+</div>
+
+<!-- ═══ 阶段七 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">7</span><span class="lane-title">阶段七 · 版本化交付与收口</span><span class="lane-tag">交付</span></div>
+  <div class="flow">
+    <div class="node gate"><b>三产物闭环核对</b><span class="d">需求规格 ↔ 方案设计 ↔ 测试验收单 逐条闭环（jarvis_coverage 自动核查：未覆盖/悬空/未收口/无证据 → 打回）</span></div>
+    <div class="arrow">→</div>
+    <div class="node actor"><b>用户视角走查闸</b><span class="d">以用户身份完整走一遍：主流程连起来+每处细节+弹窗子页+视觉+持续使用段（动态稳定性）；走查有证据（截图/记录）</span></div>
+    <div class="arrow">→</div>
+    <div class="node"><b>jarvis_release 打版本</b><span class="d">需求本质逐条 → 交付物 → 自测结果 → 甲方逐条确认（验收单）；可回滚</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>甲方确认？</b><span class="d">✅ 通过 → 冻结归档<br>❌ 否决 → 回滚/重做闭环（rollback → 重澄清 → 打新版再交）<br>⏱ 超时 → 默认通过或明确挂起</span></div>
+    <div class="arrow">→</div>
+    <div class="node out"><b>交付报告 + 收队</b><span class="d">交付报告面向用户（目标/各岗位产出/风险/交付物在哪怎么验收）；agent_teams_delete 收队（历史保留）</span></div>
+  </div>
+</div>
+
+<!-- ═══ 复盘 ═══ -->
+<div class="lane">
+  <div class="lane-head"><span class="lane-num">8</span><span class="lane-title">项目复盘 · 沉淀</span><span class="lane-tag">资产</span></div>
+  <div class="flow">
+    <div class="node"><b>复盘三问</b><span class="d">做成了什么 / 哪卡壳了（需求不清/排期/角色不匹配）/ 下次怎么更好——对事不对人</span></div>
+    <div class="arrow">→</div>
+    <div class="node out"><b>沉淀项目记忆库</b><span class="d">角色卡→cards/、流程→process-*.json、教训→lessons.md、项目细节→project.md（下次需求阶段零直接复用）</span></div>
+    <div class="arrow">→</div>
+    <div class="node cycle"><b>下次新需求</b><span class="d">回到阶段零 → 读记忆库 → 复用+修订，不重蹈覆辙</span></div>
+  </div>
+</div>
+
+<div class="footer">
+  <b>贯穿全流程的红线（违反即缺陷）</b>：① 真实优先，不编造（source/数据/成果一票否决）② 需求本质回归（jarvis_essence 四查：回归本质/防迎合/防幻觉/真实优先）③ 独立思考审视用户信息，不顺着迎合 ④ 头脑风暴产出最好的结果，不走过场 ⑤ 没想透不许做，没验证不许说完成 ⑥ 有问题早暴露（问题上行三件套），不沉默绕行 ⑦ 用户中途/收口后再提需求 = 新需求，同样先打磨再拆解分员工。<br>
+  <b>工具清单（24 个 jarvis_*）</b>：project / store / process / distill / distill_guide / review / essence / escalate / capability / update / think / think_deep / member_brief / ponder_check / fidelity / collab / perf / meeting / release / board / clarify / company / coverage / taskgraph
+</div>
+
+</body>
+</html>
