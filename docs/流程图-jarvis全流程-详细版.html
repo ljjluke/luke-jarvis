@@ -100,7 +100,7 @@
   <div class="flow">
     <div class="node"><b>CEO/架构师拆解</b><span class="d">需求拆成功能块/任务（不许随便拆）</span></div>
     <div class="arrow">→</div>
-    <div class="node gate"><b>jarvis_taskgraph 结构闸</b><span class="d">依赖闭环/无循环/每任务可判定验收/输入来源明确/编制健康（不许 CEO 一人包办）</span></div>
+    <div class="node gate"><b>jarvis_taskgraph 结构闸</b><span class="d">依赖闭环/无循环/每任务可判定验收/输入来源明确/编制健康（不许 CEO 一人包办）；<b>替代/重建/对齐类任务验收=结构对齐+逐项对照参照基准+关键路径真实验证</b>（scan 教训：只写"移植"漏子页面/协议名错=打回）</span></div>
     <div class="arrow">→</div>
     <div class="node"><b>CEO 定领域流程</b><span class="d">jarvis_process：必经阶段/验收闸门/红线/必须角色/会议触点（按本单需求特性，不照搬）</span></div>
     <div class="arrow">→</div>
@@ -160,6 +160,10 @@
     <div class="node"><b>测试角色先出《测试验收单》</b><span class="d">需求规格每条功能映射测试项+整体验收项；测试从需求出发，不从开发方案抄</span></div>
     <div class="arrow">→</div>
     <div class="node cycle"><b>开发-测试迭代循环</b><span class="d">实现（对照参照基准，禁止自己发挥）→ 独立验证 → 缺陷反馈 → 修复重打包 → 回归 → 直到测试通过</span></div>
+    <div class="arrow">→</div>
+    <div class="node cycle"><b>🌟 质量自循环深挖（每个角色对自己负责模块，下放到角色卡）</b><span class="d">CEO 现场生成质量维度清单（领域无关，不许抄模板）→ 每个角色按卡"我的模块质量深挖"段对自己模块自循环深挖（评审→修→再评）→ 独立角色评审抽检（防自夸）→ <b>连续一轮清单全部维度达标才收口</b>；收敛条件：连续3轮未减少→上报CEO判定（防无限循环）</span></div>
+    <div class="arrow">→</div>
+    <div class="node cycle"><b>💡 会议碰撞回流（清单是活的）</b><span class="d">每次会议（头脑风暴/评审/二次会）归拢时，把碰撞出的新细节方向/新思路追加进质量维度清单（标注来源=会议X轮，新增立即生效）；同方向并入不重复（防膨胀）；评审按清单全部维度查</span></div>
     <div class="arrow">→</div>
     <div class="node"><b>黑板即真相 + 按需二次会</b><span class="d">问题/决策/风险/阻塞集中 jarvis_board；阻塞未决或未决项≥3 → cycle 会；分歧 ponder 后 jarvis_review 裁决</span></div>
     <div class="arrow">→</div>
@@ -228,7 +232,9 @@
   <div class="flow">
     <div class="node gate"><b>三产物闭环核对</b><span class="d">需求规格 ↔ 方案设计 ↔ 测试验收单 逐条闭环（jarvis_coverage 自动核查：未覆盖/悬空/未收口/无证据 → 打回）</span></div>
     <div class="arrow">→</div>
-    <div class="node gate"><b>🛡️ 防迎合收口总闸（9条逐项核对）</b><span class="d">①审视过用户信息 ②挖过客户真实意图 ③全员异质审校 ④对抗碰撞 ⑤真实验证 ⑥没脑补补齐 ⑦测试独立于开发 ⑧回归需求本质 ⑨无迎合痕迹（essence 四查 PASS）——每条要证据，收口报告附核对表</span></div>
+    <div class="node gate"><b>🔍 差异清单收口逐项销项</b><span class="d">替代/重建/对齐类：<b>差异清单收口必须用 jarvis_coverage 逐项销项</b>——每条差异须有落点+evidence+终态+覆盖率100%，任一无→打回（scan：t1 列了清单但收口没核销项→用户发现21处残余）</span></div>
+    <div class="arrow">→</div>
+    <div class="node gate"><b>🛡️ 防迎合收口总闸（9条逐项核对）</b><span class="d">①审视过用户信息 ②挖过客户真实意图 ③全员异质审校 ④对抗碰撞（<b>证据=meetingVerdict=真开会</b>，假开会=第4条不满足=打回重开）⑤真实验证 ⑥没脑补补齐 ⑦测试独立于开发 ⑧回归需求本质 ⑨无迎合痕迹（essence 四查 PASS + <b>查证痕迹</b>：source/数据须写"在哪查的"，只写"无幻觉"=走过场）——每条要证据，收口报告附核对表</span></div>
     <div class="arrow">→</div>
     <div class="node actor"><b>用户视角走查闸</b><span class="d">以用户身份完整走一遍：主流程连起来+每处细节+弹窗子页+视觉+持续使用段（动态稳定性）；走查有证据</span></div>
     <div class="arrow">→</div>
