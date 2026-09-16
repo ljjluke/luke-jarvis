@@ -1467,11 +1467,11 @@ test('jarvis_taskgraph：重做/对齐类任务验收须含结构对齐约束', 
   ]) })
   assert.strictEqual(r1.ok, false, '验收缺结构对齐应打回')
   assert.ok(r1.issues.some((i) => i.includes('结构/形态') || i.includes('画蛇添足')), '提示结构对齐: ' + r1.issues.join('|'))
-  // 2) 验收含结构对齐 → 放行
+  // 2) 验收含结构对齐 + 逐项对照 + 真实验证 → 放行（新要求：替代类须逐项对照参照基准+真实验证）
   const r2 = await def.handler({ tasksJson: JSON.stringify([
-    { id: 'T1', title: '认证新增重做', assignee: '实现A', acceptance: 'UI 结构对齐旧版两页签形态，不加基准没有的' },
+    { id: 'T1', title: '认证新增重做', assignee: '实现A', acceptance: 'UI 结构对齐旧版两页签形态，不加基准没有的；对照旧版逐项核字段/校验/交互无遗漏，关键操作真跑验证生效' },
   ]) })
-  assert.strictEqual(r2.ok, true, '验收含结构对齐应放行')
+  assert.strictEqual(r2.ok, true, '验收含结构对齐+逐项对照+真实验证应放行')
 })
 
 // ── ponder 真实性核验（lyj 会话教训：成员声称"十阶段全跑完/step-guard 全部 RECORDED"，
@@ -1835,4 +1835,23 @@ test('syncCompanyState：员工开会前是 idle → 散会恢复 idle（不硬�
   await syncCompanyState(fsMock, { type: 'meeting_done', meetingId: 'm1' })
   st = JSON.parse(tmp.get(abs))
   assert.strictEqual(st.employees[0].status, 'idle', '散会应恢复 idle（开会前状态），不是硬设 working')
+})
+
+// ── ponder 结论落地：替代/重建类任务验收须"逐项对照参照基准 + 真实验证"（scan 教训深化）──
+
+test('jarvis_taskgraph：替代类验收只有结构对齐（无逐项对照+真实验证）→ 打回', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  const r = await def.handler({ requirement: '替换旧系统', tasksJson: JSON.stringify([
+    { id: 'T1', title: '认证页移植-对齐旧版两页签', assignee: '实现A', acceptance: 'UI结构对齐旧版两页签形态' },
+  ]) })
+  assert.strictEqual(r.ok, false, '缺逐项对照+真实验证应打回')
+  assert.ok(r.issues.some((i) => i.includes('逐项对照') && i.includes('真实验证')), '提示缺逐项对照+真实验证: ' + r.issues.join('|'))
+})
+
+test('jarvis_taskgraph：替代类验收含逐项对照+真实验证 → 放行', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
+  const r = await def.handler({ requirement: '替换旧系统', tasksJson: JSON.stringify([
+    { id: 'T1', title: '认证页移植', assignee: '实现A', acceptance: '对照旧版认证页逐项核字段/校验/交互无遗漏；弱口令勾选后真跑验证后端收到' },
+  ]) })
+  assert.strictEqual(r.ok, true, '含逐项对照+真实验证应放行')
 })

@@ -2878,6 +2878,13 @@ export const TOOLS = [
           const altSignal = /重做|移植|重建|复刻|替代|迁移|对齐旧|对照旧|同旧|按旧|还原/.test(titleText + ' ' + acc)
           const hasRefAlign = /(对齐|对照|一致|同旧|同原|参照|按旧|结构|形态|页签|布局|样式)/.test(acc)
           if (altSignal && !hasRefAlign) issues.push(`任务 ${id} 是替代/重建/对齐类（${titleText.slice(0, 30)}），验收标准没写"与参照基准对齐的什么结构/形态"（scan 教训：验收只写"分类型表单"漏了"UI 结构对齐旧版页签形态"，实现就画蛇添足加错东西——替代类任务的验收必须含结构对齐约束，如"UI 结构对齐旧版两页签形态、不加基准没有的"）`)
+          else if (altSignal && hasRefAlign) {
+            // scan 教训深化（用户指出"子页面缺失/bug 是验证深度不足，不是拆解/能力"）：
+            // 替代/重建类任务，光有"结构对齐"还不够——须①逐项对照参照基准②真实验证，否则细节漏/静默失效（R22 协议名这类"代码在但错"静态复核拦不住）
+            const hasPerItem = /逐项|逐条|全部|每一项|完整对照|逐一对/.test(acc)
+            const hasRealVerify = /真机|实机|真跑|实际跑|实际用|实操|真实验证|部署后|点一遍|走一遍|验证生效|实际验证/.test(acc)
+            if (!hasPerItem && !hasRealVerify) issues.push(`任务 ${id} 是替代/重建/对齐类（${titleText.slice(0, 30)}），验收有结构对齐但缺"逐项对照 + 真实验证"（scan 教训深化：子页面缺失/字段丢=没逐项对照旧版；R22 协议名错=没对照后端契约/真跑——替代类任务验收须含"逐项对照参照基准的每个子页/字段/校验/交互 + 关键路径真实验证"，如"对照旧版 auth 页逐项核字段/校验/交互，无遗漏；弱口令勾选后真跑验证后端收到 postgres 协议"）`)
+          }
         }
         const deps = Array.isArray(t?.deps) ? t.deps : []
         const realDeps = deps.map(normId).filter((d) => d && d !== '-1' && d !== 'none')
