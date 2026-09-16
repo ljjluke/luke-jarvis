@@ -1731,3 +1731,48 @@ test('jarvis_store check：project.md 存在 → 提示续接五件套核对（�
   assert.ok(r.reuseRule.includes('当前进度/下一步/未决项/团队清单/关键决策与依据'), '五件套五项')
   assert.ok(r.reuseRule.includes('缺哪项先补哪项'), '缺项先补')
 })
+
+// ── 反思维审计修复：真会议校验（防假开会——没观点/无质疑/缺三轮=不算开会）──
+
+test('jarvis_meeting：无成员观点 → 判假开会（拦"没真开就说开完"）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const r = await def.handler({ meetingType: 'cycle' })
+  assert.ok(r.meetingVerdict.includes('假开会'), '无观点应判假开会')
+  assert.ok(r.meetingIssues.some((i) => /memberReplies|假开会/.test(i)), '应报缺成员观点')
+})
+
+test('jarvis_meeting：有成员观点但全员附和（无质疑）→ 判假开会', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const r = await def.handler({ meetingType: 'cycle', memberReplies: '角色A:同意\n角色B:同意' })
+  assert.ok(r.meetingVerdict.includes('假开会'), '无质疑应判假开会')
+  assert.ok(r.meetingIssues.some((i) => /质疑|反驳|附和/.test(i)), '应报无质疑')
+})
+
+test('jarvis_meeting：多角色观点+质疑+三轮证据 → 判真开会（可进归拢）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const r = await def.handler({
+    meetingType: 'cycle',
+    memberReplies: '角色A:我同意方案1\n角色B:我质疑方案1的前提不成立',
+    brainstormEvidence: '提议X: ①A提 ②B反驳+理由 ③A同意修正',
+  })
+  assert.ok(r.meetingVerdict.includes('真开会'), '有观点+质疑+三轮应判真开会')
+  assert.strictEqual(r.meetingIssues.length, 0)
+})
+
+// ── 反思维审计修复：续接五件套真校验（有 content 时工具真查五项，缺=提示补）──
+
+test('jarvis_store check：project.md 内容五件套齐全 → 判可无缝续接', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  const r = await def.handler({ mode: 'check', existingDirs: '["cards"]', projectMd: 'true',
+    projectContent: '## 当前进度\n- t1 done\n## 下一步\n- 做t2\n## 未决项\n- B1\n## 团队清单\n- CEO\n## 关键决策\n- 用A方案' })
+  assert.ok(r.reuseRule.includes('续接五件套齐全'), '五件套齐全应判可续接')
+})
+
+test('jarvis_store check：project.md 内容缺五件套项 → 报缺并提示先补', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  const r = await def.handler({ mode: 'check', existingDirs: '["cards"]', projectMd: 'true', projectContent: '## 当前进度\n- t1 done' })
+  assert.ok(r.reuseRule.includes('续接五件套缺'), '缺项应报缺')
+  assert.ok(r.reuseRule.includes('下一步'), '应列出缺的项')
+  assert.ok(r.reuseRule.includes('关键决策与依据'), '应列出缺的项2')
+  assert.ok(r.reuseRule.includes('先补这几项再继续'), '应提示先补')
+})

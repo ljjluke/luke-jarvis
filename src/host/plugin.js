@@ -628,6 +628,7 @@ export const TOOLS = [
         cards: { type: 'string', description: '已存在的角色卡名，逗号分隔（check 用）' },
         prototypes: { type: 'string', description: '已存在的真实人物原型名，逗号分隔（check 用）' },
         projectMd: { type: 'string', description: 'project.md 是否存在（true/false，check 用）' },
+        projectContent: { type: 'string', description: 'project.md 实际内容（check 用，传了就真校验续接五件套五项是否都在）' },
       },
     },
     output: {
@@ -690,8 +691,25 @@ export const TOOLS = [
           const missingFive = FIVE.filter(([label, re]) => !re.test(reuseRule) && !re.test(verdict)).map(([l]) => l)
           // 以传入的 projectMd 是否可能含五件套为判据（此处无法读文件内容，提示按需补写）
           if (String(args.projectMd ?? '').trim() === 'true') {
-            // project.md 存在但工具看不到内容——输出五件套核对提醒
-            reuseRule += ' **⚠️ 续接五件套核对**：读 project.md 时必找五件套（当前进度/下一步/未决项/团队清单/关键决策与依据），缺哪项先补哪项再继续（五件套缺 = 新会话/追加成员会断层）。'
+            // project.md 存在——若有内容则真校验五件套，否则输出核对提醒
+            const content = String(args.projectContent ?? '').trim()
+            if (content) {
+              const FIVE_RE = [
+                ['当前进度', /当前进度|进行到哪|任务状态|done|in_progress|pending/i],
+                ['下一步', /下一步|接着干|下一个动作|next step|NEXT/i],
+                ['未决项', /未决项|未决|遗留|open|待办/i],
+                ['团队清单', /团队|成员|角色|assignee/i],
+                ['关键决策与依据', /关键决策|决策.*依据|为什么.*定|否决|选型|拍板|决策记录/i],
+              ]
+              const missingFive = FIVE_RE.filter(([label, re]) => !re.test(content)).map(([l]) => l)
+              if (missingFive.length > 0) {
+                reuseRule += ' **⛔ 续接五件套缺 ' + missingFive.length + ' 项：' + missingFive.join('、') + '（project.md 内容里找不到）——缺项会让新会话/追加成员断层，先补这几项再继续**'
+              } else {
+                reuseRule += ' ✅ 续接五件套齐全（当前进度/下一步/未决项/团队清单/关键决策与依据都在 project.md 中）——可无缝续接。'
+              }
+            } else {
+              reuseRule += ' **⚠️ 续接五件套核对**：读 project.md 时必找五件套（当前进度/下一步/未决项/团队清单/关键决策与依据），缺哪项先补哪项再继续（五件套缺 = 新会话/追加成员会断层）。'
+            }
           }
         } else {
           reuseRule =
@@ -1960,6 +1978,8 @@ export const TOOLS = [
         agenda: { type: 'string', description: '本次会议议程/议题（可含黑板未决项 id）' },
         attendees: { type: 'string', description: '与会角色名，逗号分隔（默认全员）' },
         context: { type: 'string', description: '会议上下文（黑板摘要/分歧/阻塞等，可选）' },
+        memberReplies: { type: 'string', description: '会后实际收齐的每个成员回复/观点（JSON 或文本：谁给了什么观点）——用于真校验"会议真开了且收了每个成员观点"' },
+        brainstormEvidence: { type: 'string', description: '头脑风暴三轮完成证据（JSON：哪些提议走完了"提议→开放回应→表态收敛"三轮，谁反驳过谁）——缺三轮=未充分碰撞' },
       },
     },
     output: {
@@ -1975,6 +1995,9 @@ export const TOOLS = [
           respondAs: { type: 'string', description: '要求输出纪要 JSON 的结构' },
           realMeetingCheck: { type: 'string', description: '真会议执行清单：开会必须真拉每个成员用自己的卡+ponder 独立给观点质疑并留痕，缺任一项=假开会' },
           brainstormCheck: { type: 'string', description: '头脑风暴三轮强制清单（代码级归一化，压缩不丢）：每个提议必须走"提议→开放回应→表态收敛"三轮且过程留痕，缺任一=未充分碰撞' },
+          meetingVerdict: { type: 'string', description: '真会议校验结果：真开会 / 假开会/未充分开会（按 memberReplies+brainstormEvidence 判定）' },
+          meetingVerdictNote: { type: 'string', description: '真会议校验明细（缺什么/通过）' },
+          meetingIssues: { type: 'array', items: { type: 'string' }, description: '假开会的问题清单（缺观点/无质疑/缺三轮）' },
         },
         required: ['goal', 'resolutions'],
       },
@@ -2022,12 +2045,37 @@ export const TOOLS = [
           else await syncCompanyState(fsSvc2, { type: 'meeting_started', meeting: { id: 'm', type, topic: agenda || m.goal, attendees: attendees.split(',') } })
         }
       } catch {}
+      // ── 真会议校验（防假开会：capatin 传实际收齐的成员观点 + 三轮证据，工具判定真开会 or 假开会）──
+      const replies = String(args.memberReplies ?? '').trim()
+      const bstorm = String(args.brainstormEvidence ?? '').trim()
+      const meetingIssues = []
+      if (!replies) {
+        meetingIssues.push('未提供 memberReplies（每个成员的实际回复/观点）——**没有"每个成员独立观点"的会 = 假开会 = 不算评审**')
+      } else {
+        // 至少要有 2 个不同角色的观点（单人自说自话不算开会）
+        const replyRoles = (replies.match(/[^\n，,]{1,12}\s*[:：]\s*[^\n，,]{2,}/g) || [])
+        if (replyRoles.length < 2) meetingIssues.push('memberReplies 角色数 <2（只有一个人说话不算开会——须有不同角色的独立观点/质疑）')
+        if (!/质疑|反驳|不同意|担心|异议|不对|有疑问|挑战/.test(replies)) meetingIssues.push('memberReplies 中没有任何成员提出质疑/反驳/不同观点——全员附和 = 不算评审，重开')
+      }
+      if (!bstorm) {
+        meetingIssues.push('未提供 brainstormEvidence（头脑风暴三轮完成证据）——**每个提议必须走完"提议→开放回应→表态收敛"三轮才能进归拢**')
+      } else {
+        if (!/③|表态|收敛|同意|反对|保留/.test(bstorm)) meetingIssues.push('brainstormEvidence 缺"表态收敛"（第③轮）——提议没走完三轮 = 未充分碰撞')
+        if (!/反驳|质疑|不同意/.test(bstorm)) meetingIssues.push('brainstormEvidence 中无任何"反驳/质疑"——没有对抗的头脑风暴 = 全员附和')
+      }
+      const meetingVerdict = meetingIssues.length === 0 ? '真开会' : '假开会/未充分开会'
+      const meetingVerdictNote = meetingIssues.length
+        ? '⛔ ' + meetingIssues.join(' | ')
+        : '✅ 真会议通过：收齐了各成员独立观点（含质疑）+ 提议走完三轮（含反驳/表态）——可进归拢'
       return {
         type,
         goal: m.goal,
         protocol: m.protocol + (agenda ? `\n议程：${agenda}` : '') + (ctx ? `\n上下文：${ctx}` : ''),
         resolutions: m.resolutions,
         actions: m.actions,
+        meetingVerdict,
+        meetingVerdictNote,
+        meetingIssues,
         realMeetingCheck: '真会议执行清单（开会 = 做完这些才算开，缺任一项 = 假开会 = 不算开）：\n' +
           '  ① 把议题逐个 send_message 发给每个与会成员（不是自己心里过一遍）；\n' +
           '  ② 每个成员用自己的角色卡思维 + ponder 独立给观点/质疑（不同角色对同一议题的不同视角：验收的质疑「这怎么验」、实现的质疑「这改得动吗」、独立的质疑「用户会满意吗」）——**收集每个成员的独立观点，不许只自己宣布**；\n' +
