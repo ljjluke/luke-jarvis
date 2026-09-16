@@ -1711,3 +1711,23 @@ test('jarvis_board：有 open 资源需求 → 输出未闭环提示（相关任
   ] }) })
   assert.strictEqual(r2.openResources.length, 0, 'resolve 后闭环')
 })
+
+// ── 归一化第二批：上下文准入/卡住上报（member_brief 强制输出）+ 续接五件套核对（store check）──
+
+test('jarvis_member_brief：新成员须知强制含上下文准入 + 卡住限时上报（代码级，压缩不丢）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '开发A', task: '实现登录页' })
+  assert.ok(r.brief.includes('上下文准入'), '须知应含上下文准入（读记忆+复述确认才接任务）')
+  assert.ok(r.brief.includes('续接五件套'), '上下文准入应指向续接五件套')
+  assert.ok(r.brief.includes('卡住限时上报'), '须知应含卡住限时上报')
+  assert.ok(r.brief.includes('20-30 分钟'), '卡住 20-30 分钟须上报')
+  assert.ok(r.brief.includes('执行 CEO 当前最高优先级指令'), '不被低优先级细节带走')
+})
+
+test('jarvis_store check：project.md 存在 → 提示续接五件套核对（缺项先补再继续）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  const r = await def.handler({ mode: 'check', existingDirs: '["cards","docs"]', projectMd: 'true' })
+  assert.ok(r.reuseRule.includes('续接五件套核对'), '应提示核对五件套')
+  assert.ok(r.reuseRule.includes('当前进度/下一步/未决项/团队清单/关键决策与依据'), '五件套五项')
+  assert.ok(r.reuseRule.includes('缺哪项先补哪项'), '缺项先补')
+})
