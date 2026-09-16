@@ -1684,3 +1684,30 @@ test('jarvis_member_brief：成员须知含查证通道矩阵（搜索不可用�
   assert.ok(r.brief.includes('编造来源=一票否决'), '编造来源一票否决')
   assert.ok(r.brief.includes('按你职责查你该查的方向'), '角色按职责查不同方向')
 })
+
+// ── 提示词→代码化归一化（用户：上下文压缩可能丢精度、LLM可能跳步——流程步骤从提示词变工具强制）──
+
+test('jarvis_meeting：输出头脑风暴三轮强制清单（代码级，压缩不丢）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const r = await def.handler({ meetingType: 'cycle', agenda: '分歧裁决' })
+  assert.ok(r.brainstormCheck, '应输出头脑风暴三轮强制清单')
+  assert.ok(r.brainstormCheck.includes('① 提议'), '三轮①')
+  assert.ok(r.brainstormCheck.includes('② 开放回应'), '三轮②')
+  assert.ok(r.brainstormCheck.includes('③ 表态收敛'), '三轮③')
+  assert.ok(r.brainstormCheck.includes('没走三轮的提议 = 未碰撞 = 打回'), '缺三轮=打回')
+})
+
+test('jarvis_board：有 open 资源需求 → 输出未闭环提示（相关任务不得标记完成）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  const r = await def.handler({ role: '测试', board: JSON.stringify({ items: [
+    { id: 'B1', type: '资源需求', content: '需要客户提供测试服务器环境', status: 'open' },
+  ] }) })
+  assert.strictEqual(r.openResources.length, 1, '应识别未闭环资源需求')
+  assert.ok(r.resourceBlockNote.includes('未闭环'), '应提示未闭环')
+  assert.ok(r.resourceBlockNote.includes('不得标记完成'), '相关任务不得标记完成')
+  // resolve 后闭环
+  const r2 = await def.handler({ role: 'CEO', resolve: 'B1', board: JSON.stringify({ items: [
+    { id: 'B1', type: '资源需求', content: '需要客户提供测试服务器环境', status: 'open' },
+  ] }) })
+  assert.strictEqual(r2.openResources.length, 0, 'resolve 后闭环')
+})

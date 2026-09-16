@@ -1958,6 +1958,7 @@ export const TOOLS = [
           actions: { type: 'string', description: '会后任务模板（谁负责什么）' },
           respondAs: { type: 'string', description: '要求输出纪要 JSON 的结构' },
           realMeetingCheck: { type: 'string', description: '真会议执行清单：开会必须真拉每个成员用自己的卡+ponder 独立给观点质疑并留痕，缺任一项=假开会' },
+          brainstormCheck: { type: 'string', description: '头脑风暴三轮强制清单（代码级归一化，压缩不丢）：每个提议必须走"提议→开放回应→表态收敛"三轮且过程留痕，缺任一=未充分碰撞' },
         },
         required: ['goal', 'resolutions'],
       },
@@ -2019,6 +2020,13 @@ export const TOOLS = [
           '  ⑤ 决议落黑板 + 会后任务（谁负责什么）。\n' +
           '  自检：本次会有没有至少一个成员提出过质疑/不同观点？没有 = 全员附和 = 不算评审，重开。',
         respondAs: `完成本次「${type}」会后，以 JSON 输出纪要：{"date":"","type":"${type}","attendees":["${attendees}"],"agenda":["…"],"memberViews":[{"role":"角色","view":"他用自己的卡+ponder 对议题的独立观点/质疑"}],"disputes":[{"issue":"分歧","resolvedBy":"jarvis_review 裁决结果"}],"resolutions":["按模板逐条"],"boardUpdates":["写回黑板的条目"],"actions":[{"who":"角色","what":"会后负责什么"}]}——纪要必须含每个成员的观点/质疑（没有=假开会）`,
+        brainstormCheck: `🧠 头脑风暴三轮强制清单（代码级——每个提议必须走完三轮，缺任一=未充分碰撞=不能进归拢；过程留痕到会议纪要）：
+  ① 提议：某角色抛出疑问/方案/想法（记录：谁提的 + 提了什么）；
+  ② 开放回应：任何人可解答/补充/同意/反驳（记录：谁回应 + 同意/反驳 + 理由）；
+  ③ 表态收敛：全员表态 同意/反对/保留（记录：各自态度）；有分歧 → 继续辩（回到②）→ 辩到多数认同或 CEO 裁决；
+  每个提议都走完三轮 → 才进归拢（共识/分歧/待确认）；没走三轮的提议 = 未碰撞 = 打回；
+  同时：挑战用户信息本身（用户说的不是圣旨）；归拢 = 最好的结果（坏方案被反驳淘汰、好方案吸收胜出，不是并集/折中/多数即对）。
+  自检：有没有至少一个提议走完了三轮且有人反驳过？没有 = 全员附和 = 假头脑风暴 = 重开。`,
       }
     },
   },
@@ -2234,6 +2242,8 @@ export const TOOLS = [
           needsMeeting: { type: 'boolean', description: '是否建议二次开会' },
           reason: { type: 'string', description: '二次开会判定理由' },
           summary: { type: 'string' },
+          openResources: { type: 'array', description: '未闭环的资源需求条目（依赖它们的任务不得标记完成）' },
+          resourceBlockNote: { type: 'string', description: '资源未闭环提示（有 open 资源需求时输出）' },
         },
         required: ['items', 'needsMeeting'],
       },
@@ -2313,7 +2323,12 @@ export const TOOLS = [
       const summary = `未决 ${openItems.length} 项；阻塞 ${blockers.length} 项${blockers.length ? '：' + blockers.map((b) => b.id + '(' + b.content.slice(0, 20) + ')').join(', ') : ''}。${reason}${essenceNote}`
       // 写回磁盘（项目级公屏持久化）。成功=真源已更新；失败=本次仅内存返回（下次调用仍以磁盘为准，不伪造持久化）
       const persisted = await writeBoardItems(fsSvc, items, disk.version)
-      const out = { items, openItems, blockers, needsMeeting, reason, summary }
+      // 资源闭环检查（代码级归一化：有 open 的资源需求 = 未闭环 = 相关任务不得标记完成——压缩不丢）
+      const openResources = items.filter((i) => i.type === '资源需求' && i.status === 'open')
+      const resourceBlockNote = openResources.length
+        ? ('；⚠️ ' + openResources.length + ' 条资源需求未闭环（' + openResources.map((r) => r.id + '[' + r.content.slice(0, 24) + ']').join(', ') + '）——依赖这些资源的任务不得标记完成：CEO 分配/上报用户（只有客户能给的→问客户要）→ 提供后 resolve 闭环；资源未到前做不依赖它的任务，不许幻觉跳过/假装有')
+        : ''
+      const out = { items, openItems, blockers, needsMeeting, reason, summary: summary + resourceBlockNote, openResources, resourceBlockNote: resourceBlockNote.trim() || undefined }
       if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
         out.persisted = persisted.ok
         out.storage = persisted.ok ? '.jarvis/board.json' : undefined
