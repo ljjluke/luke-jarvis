@@ -1855,3 +1855,21 @@ test('jarvis_taskgraph：替代类验收含逐项对照+真实验证 → 放行'
   ]) })
   assert.strictEqual(r.ok, true, '含逐项对照+真实验证应放行')
 })
+
+// ── ponder 结论落地：差异清单收口用 coverage 逐项销项（scan：t1 列了清单但收口没核销项→用户发现21处残余）──
+
+test('jarvis_coverage：差异清单收口销项——每条差异须有落点+evidence，无证据终态打回', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_coverage')
+  // 正确销项：差异R1有落点D1+evidence → 通过
+  const ok = await def.handler({ label: '差异清单销项', source: JSON.stringify([{ id: 'R1', title: '认证详细页移植', status: 'completed' }]), targets: JSON.stringify({ 实现落点: [{ id: 'D1', refs: ['R1'], status: 'completed', evidence: '对照旧版逐项核过，真跑验证生效' }] }) })
+  assert.strictEqual(ok.ok, true, '有落点+evidence 应通过')
+  assert.strictEqual(ok.coverage, 1, '覆盖率100%')
+  // 假销项：目标标 completed 但无 evidence（闭环列✅但没真验）→ 打回
+  const fake = await def.handler({ label: '差异清单销项', source: JSON.stringify([{ id: 'R1', title: '认证详细页移植', status: 'completed' }]), targets: JSON.stringify({ 实现落点: [{ id: 'D1', refs: ['R1'], status: 'completed' }] }) })
+  assert.strictEqual(fake.ok, false, '无 evidence 终态应打回（防自报式销项）')
+  assert.ok(fake.evidenceLess.length > 0, '应报无证据终态')
+  // 漏项：差异R2无任何落点 → 打回
+  const miss = await def.handler({ label: '差异清单销项', source: JSON.stringify([{ id: 'R1', title: '认证', status: 'completed' }, { id: 'R2', title: '网站工具栏', status: 'completed' }]), targets: JSON.stringify({ 实现落点: [{ id: 'D1', refs: ['R1'], status: 'completed', evidence: '对照核过' }] }) })
+  assert.strictEqual(miss.ok, false, '漏差异无落点应打回')
+  assert.ok(miss.uncovered.some((u) => u.includes('R2')), '应报 R2 无落点')
+})
