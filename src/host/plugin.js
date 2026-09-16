@@ -2076,6 +2076,10 @@ export const TOOLS = [
       const meetingVerdictNote = meetingIssues.length
         ? '⛔ ' + meetingIssues.join(' | ')
         : '✅ 真会议通过：收齐了各成员独立观点（含质疑）+ 提议走完三轮（含反驳/表态）——可进归拢'
+      // 闭环：假开会 = 本次会结论作废（不许基于它推进拆解/派活/收口）——防"判了假开会还继续"
+      const meetingClosed = meetingIssues.length === 0
+        ? '本次会议结论可进入后续（拆解/派活/收口）；收口防迎合总闸第4条（对抗碰撞过）以本次 meetingVerdict 为证据。'
+        : '⛔ **本次会议结论作废**：未达到真会议标准（见上），**后续拆解/派活/收口不得基于本次会结论**——先重开会议收齐成员观点+三轮证据（补 memberReplies/brainstormEvidence 或重新开会），收口防迎合总闸第4条（对抗碰撞过）将按本次 verdict=假开会 拦截。'
       return {
         type,
         goal: m.goal,
