@@ -866,7 +866,7 @@ test('jarvis_clarify：三阶提问 + 方案 A 双人判据 + 澄清完成判定
   const def = TOOLS.find((t) => t.name === 'jarvis_clarify')
   const a = await def.handler({ mode: 'analyze', requirement: '做个自动写周报的东西' })
   const q1 = await def.handler({ mode: 'ask', requirement: 'x', round: '1', candidates: a.candidates.join('\n') })
-  assert.ok(q1.questions.length <= 2, '每轮≤2问')
+  assert.ok(q1.questions.length >= 1, '一次问尽真疑问（不设数量上限，收敛判据=无剩余真疑问）')
   const d = await def.handler({ mode: 'duo', roleCards: 'CEO卡\n专家卡', round: '1' })
   assert.ok(d.duoCheck.includes('方案 A'), '双人方案 A 判据')
   const cf = await def.handler({ mode: 'confirm', userAnswers: '用户是员工，周报难写，希望自动汇总，成功=5分钟发出领导看到具体成果' })
