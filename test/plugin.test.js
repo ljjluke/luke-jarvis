@@ -1499,7 +1499,17 @@ test('jarvis_ponder_check：十阶段按序 + 子agent达标 + 产出齐全 → 
     score: 'stage-score.json', simulate: 'stage-simulate.json', debate: 'stage-debate.json',
     synthesis: 'end-state.md',
   }
-  for (const s of STEPS) fs.writeFileSync(path.join(ev, FILES[s]), '{}')
+  const CONTENT = {
+    interview: 'userProfile 五诊天 地 人 法 物', shensi: 'stake high premises 前提审视',
+    divergence: 'perspectives 六视角 共识', bagua: 'dimensions F1 F2 F3 F4 F5 F6 F7 F8',
+    plans: 'plans 方案 P1 P2 P3', converge: 'survivors 幸存方案',
+    score: 'scored_survivors 评分', simulate: 'simulations 推演',
+    debate: 'ranked 排名 debate_summary', synthesis: 'recommendation 结论',
+  }
+  for (const s of STEPS) {
+    const body = (CONTENT[s] || '') + ' ' + ('实质内容细节 '.repeat(40)) // 保证 >200 字节
+    fs.writeFileSync(path.join(ev, FILES[s]), JSON.stringify({ stage: s, content: body, detail: body }))
+  }
   const state = {
     run_id: 'run_ok', question: 'q', completed: STEPS, agents: AG, certainties: {},
     sequence: STEPS.map((s, i) => ({ step: s, at: new Date(Date.now() + i * 1000).toISOString(), agents: AG[s] || 0 })),

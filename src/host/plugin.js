@@ -1651,14 +1651,38 @@ export const TOOLS = [
       if (agentShortfalls.length > 0) issues.push(`子 agent 数不足：${agentShortfalls.join('；')}`)
 
       const evidenceMissing = []
+      // 各阶段产出文件的关键字段（防"文件存在但空壳/无实质内容"——fs.existsSync 只看存在，不看内容）
+      const EXPECT_KEYS = {
+        interview: ['userProfile', '五诊', '天', 'persona'],
+        shensi: ['stake', 'premises'],
+        divergence: ['perspectives', '共识', 'consensus'],
+        bagua: ['dimensions', '八维度'],
+        plans: ['plans', '方案'],
+        converge: ['survivors'],
+        score: ['scored', 'scored_survivors'],
+        simulate: ['simulations'],
+        debate: ['ranked', 'debate_summary'],
+        synthesis: ['recommendation', 'conclusion'],
+      }
       if (evidenceDir) {
         STEPS.forEach((s) => {
           if (!completed.includes(s)) return
           const cands = EXPECT_FILES[s] || []
-          const hit = cands.some((f) => { try { return fs.existsSync(path.join(evidenceDir, f)) } catch { return false } })
-          if (!hit) evidenceMissing.push(`${LABELS[s]}(${s})，未见 ${cands.join('/')}`)
+          const hit = cands.some((f) => {
+            try {
+              const p = path.join(evidenceDir, f)
+              if (!fs.existsSync(p)) return false
+              const st = fs.statSync(p)
+              if (st.size < 200) return false // 空壳/占位文件不算产出
+              const txt = fs.readFileSync(p, 'utf8')
+              const keys = EXPECT_KEYS[s] || []
+              if (keys.length === 0) return true
+              return keys.some((k) => txt.includes(k)) // 含关键字段才算实质产出
+            } catch { return false }
+          })
+          if (!hit) evidenceMissing.push(`${LABELS[s]}(${s})，未见含实质内容的 ${cands.join('/')}（文件存在但空壳/缺关键字段=假产出）`)
         })
-        if (evidenceMissing.length > 0) issues.push(`阶段产出证据缺失：${evidenceMissing.join('；')}（记录了完成却无产出文件=存疑）`)
+        if (evidenceMissing.length > 0) issues.push(`阶段产出证据缺失/空壳：${evidenceMissing.join('；')}（记录了完成却无实质产出文件=存疑）`)
       } else {
         issues.push('未提供 evidenceDir——只核验了 step-guard 记录，**未核验阶段产出是否真落盘**（应收该角色项目 .jarvis/ponder-runs/<run_id>/）')
       }
