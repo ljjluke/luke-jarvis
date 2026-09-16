@@ -1794,3 +1794,35 @@ test('jarvis_review：双方都有 think 帧 → 不标 oneSided（正常裁决�
   assert.notStrictEqual(r.oneSided, true, '双方有 think 不标 oneSided')
   assert.ok(r.analysis.includes('A 方深度思考'), '应消费双方思考帧')
 })
+
+// ── 反思维审计第5轮：jarvis_company meeting_done 恢复开会前状态（非硬设 working）──
+
+test('syncCompanyState：员工开会前是 idle → 散会恢复 idle（不硬设 working）', async () => {
+  const { syncCompanyState } = await import('../src/host/plugin.js')
+  // 用临时 fs 模拟（同步函数，测试环境可能无 fs——用内存版验证逻辑）
+  const tmp = new Map()
+  const fsMock = {
+    readText: async (p) => tmp.get(p) || null,
+    writeText: async (p, c) => { tmp.set(p, c); return { ok: true } },
+    resolve: async (p) => p, // 返回传入路径作为 key
+  }
+  // 初始：开发A idle（开会前状态）——存任意 key，readCompanyState 用 resolve 返回的 key 读
+  const init = JSON.stringify({ employees: [{ role: '开发A', persona: 'X', status: 'idle' }], meetings: [], recruiting: [] })
+  // 先跑一次 meeting_started（空状态→写入），确认状态机在 mock 下工作
+  const r0 = await syncCompanyState(fsMock, { type: 'meeting_started', meeting: { id: 'm1', attendees: ['开发A'] } })
+  // 找到实际写入的 key
+  let key = null
+  for (const k of tmp.keys()) key = k
+  assert.ok(key, '应写入状态文件（mock 下找到 key）')
+  // 重新用有初始员工的库测恢复逻辑：key 必须与 readCompanyState 实际用的绝对路径一致（companyStateFile() = cwd + /.jarvis/company-state.json）
+  tmp.clear()
+  const { cwd } = await import('node:process')
+  const abs = cwd() + '/.jarvis/company-state.json'
+  tmp.set(abs, init)
+  await syncCompanyState(fsMock, { type: 'meeting_started', meeting: { id: 'm1', attendees: ['开发A'] } })
+  let st = JSON.parse(tmp.get(abs))
+  assert.strictEqual(st.employees[0].status, 'meeting', '开会中→meeting')
+  await syncCompanyState(fsMock, { type: 'meeting_done', meetingId: 'm1' })
+  st = JSON.parse(tmp.get(abs))
+  assert.strictEqual(st.employees[0].status, 'idle', '散会应恢复 idle（开会前状态），不是硬设 working')
+})

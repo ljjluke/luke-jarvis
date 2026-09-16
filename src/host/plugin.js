@@ -148,7 +148,8 @@ export async function syncCompanyState(fsSvc, action) {
       const CEO_ROLES = new Set(['CEO', 'ceo', '老板', '主面板'])
       for (const emp of state.employees) {
         if (attendees.includes(emp.role) && !CEO_ROLES.has(emp.role)) {
-          emp.status = 'meeting'; emp._prevStatus = emp._prevStatus || 'working'
+          if (emp._prevStatus === undefined) emp._prevStatus = emp.status; // 记住开会前真实状态（idle/working/on_probation），散会时恢复
+          emp.status = 'meeting'
         }
       }
     } else if (a.type === 'meeting_done' && a.meetingId) {
@@ -159,7 +160,9 @@ export async function syncCompanyState(fsSvc, action) {
       const CEO_ROLES = new Set(['CEO', 'ceo', '老板', '主面板'])
       for (const emp of state.employees) {
         if (attendees.includes(emp.role) && !CEO_ROLES.has(emp.role) && emp.status === 'meeting') {
-          emp.status = 'working'; emp.lastMeetingAt = new Date().toISOString().slice(0, 16)
+          // 恢复开会前状态（_prevStatus），不是硬设 working——员工开会前可能是 idle/on_probation/working
+          emp.status = emp._prevStatus || 'working'; emp.lastMeetingAt = new Date().toISOString().slice(0, 16)
+          delete emp._prevStatus
         }
       }
     } else if (a.type === 'employee_evaluated' && a.role) {
