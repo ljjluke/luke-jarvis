@@ -1776,3 +1776,21 @@ test('jarvis_store check：project.md 内容缺五件套项 → 报缺并提示�
   assert.ok(r.reuseRule.includes('关键决策与依据'), '应列出缺的项2')
   assert.ok(r.reuseRule.includes('先补这几项再继续'), '应提示先补')
 })
+
+// ── 反思维审计修复：jarvis_review 防一面之词硬标注（一方缺 think → 裁决置信降级）──
+
+test('jarvis_review：一方未提供深度思考帧 → 标注防一面之词未满足（置信降级）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({ issue: '方案A还是B', sideA: 'A好', sideB: 'B好', requirement: '客户要X' })
+  assert.strictEqual(r.oneSided, true, '缺 think 应标 oneSided')
+  assert.ok(r.oneSidedNote.includes('防一面之词未满足'), '应标防一面未满足')
+  assert.ok(r.oneSidedNote.includes('置信度降级'), '应标置信降级')
+  assert.ok(r.oneSidedNote.includes('先补另一方深度思考再裁决'), '应建议补深度思考')
+})
+
+test('jarvis_review：双方都有 think 帧 → 不标 oneSided（正常裁决）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({ issue: 'X', sideA: 'A', sideB: 'B', requirement: 'R', thinkA: '{"counter":"反A","realityCheck":"验A"}', thinkB: '{"counter":"反B","realityCheck":"验B"}' })
+  assert.notStrictEqual(r.oneSided, true, '双方有 think 不标 oneSided')
+  assert.ok(r.analysis.includes('A 方深度思考'), '应消费双方思考帧')
+})

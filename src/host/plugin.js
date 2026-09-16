@@ -1012,10 +1012,19 @@ export const TOOLS = [
       const essenceCheck = requirement
         ? `先重述需求本质：「${requirement.slice(0, 120)}」——为谁解决什么、怎样算成功。然后逐条核对裁决：① 偏离需求本质了吗（把用户要X做成了你想要的Y）？② 在迎合谁（用户原话/角色卡/主流方案/会议多数）？③ 有没有无依据断言（编造 source/数据/案例）？只要有一项打问号，裁决必须打回重做——回归需求本质优先于一切。必要时用 jarvis_essence 完成审计。`
         : '⚠️ 未提供原始需求（requirement）——裁决必须拿到需求本质才能定案：先补需求再裁决，禁止脱离需求空谈。'
+      // 防一面之词硬标注：一方未提供深度思考帧 → 裁决置信降级（提示强度升级：不是"建议"，是"该裁决信息不全"）
+      const missingSide = []
+      if (!String(args.thinkA ?? '').trim()) missingSide.push('A方')
+      if (!String(args.thinkB ?? '').trim()) missingSide.push('B方')
+      const oneSided = missingSide.length > 0
       const reviewOut = {
         ruling: `待 CEO 基于需求本质与真实情况裁决：「${issue}」。A=${sideA}；B=${sideB}。`,
         basis: '需求本质 > 真实情况 > 用户需求 > 专业判断（不迎合角色卡/主流方案/会议多数，回归原始需求定案）',
         essenceCheck,
+      }
+      if (oneSided) {
+        reviewOut.oneSided = true
+        reviewOut.oneSidedNote = '⛔ 防一面之词未满足：' + missingSide.join('、') + ' 未提供深度思考帧（jarvis_think_deep/ponder）——**该裁决建立在信息不全上，置信度降级**；除非该分歧低赌注/单方可确认，否则应先补另一方深度思考再裁决（否则=迎合一面之词风险）'
       }
       if (notes.length) reviewOut.analysis = notes.join('\n')
       return reviewOut
