@@ -65,12 +65,13 @@
     <div class="arrow">→</div>
     <div class="node actor"><b>CEO 定领域专家搭档</b><span class="d">需求最需要的子领域专业视角，猎头调度给 CEO 确认</span></div>
   </div>
-  <div class="subflow"><div class="subflow-title">🔗 续接四件套（新会话识别 .jarvis/ 直接继续——project.md 必须持续维护）</div>
+  <div class="subflow"><div class="subflow-title">🔗 续接五件套（新会话/追加成员识别 .jarvis/ 直接续接——project.md 必须持续维护）</div>
     <div class="mini">
       <div class="node"><b>① 当前进度</b><span class="d">每任务/阶段状态（done/in_progress/pending + 谁在做）</span></div>
       <div class="node"><b>② 下一步</b><span class="d">下一个动作（做什么+谁负责+触发条件）→ 新会话从这接着干</span></div>
       <div class="node"><b>③ 未决项</b><span class="d">黑板 open 项（owner+卡什么+怎么解）</span></div>
       <div class="node"><b>④ 团队清单</b><span class="d">当前角色（职责+卡位置）</span></div>
+      <div class="node"><b>⑤ 关键决策与依据</b><span class="d">选型/方向/口径/否决过什么 + 为什么这么定 + 谁拍板——缺它=追加成员看不到隐性上下文=返工根源</span></div>
     </div>
   </div>
 </div>
@@ -133,7 +134,11 @@
     <div class="mini">
       <div class="node"><b>按当前阶段配人</b><span class="d">客户只要方案 → 只配方案角色，不提前配满开发/测试（避免空挂）</span></div>
       <div class="arrow">→</div>
-      <div class="node"><b>阶段推进自动触发扩充</b><span class="d">客户确认继续/本阶段验收通过/下阶段无人承接 → 贾维斯提醒 CEO 提需求单 → 猎头补人注入</span></div>
+      <div class="node gate"><b>⚠️ 先判匹配度（追加 or 重建，不默认追加）</b><span class="d">①方向变了吗 ②原角色还匹配吗 ③有无"原团队干不了"的环节？匹配→追加；方向变/能力模型突变（方案→实施）→换帅重建（保留一阶段成果与记忆）</span></div>
+      <div class="arrow">→</div>
+      <div class="node"><b>阶段推进自动触发扩充</b><span class="d">客户确认继续/本阶段验收通过/下阶段无人承接 → 贾维斯提醒 CEO 提需求单 → 猎头补人注入（走猎头，附开工须知）</span></div>
+      <div class="arrow">→</div>
+      <div class="node gate"><b>🔗 新成员上下文准入</b><span class="d">先读 .jarvis/（续接五件套+需求规格+方案+一阶段交付+黑板决策）→ 向 CEO 复述理解 → 确认后才接任务；没读记忆=名义追加实际重建</span></div>
       <div class="arrow">→</div>
       <div class="node"><b>收口时先问"是否继续"</b><span class="d">继续 → 触发扩充；不继续 → project.md 记"下一阶段要补的岗位"，下次直接补人</span></div>
     </div>
