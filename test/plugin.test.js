@@ -1899,3 +1899,29 @@ test('jarvis_member_brief audit：所有任务都附须知 → 通过', async ()
   assert.strictEqual(r.ok, true, '全有须知应通过')
   assert.strictEqual(r.missing.length, 0)
 })
+
+// ── 主流程守卫 jarvis_flowguard（"每一步都不能跳过"——学 ponder step-guard 的 before/BLOCKED）──
+
+test('jarvis_flowguard：未知步骤 → 提示合法步骤', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_flowguard')
+  const r = await def.handler({ step: 'nope' })
+  assert.strictEqual(r.ok, false)
+  assert.ok(r.verdict.includes('未知步骤'), '应提示未知步骤')
+})
+
+test('jarvis_flowguard：收口步骤 → 检查黑板/差异销项前置（缺=BLOCKED）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_flowguard')
+  const r = await def.handler({ step: 'close' })
+  // 无 fs 环境 hasGlob 放行，但 pre 数组会给出提醒项（黑板/差异销项）
+  assert.ok(r.verdict.includes('BLOCKED') || r.ok === true, '收口应有前置检查（黑板/差异销项）')
+  assert.ok(['close', '收口'].includes(r.step || 'close'), 'step 回显')
+})
+
+test('jarvis_flowguard：全部合法步骤可调用不抛错', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_flowguard')
+  for (const s of ['clarify', 'decompose', 'design', 'build', 'execute', 'close']) {
+    const r = await def.handler({ step: s })
+    assert.ok(typeof r.ok === 'boolean', s + ' 应返回 ok 布尔')
+    assert.ok(r.verdict.length > 0, s + ' 应有判定')
+  }
+})

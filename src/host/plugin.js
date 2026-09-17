@@ -3045,7 +3045,164 @@ export const TOOLS = [
       }
     },
   },
+
+  {
+    name: 'jarvis_flowguard',
+    description:
+      '主流程步骤守卫（"每一步都不能跳过"硬闸——学 ponder step-guard 的 before/BLOCKED 机制：主流程每步必须先有前置产物才能进下一步，缺=BLOCKED 不许跳步；防 ssa 式"真实任务角色没跑 ponder/派活没附须知"这类跳步）。检查主流程各阶段前置产物（可机械判定的文件/记录），缺任一 → 输出 missing + 打回补齐，不许继续。',
+    parameters: {
+      type: 'object',
+      properties: {
+        step: { type: 'string', description: '要进入的步骤名（clarify=需求打磨/decompose=拆解/design=方案/build=建队派活/execute=执行/close=收口）' },
+        projectDir: { type: 'string', description: '项目目录（默认当前工作目录）——守卫按此目录检查前置产物文件' },
+        extra: { type: 'string', description: '额外要检查的产物（逗号分隔的相对路径或关键词，可选）' },
+      },
+      required: ['step'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          verdict: { type: 'string' },
+          ok: { type: 'boolean' },
+          missing: { type: 'array', items: { type: 'string' }, description: '缺失的前置产物（打回补齐项）' },
+          next: { type: 'string', description: '下一步该做什么' },
+        },
+        required: ['verdict', 'ok'],
+      },
+      render: (r) => `【主流程守卫 · ${r.step ?? ''}】${r.ok ? '✅ 前置齐备可进入' : '⛔ BLOCKED 缺前置产物：' + (r.missing || []).join('；')}
+下一步：${r.next ?? ''}`,
+    },
+    handler: async (args) => {
+      const path = _require('node:path')
+      const step = String(args.step ?? '').trim()
+      const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+      const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+      const exists = async (rel) => {
+        if (!fsSvc || typeof fsSvc.readText !== 'function') return false
+        try { const t = await fsSvc.readText(path.join(projectDir, rel)); return !!t } catch { return false }
+      }
+      // 每步前置产物（可机械判定：文件存在 或 记录存在）——领域无关，产物名按 jarvis 约定
+      const STEP_PRECOND = {
+        clarify: {
+          label: '需求打磨',
+          pre: [],
+          check: async () => [], // 需求打磨本身是起点（从用户需求进）
+          next: '产出《需求规格》（.jarvis/docs/需求规格-*.md 每条功能带可判定验收）后进拆解',
+        },
+        decompose: {
+          label: '拆解',
+          pre: ['需求规格（.jarvis/docs/需求规格-*.md）'],
+          check: async (missing) => {
+            // 需求规格存在？宽松匹配：目录里有 需求规格-*.md
+            if (fsSvc && typeof fsSvc.readText === 'function') {
+              try {
+                const dir = await fsSvc.readText(path.join(projectDir, '.jarvis/docs/需求规格-占位.probe'))
+                if (dir) {}
+              } catch {}
+            }
+            const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '需求规格')
+            if (!found) missing.push('需求规格（.jarvis/docs/需求规格-*.md 不存在——需求没打磨清楚不许拆解）')
+            else missing = missing.filter((m) => !m.startsWith('需求规格'))
+          },
+          next: '过 jarvis_taskgraph 结构闸 → 出《任务编排图》',
+        },
+        design: {
+          label: '方案设计',
+          pre: ['任务编排图（.jarvis/docs/任务编排-*.md）'],
+          check: async (missing) => {
+            const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '任务编排')
+            if (!found) missing.push('任务编排图（.jarvis/docs/任务编排-*.md 不存在——没拆解不许写方案）')
+            else missing = missing.filter((m) => !m.startsWith('任务编排'))
+          },
+          next: '出《方案设计》（.jarvis/docs/方案设计-*.md 每条需求→实现落点）',
+        },
+        build: {
+          label: '建队派活',
+          pre: ['需求规格', '方案设计（.jarvis/docs/方案设计-*.md）'],
+          check: async (missing) => {
+            const fd = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
+            if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许建队派活）')
+            else missing = missing.filter((m) => !m.startsWith('方案设计'))
+            // 派活必带开工须知：audit 团队任务
+            const teamFound = await hasGlob(fsSvc, path.join(projectDir, '.agent-teams'), 'team.json')
+            if (teamFound) {
+              const briefOk = await auditTeamBriefs(fsSvc, projectDir, path)
+              if (!briefOk) missing.push('有团队成员任务缺「开工须知」（派活后跑 jarvis_member_brief audit——成员没须知=不会跑 ponder）')
+            }
+          },
+          next: '派活（每任务附开工须知）→ 成员开工先 ponder → 执行',
+        },
+        execute: {
+          label: '执行',
+          pre: ['方案设计'],
+          check: async (missing) => {
+            const fd = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
+            if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许执行实现）')
+            else missing = missing.filter((m) => !m.startsWith('方案设计'))
+          },
+          next: '开发-测试迭代（对照基准）+ 质量自循环深挖 → 收口',
+        },
+        close: {
+          label: '收口',
+          pre: ['黑板（.jarvis/board.json 无阻塞/未决项收敛）', '差异清单已销项（替代类 coverage）'],
+          check: async (missing) => {
+            const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis'), 'board.json')
+            if (!found) missing.push('黑板（.jarvis/board.json 不存在——没有决策/阻塞记录不许收口）')
+            else missing = missing.filter((m) => !m.startsWith('黑板'))
+          },
+          next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',
+        },
+      }
+      const cfg = STEP_PRECOND[step]
+      if (!cfg) {
+        return { verdict: `⚠️ 未知步骤「${step}」（应为 clarify/decompose/design/build/execute/close）`, ok: false, step, missing: [], next: '' }
+      }
+      const missing = [...cfg.pre]
+      try { await cfg.check(missing) } catch {}
+      const ok = missing.length === 0
+      return {
+        verdict: ok ? `✅ ${cfg.label}前置齐备，可进入` : `⛔ BLOCKED：${cfg.label}缺前置产物——${missing.join('；')}`,
+        ok,
+        step,
+        missing,
+        next: ok ? cfg.next : `先补齐缺失项（${missing.join('；')}）再进${cfg.label}`,
+      }
+    },
+  },
 ]
+// ── jarvis_flowguard 辅助函数（模块级，TOOLS 数组外）──
+// 在目录里找含关键字的文件（fs 支持时；不支持则返回 true=放行，防环境缺 fs 误拦）
+async function hasGlob(fsSvc, dir, keyword) {
+  if (!fsSvc || typeof fsSvc.list !== 'function') return true
+  try {
+    const names = await fsSvc.list(dir)
+    return (Array.isArray(names) ? names : []).some((n) => String(n).includes(keyword))
+  } catch { return true }
+}
+// 审计团队任务是否每个都附了开工须知（含 ponder 指引）
+async function auditTeamBriefs(fsSvc, projectDir, path) {
+  if (!fsSvc || typeof fsSvc.list !== 'function') return true
+  try {
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    const teamNames = await fsSvc.list(teamsDir).catch(() => [])
+    let anyMissing = false
+    for (const team of Array.isArray(teamNames) ? teamNames : []) {
+      try {
+        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        if (!txt) continue
+        const d = JSON.parse(txt)
+        const PONDER_MARK = /ponder|开工须知|step-guard|十阶段|run_id|PONDER_DATA_DIR|先跑 ponder/
+        for (const t of d.tasks || []) {
+          const text = String(t.description || '') + ' ' + String(t.subject || '') + ' ' + String(t.acceptance || '')
+          if (!PONDER_MARK.test(text)) { anyMissing = true; break }
+        }
+      } catch {}
+    }
+    return !anyMissing
+  } catch { return true }
+}
+
 
 /** 需求分级（纯逻辑，供 jarvis_project 工具与 /jarvis 命令共用）。
  *  ⚠️ 领域无关设计：插件不预设任何行业/人物/领域流程（那是项目沉淀的职责）。
