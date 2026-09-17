@@ -1873,3 +1873,29 @@ test('jarvis_coverage：差异清单收口销项——每条差异须有落点+e
   assert.strictEqual(miss.ok, false, '漏差异无落点应打回')
   assert.ok(miss.uncovered.some((u) => u.includes('R2')), '应报 R2 无落点')
 })
+
+// ── ssa-website 教训：真实任务缺开工须知→成员没跑 ponder——audit 模式机械校验"每个任务都有须知"──
+
+test('jarvis_member_brief audit：检出真实任务缺开工须知（ssa 式：只有方法测试任务有 ponder）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ mode: 'audit', tasksJson: JSON.stringify([
+    { id: 't1', assignee: '专家A', subject: '已知答案测试', description: '先跑 ponder 十阶段（run_id）' },
+    { id: 't3', assignee: '专家A', subject: '修复方案定稿', description: '对照验收判据定稿' },
+    { id: 't6', assignee: '实现', subject: 'B4 实现', description: '落地为最小可回退改动' },
+  ]) })
+  assert.strictEqual(r.ok, false, '有任务缺须知应 audit 不过')
+  assert.ok(r.missing.length === 2, '应检出 t3/t6 缺须知')
+  assert.ok(r.missing.some((m) => m.includes('t3')), '应指出 t3')
+  assert.ok(r.missing.some((m) => m.includes('t6')), '应指出 t6')
+  assert.ok(r.hint.includes('jarvis_member_brief'), '应给修复提示')
+})
+
+test('jarvis_member_brief audit：所有任务都附须知 → 通过', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ mode: 'audit', tasksJson: JSON.stringify([
+    { id: 't1', assignee: '专家A', subject: '测试', description: '先跑 ponder 十阶段（PONDER_DATA_DIR + run_id 回报）' },
+    { id: 't6', assignee: '实现', subject: '实现', description: '开工须知：先 ponder 十阶段再动手（step-guard）' },
+  ]) })
+  assert.strictEqual(r.ok, true, '全有须知应通过')
+  assert.strictEqual(r.missing.length, 0)
+})

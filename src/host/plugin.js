@@ -1349,6 +1349,9 @@ export const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
+        mode: { type: 'string', description: 'generate=生成须知（默认）/ audit=审计团队任务是否每个都附了开工须知（含ponder）' },
+        teamDir: { type: 'string', description: 'audit 用：团队目录（如 <项目>/.agent-teams/<team>，自动读 team.json 扫描任务）' },
+        tasksJson: { type: 'string', description: 'audit 用：直接传任务清单 JSON（[{id,assignee,description,subject}]），不传 teamDir 时用' },
         roleName: { type: 'string', description: '成员在团队里的职位名（如 猎头/合规与信创涉密专家/开发-前端A）' },
         task: { type: 'string', description: '本次派给他的任务（写清交付物与验收）——须知会带上"你的本次任务"一节' },
         stakes: { type: 'string', description: '本次任务赌注 high/medium/low（默认 medium）——决定 ponder 深度说明' },
@@ -1374,6 +1377,44 @@ export const TOOLS = [
     handler: async (args) => {
       const os = _require('node:os')
       const path = _require('node:path')
+      const mode = String(args.mode ?? 'generate').trim()
+      // ⚠️ audit 模式：机械校验"团队每个任务是否都附了开工须知（含 ponder 指引）"——ssa 教训：
+      //   captain 只对"验证 ponder 的方法测试任务"附了须知，真实任务(实现/修复/验收)没附 → 成员没跑 ponder
+      if (mode === 'audit') {
+        const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+        const teamDir = String(args.teamDir ?? '').trim()
+        const tasksJson = String(args.tasksJson ?? '').trim()
+        let tasks = []
+        if (tasksJson) {
+          try { tasks = JSON.parse(tasksJson) } catch { return { verdict: '⛔ tasksJson 不是合法 JSON', ok: false } }
+        } else if (fsSvc && typeof fsSvc.readText === 'function' && teamDir) {
+          try {
+            const text = await fsSvc.readText(teamDir.replace(/\/$/, '') + '/team.json')
+            if (text) { const d = JSON.parse(text); tasks = d.tasks || [] }
+          } catch (e) { return { verdict: '⛔ 读团队任务失败：' + (e.message || e), ok: false } }
+        } else {
+          return { verdict: '⚠️ audit 需要 teamDir（团队目录，自动读 team.json）或 tasksJson', ok: false }
+        }
+        // 任务描述/标题里是否含 ponder 须知特征（有 = 成员会知道先跑 ponder；无 = 成员只当执行手）
+        const PONDER_MARK = /ponder|开工须知|step-guard|十阶段|run_id|PONDER_DATA_DIR|先跑 ponder/
+        const missing = []
+        for (const t of tasks || []) {
+          const id = t?.id ?? '?'
+          const text = String(t?.description || '') + ' ' + String(t?.subject || '') + ' ' + String(t?.acceptance || '')
+          if (!PONDER_MARK.test(text)) missing.push(`${id}[${t?.assignee || '未指派'}] ${String(t?.subject || '').slice(0, 32)}`)
+        }
+        const ok = missing.length === 0
+        return {
+          verdict: ok
+            ? '✅ 团队所有任务都附了开工须知（含 ponder 指引）——成员会知道先跑 ponder 十阶段'
+            : `⛔ ${missing.length} 个任务缺开工须知（成员看不到 jarvis 协议，不附 = 当执行手 = 不会跑 ponder）：${missing.join('；')}`,
+          missing,
+          ok,
+          total: (tasks || []).length,
+          hint: ok ? '' : '修复：对缺须知的 assignee 用 jarvis_member_brief 生成须知，原文附进该任务 description（或 send_message 补发），成员才知道先跑 ponder。',
+        }
+      }
       const role = String(args.roleName ?? '成员').trim() || '成员'
       const task = String(args.task ?? '').trim()
       const stakes = String(args.stakes ?? 'medium').trim()
