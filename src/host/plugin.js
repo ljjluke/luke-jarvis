@@ -3054,6 +3054,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         step: { type: 'string', description: '要进入的步骤名（clarify=需求打磨/decompose=拆解/design=方案/build=建队派活/execute=执行/close=收口）' },
+        done: { type: 'boolean', description: '标记该步已完成并记录到 .jarvis/flow-progress.json（学 ponder step-guard 的 after——步骤完成留痕，可核验"真执行了"）' },
         projectDir: { type: 'string', description: '项目目录（默认当前工作目录）——守卫按此目录检查前置产物文件' },
         extra: { type: 'string', description: '额外要检查的产物（逗号分隔的相对路径或关键词，可选）' },
       },
@@ -3161,11 +3162,30 @@ export const TOOLS = [
       const missing = [...cfg.pre]
       try { await cfg.check(missing) } catch {}
       const ok = missing.length === 0
+      // 步骤完成留痕（done=true 且前置齐备 → 记录到 .jarvis/flow-progress.json，学 ponder step-guard after）
+      let recorded = null
+      if (args.done === true && ok) {
+        const fsSvc2 = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        if (fsSvc2 && typeof fsSvc2.readText === 'function' && typeof fsSvc2.writeText === 'function') {
+          try {
+            const fp = path.join(projectDir, '.jarvis/flow-progress.json')
+            let prog = { steps: [], updatedAt: '' }
+            try { const t = await fsSvc2.readText(fp); if (t) prog = JSON.parse(t) } catch {}
+            const now = new Date().toISOString()
+            prog.steps = (prog.steps || []).filter((x) => x.step !== step)
+            prog.steps.push({ step, label: cfg.label, at: now })
+            prog.updatedAt = now
+            await fsSvc2.writeText(fp, JSON.stringify(prog, null, 2))
+            recorded = fp
+          } catch {}
+        }
+      }
       return {
-        verdict: ok ? `✅ ${cfg.label}前置齐备，可进入` : `⛔ BLOCKED：${cfg.label}缺前置产物——${missing.join('；')}`,
+        verdict: ok ? `✅ ${cfg.label}前置齐备，可进入${recorded ? '（已记录完成→' + recorded + '）' : ''}` : `⛔ BLOCKED：${cfg.label}缺前置产物——${missing.join('；')}`,
         ok,
         step,
         missing,
+        recorded,
         next: ok ? cfg.next : `先补齐缺失项（${missing.join('；')}）再进${cfg.label}`,
       }
     },
@@ -3271,8 +3291,9 @@ export function jarvisCommand(requirement) {
       '③ CEO 分析需求 → 向猎头定一个领域专家搭档 → 猎头调度给 CEO 确认',
       '④ **全体开会畅所欲言（头脑风暴）+ 归拢**：每个角色（含 CEO+专家+团队）先各自 ponder 理解需求（有自己的见解）→ 全体开会按各自角色工作方式风格自由发言、互相碰撞、挑战用户信息 → **会议后归拢**成"内部共识 + 分歧点 + 待用户确认清单"（写贾维斯公屏）→ 真疑问才用 `ask_user_question` 问用户（问尽所有真疑问、不设数量上限）；**若 ⓪ 已思考过且无疑问则复用结论，不重复问** → 需求清晰',
       '⑤ 需求无问题 → CEO+专家定团队规模/人员列表 → 猎头逐个调度 → CEO+专家确认够格 → kickoff 开工',
+      '⑥ **每步过「步骤守卫」jarvis_flowguard（"每个步骤必须执行"——用户强调，不可跳过）**：进 拆解/方案/建队/执行/收口 每个阶段前，先 `jarvis_flowguard(step=<阶段>)` 检查前置产物，**缺 = BLOCKED = 不许进下一步，先补齐**（需求规格→任务编排→方案设计→开工须知→黑板/差异销项——前一步产物没齐，后一步不许开工）；**每个阶段产物没齐就往下走 = 跳步 = 缺陷**',
     ]
-    guidance = hit.domainDeterminable ? '✅ 领域可从文本判断，启动人才流程（**注意：先按角色卡思考需求、真疑问才问，再建队**）' : '（小需求/无领域线索但可直接做——按需走或直接做，但有真疑问就先问）'
+    guidance = hit.domainDeterminable ? '✅ 领域可从文本判断，启动人才流程（**注意：先按角色卡思考需求、真疑问才问，再建队；每个阶段过 jarvis_flowguard 步骤守卫，缺前置产物=BLOCKED 不许跳过**）' : '（小需求/无领域线索但可直接做——按需走或直接做，但有真疑问就先问；每个阶段过 jarvis_flowguard 步骤守卫）'
   }
   return {
     content: `已收到需求[${text.slice(0, 120)}]。\n${guidance}\n\n【接下来 5 分钟该做什么（照做即可）】\n${actions.join('\n')}\n\n（完整协议见 jarvis 技能：核心协议 5 步主干 + 判领域/猎头调度/CEO+专家打磨/三产物闸/测试返工/收口核对。铁律：真实优先不编造；做客户要的；卡不贵多贵有用。）`,
