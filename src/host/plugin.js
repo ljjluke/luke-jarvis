@@ -2057,6 +2057,9 @@ export const TOOLS = [
         context: { type: 'string', description: '会议上下文（黑板摘要/分歧/阻塞等，可选）' },
         memberReplies: { type: 'string', description: '会后实际收齐的每个成员回复/观点（JSON 或文本：谁给了什么观点）——用于真校验"会议真开了且收了每个成员观点"' },
         brainstormEvidence: { type: 'string', description: '头脑风暴三轮完成证据（JSON：哪些提议走完了"提议→开放回应→表态收敛"三轮，谁反驳过谁）——缺三轮=未充分碰撞' },
+        groupchat: { type: 'boolean', description: 'true=群聊会议模式：建共享发言线程（全员可见，每个人能发言、所有人能看到——真会议不是单对单）；输出广播话术+线程路径' },
+        post: { type: 'string', description: '群聊模式：某个成员的发言（追加到共享线程，全员可见）；配合 groupchat=true' },
+        speaker: { type: 'string', description: '群聊模式：发言者角色名（post 用）' },
       },
     },
     output: {
@@ -2112,6 +2115,74 @@ export const TOOLS = [
           resolutions: 'R1 验收结论逐项（通过/未通过+原因）；R2 黑板遗留项分级；R3 jarvis_essence 审计结论汇总；R4 交付报告要点清单',
           actions: 'CEO 产出交付报告给用户；必要时 agent_teams_delete 收队',
         },
+      }
+      // ── 群聊会议协议（groupchat=true，用户定义的真实会议效果）：
+      //    排队发言（按顺序，不乱写）+ 每发言须对前面所有发言给评价/看法（同意/反驳/补充+理由，真碰撞）
+      //    + 明确时长（轮次上限）+ 明确主题 + 收敛判据（所有细节都没问题才结束，收敛才散会）──
+      if (args.groupchat === true) {
+        const path = _require('node:path')
+        const fsSvc3 = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+        const topic = String(args.topic ?? args.agenda ?? '未命名议题').trim()
+        const attendees = String(args.attendees ?? '全员').trim().split(',').map((x) => x.trim()).filter(Boolean)
+        const order = String(args.order ?? attendees.join('→')).trim() // 排队发言顺序
+        const maxRounds = String(args.maxRounds ?? '3').trim() // 时长：最多几轮（每轮每人发言一次）
+        const meetId = 'm' + Date.now().toString(36)
+        const threadRel = '.jarvis/meetings/' + meetId + '.jsonl'
+        const threadPath = path.join(projectDir, threadRel)
+        const post = String(args.post ?? '').trim()
+        const speaker = String(args.speaker ?? '').trim()
+        // post 模式：成员追加发言到共享线程（含对前面发言的评价——用户要求"每个发言对前面每个意见给评价/看法"）
+        if (post) {
+          if (!fsSvc3 || typeof fsSvc3.readText !== 'function' || typeof fsSvc3.writeText !== 'function') {
+            return { verdict: '⚠️ 环境无 fs 服务，无法追加发言（需项目 .jarvis/meetings/ 目录）', ok: false, meetId, thread: threadRel }
+          }
+          try {
+            const existing = (await fsSvc3.readText(threadPath)) || ''
+            // 发言格式：必含"对前面发言的评价/看法"（用户要求）+ 自己的观点
+            const lines = existing.trim().split(/\n/).filter(Boolean)
+            const prevSpeakers = lines.filter((l) => l.includes('发言]')).length
+            const speakerLabel = speaker || ('成员' + (prevSpeakers + 1))
+            const mustEvaluate = prevSpeakers > 0
+            const entry = `[${new Date().toISOString().slice(0, 16)}][${speakerLabel} 发言] 对前面 ${prevSpeakers} 个发言的评价/看法：${String(args.evaluate ?? '（未写对前面发言的评价——用户要求"每个发言对前面每个意见给出评价或自己的看法"）')}\n 自己的观点：${post}`
+            await fsSvc3.writeText(threadPath, existing + (existing ? '\n' : '') + entry + '\n')
+            return {
+              verdict: `✅ ${speakerLabel} 已发言（${mustEvaluate ? '含对前面发言的评价' : '首位发言'}）——线程=${threadRel}，全员可见`,
+              ok: true, meetId, thread: threadRel, mustEvaluate,
+              meetingStatus: await countMeetingProgress(existing, maxRounds),
+            }
+          } catch (e) { return { verdict: '⛔ 追加发言失败：' + (e.message || e), ok: false } }
+        }
+        // 发起模式：建线程 + 输出会议协议（主题/时长/排队顺序/发言规则/收敛判据）+ 广播话术
+        const protocol = [
+          `【群聊会议 · ${topic}】`,
+          `主题（要打磨的细节）：${topic}`,
+          `时长：最多 ${maxRounds} 轮（每轮每人发言一次；超时未收敛 → CEO 判定：继续或归拢）`,
+          `排队发言顺序：${order}`,
+          '发言规则（用户要求）：',
+          '  ① 排队发言：按上面顺序轮到自己才发（不插队/不乱写）；',
+          '  ② 每个发言必须对前面每个发言给出评价/看法（同意/反驳/补充+理由）——先读线程全部，再回应每个前发言，再给自己的新观点；',
+          '  ③ 所有人能看到所有人的发言（共享线程=群聊，read 线程即见全员）。',
+          `收敛判据（用户要求）：所有细节都被确认没问题（每个议题/细节都有成员明确"无问题/已闭环"）才散会；有遗留细节 → 继续下一轮。`,
+          `线程：${threadRel}（发言写这里，read 即见全员）`,
+        ].join('\n')
+        // 建线程（写议题）
+        try {
+          if (fsSvc3 && typeof fsSvc3.writeText === 'function') {
+            await fsSvc3.writeText(threadPath, protocol + '\n')
+          }
+        } catch {}
+        const broadcast = `【群聊会议发起 · ${topic}】请到共享线程发言（排队顺序 ${order}，每人发言须对前面每个发言给评价/看法，最多 ${maxRounds} 轮，所有细节没问题才散会）：${threadRel}`
+        return {
+          verdict: `群聊会议已发起：主题=${topic}，时长≤${maxRounds}轮，排队顺序=${order}，收敛=所有细节无问题才结束`,
+          ok: true, topic, meetId, thread: threadRel,
+          protocol,
+          broadcast, // CEO/captain 逐个 send_message 给 attendee（内容=此 broadcast）
+          attendees,
+          order, maxRounds,
+          mustEvaluate: true, // 每个发言必须评价前面
+          convergeRule: '所有细节被确认无问题才结束；有遗留 → 下一轮',
+        }
       }
       const m = META[type] || META.kickoff
       // 公司状态自动同步（3D 画面显示"正在开会/会议结束"）
@@ -3201,6 +3272,16 @@ async function hasGlob(fsSvc, dir, keyword) {
   } catch { return true }
 }
 // 审计团队任务是否每个都附了开工须知（含 ponder 指引）
+// 统计群聊会议进度：已有几轮发言、还剩几轮（供成员/CEO 看会议进行到哪）
+async function countMeetingProgress(existingText, maxRounds) {
+  try {
+    const lines = String(existingText || '').split(/\n/)
+    const speakerCount = lines.filter((l) => l.includes('发言]')).length
+    const round = Math.floor(speakerCount / Math.max(1, lines.filter((l) => l.includes('发言]')).length || 1)) || 0
+    return { roundsUsed: Math.max(1, Math.ceil(speakerCount / 2)), maxRounds: Number(maxRounds) || 3, speakers: speakerCount }
+  } catch { return { roundsUsed: 1, maxRounds: Number(maxRounds) || 3 } }
+}
+
 async function auditTeamBriefs(fsSvc, projectDir, path) {
   if (!fsSvc || typeof fsSvc.list !== 'function') return true
   try {

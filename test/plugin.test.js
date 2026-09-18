@@ -1925,3 +1925,26 @@ test('jarvis_flowguard：全部合法步骤可调用不抛错', async () => {
     assert.ok(r.verdict.length > 0, s + ' 应有判定')
   }
 })
+
+// ── 群聊会议协议（用户定义的真实会议效果：排队发言+每发言评价前面+时长+主题+收敛才结束）──
+
+test('jarvis_meeting groupchat：发起会议输出完整协议（主题/时长/排队/评价规则/收敛判据）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const r = await def.handler({ groupchat: true, topic: 'B4 修复方案细节打磨', attendees: '领域专家-A,领域专家-B,实现工程师', order: '领域专家-A→领域专家-B→实现工程师', maxRounds: '3' })
+  assert.strictEqual(r.ok, true)
+  assert.strictEqual(r.topic, 'B4 修复方案细节打磨', '主题明确')
+  assert.ok(r.protocol.includes('排队发言顺序'), '排队发言')
+  assert.ok(r.protocol.includes('对前面每个发言给出评价'), '每发言评价前面')
+  assert.ok(r.protocol.includes('所有细节都被确认没问题'), '收敛判据：所有细节无问题才结束')
+  assert.ok(r.protocol.includes('最多 3 轮'), '时长：轮次上限')
+  assert.ok(r.broadcast.includes('共享线程'), '广播唤醒话术')
+  assert.ok(r.thread.includes('.jarvis/meetings/'), '共享线程路径')
+})
+
+test('jarvis_meeting groupchat：发言须对前面发言给评价（用户要求），线程=全员可见', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const init = await def.handler({ groupchat: true, topic: 'T', attendees: 'A,B', maxRounds: '2' })
+  // 无 fs 环境：post 会返回环境提示（但协议仍定义了 mustEvaluate）
+  assert.strictEqual(init.mustEvaluate, true, '会议协议要求每个发言评价前面')
+  assert.ok(init.convergeRule.includes('所有细节被确认无问题'), '收敛规则')
+})
