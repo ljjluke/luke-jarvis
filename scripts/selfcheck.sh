@@ -36,6 +36,9 @@ node test/e2e-flow.test.mjs >/dev/null 2>&1 && echo "   E2E-OK" || { echo "   E2
 echo "== 9) 新铁律落位（需求本质/问题上行/能力补足/项目记忆库/深度闸/蒸馏引导/版本交付/绩效换人） =="
 grep -q "jarvis_essence" src/host/plugin.js && grep -q "jarvis_escalate" src/host/plugin.js && grep -q "jarvis_capability" src/host/plugin.js && grep -q "jarvis_store" src/host/plugin.js && grep -q "assessCardDepth" src/host/plugin.js && grep -q "jarvis_distill_guide" src/host/plugin.js && grep -q "jarvis_release" src/host/plugin.js && grep -q "jarvis_perf" src/host/plugin.js && echo "   IRON-RULES-OK (essence/escalate/capability/store/deep/guide/release/perf 八闸在位)" || { echo "   IRON-RULES-MISSING"; exit 1; }
 
+echo "== 9.5) 安装配置正确性（persona prefix——dsh-persona schema 要求 prefix 必填，用户安装后不该手动修） =="
+grep -q "    prefix: >-" preset/agent.cordis.yml && echo "   PRESET-PREFIX-OK（preset/agent.cordis.yml persona 用 prefix 字段）" || { echo "   PRESET-PREFIX-FAIL（persona 须用 prefix 不是 text——dsh-persona schema: prefix required）"; exit 1; }
+
 echo "== 10) 蒸馏深度硬闸行为实测（浅层卡须被拦） =="
 node -e "
 import('./src/host/plugin.js').then(async (m) => {
