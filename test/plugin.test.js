@@ -1951,3 +1951,24 @@ test('jarvis_meeting groupchat：发言须对前面发言给评价（用户要�
   assert.strictEqual(init.mustEvaluate, true, '会议协议要求每个发言评价前面')
   assert.ok(init.convergeRule.includes('所有细节被确认无问题'), '收敛规则')
 })
+
+// ── 思考必 ponder（用户：不限于第一次分析需求——会议讨论/方案决策/分歧/收口等所有"需要思考"的动作都要 ponder）──
+
+test('jarvis_member_brief：须知含"思考必 ponder"场景清单（不限于第一次）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '开发A', task: '实现登录页' })
+  assert.ok(r.brief.includes('思考必 ponder'), '须知应含思考必ponder')
+  assert.ok(r.brief.includes('会议发言/给观点前'), '会议发言也要ponder')
+  assert.ok(r.brief.includes('方案选择/决策'), '方案决策也要ponder')
+  assert.ok(r.brief.includes('难点定位/返工根因'), '返工根因也要ponder')
+  assert.ok(r.brief.includes('分歧判断'), '分歧判断也要ponder')
+  assert.ok(r.brief.includes('回应/质疑别人的观点'), '回应质疑也要ponder')
+  assert.ok(r.brief.includes('要产生判断'), '判据：要产生判断→先ponder')
+})
+
+test('jarvis_member_brief：执行场景不强制 ponder（按任务做/汇报/查资料）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '开发A', task: '实现' })
+  assert.ok(r.brief.includes('执行场景可不 ponder'), '执行场景不强制')
+  assert.ok(r.brief.includes('执行已定方案'), '按任务描述做不重新决策')
+})
