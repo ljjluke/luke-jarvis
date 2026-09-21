@@ -1349,7 +1349,7 @@ export const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        mode: { type: 'string', description: 'generate=生成须知（默认）/ audit=审计团队任务是否每个都附了开工须知（含ponder）' },
+        mode: { type: 'string', description: 'generate=生成须知（默认）/ audit=审计团队任务是否每个都附了开工须知（含ponder）/ broadcast=生成协议刷新消息（升级新jarvis后推送给已有成员——老成员spawn时persona冻结不自动带新协议，需广播刷新）' },
         teamDir: { type: 'string', description: 'audit 用：团队目录（如 <项目>/.agent-teams/<team>，自动读 team.json 扫描任务）' },
         tasksJson: { type: 'string', description: 'audit 用：直接传任务清单 JSON（[{id,assignee,description,subject}]），不传 teamDir 时用' },
         roleName: { type: 'string', description: '成员在团队里的职位名（如 猎头/合规与信创涉密专家/开发-前端A）' },
@@ -1378,6 +1378,30 @@ export const TOOLS = [
       const os = _require('node:os')
       const path = _require('node:path')
       const mode = String(args.mode ?? 'generate').trim()
+      // 🔄 broadcast 模式：生成"协议刷新消息"（升级新 jarvis 后推送给已有成员——老成员 spawn 时 persona 冻结不自动带新协议，需广播刷新让成员下回合读到并遵守）
+      if (mode === 'broadcast') {
+        const protocolRefresh = [
+          '【协议刷新 · 贾维斯】你所在工作区已升级到新版 jarvis——以下是升级后的成员协议（与你的角色卡不冲突，是新增的团队级约束），请立即纳入你的工作方式：',
+          '① **思考必 ponder**：任何"需要产生判断"的动作必须先跑 ponder 十阶段（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，固定顺序一个不能少）——包括：第一次分析需求/会议发言给观点前/方案决策/难点定位/返工根因/分歧判断/变更影响评估/收口判定/回应质疑别人观点；执行已定方案/汇报/查资料可不跑。',
+          '② ponder 执行：export PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ → node <ponder技能>/scripts/step-guard.cjs init "<问题>" → 逐阶段 before/after → verify 自检 → 回报 run_id+dataDir+evidenceDir（派活方用 jarvis_ponder_check 核验：顺序/完整性/子agent数/产出文件）。',
+          '③ 黑板即真相：问题/发现/决策/风险/阻塞/接口变更/资源需求 → jarvis_board 写公屏；资源需求（尤其只有客户能给的）必须上公屏闭环。',
+          '④ 问题上行三件套：绕不开/无法抉择 → jarvis_escalate（问题+已尝试+风险细节+需决策什么），缺项打回。',
+          '⑤ 卡住限时上报：同一问题约20-30分钟无进展必须上报；生产操作卡住立即上报。',
+          '⑥ 上下文准入：先读 .jarvis/（project.md 续接五件套+需求规格+方案+黑板决策），复述理解给CEO确认后再接任务。',
+          '⑦ 真实优先：不迎合不编造；查不到如实标注，绝不脑补补齐。',
+          '请确认收到（回一句即可），并从此遵守上述协议。',
+        ].join('\n')
+        const teamDir = String(args.teamDir ?? '').trim()
+        const members = String(args.members ?? '').trim()
+        const target = members ? members.split(',').map((x) => x.trim()).filter(Boolean) : []
+        return {
+          verdict: `协议刷新消息已生成（${target.length ? '成员：' + target.join('、') : '发给所有成员'}）——用 agent_teams_send_message 逐个发给每个已有成员（落 mailbox，成员下回合读到并遵守）；升级后不刷新 = 老成员继续用旧 persona = 约束不生效`,
+          protocolRefresh,
+          members: target,
+          broadcast: `【协议刷新 · 贾维斯】${protocolRefresh}`,
+          hint: teamDir ? `发送：对 ${teamDir} 团队每个成员 agent_teams_send_message(to=<成员>, content=本消息)` : '发送：agent_teams_send_message(to=<成员>, content=本消息)',
+        }
+      }
       // ⚠️ audit 模式：机械校验"团队每个任务是否都附了开工须知（含 ponder 指引）"——ssa 教训：
       //   captain 只对"验证 ponder 的方法测试任务"附了须知，真实任务(实现/修复/验收)没附 → 成员没跑 ponder
       if (mode === 'audit') {

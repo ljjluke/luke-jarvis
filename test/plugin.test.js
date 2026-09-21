@@ -1988,3 +1988,20 @@ test('jarvis_member_brief：输出 executionPrompt 版（add_member 注入成员
   assert.ok(r.executionPrompt.includes('上下文准入'), '含上下文准入')
   assert.ok(r.verdict.includes('executionPrompt'), 'verdict 提示注入')
 })
+
+// ── 升级后协议刷新（老工作区升级新jarvis，已有成员spawn时persona冻结不自动带新协议→broadcast推送）──
+
+test('jarvis_member_brief broadcast：生成协议刷新消息（含思考必ponder等新协议，供推送给已有成员）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ mode: 'broadcast', members: '领域专家-A,领域专家-B' })
+  assert.ok(r.protocolRefresh, '应生成协议刷新消息')
+  assert.ok(r.protocolRefresh.includes('思考必 ponder'), '含思考必ponder')
+  assert.ok(r.protocolRefresh.includes('固定顺序一个不能少'), '含十阶段')
+  assert.ok(r.protocolRefresh.includes('黑板即真相'), '含黑板')
+  assert.ok(r.protocolRefresh.includes('问题上行'), '含问题上行')
+  assert.ok(r.protocolRefresh.includes('卡住限时上报'), '含卡住上报')
+  assert.ok(r.protocolRefresh.includes('上下文准入'), '含上下文准入')
+  assert.deepStrictEqual(r.members, ['领域专家-A', '领域专家-B'], '目标成员')
+  assert.ok(r.hint.includes('send_message'), '发送提示')
+  assert.ok(r.verdict.includes('升级后不刷新'), '提示升级后需刷新')
+})
