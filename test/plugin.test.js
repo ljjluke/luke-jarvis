@@ -1972,3 +1972,19 @@ test('jarvis_member_brief：执行场景不强制 ponder（按任务做/汇报/�
   assert.ok(r.brief.includes('执行场景可不 ponder'), '执行场景不强制')
   assert.ok(r.brief.includes('执行已定方案'), '按任务描述做不重新决策')
 })
+
+// ── 子代理只有角色卡不跑 ponder 的根治：member_brief 输出 executionPrompt（注入成员系统 prompt）──
+
+test('jarvis_member_brief：输出 executionPrompt 版（add_member 注入成员系统 prompt，出生即带协议）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '开发A', task: '实现' })
+  assert.ok(r.executionPrompt, '应输出 executionPrompt（供 add_member 注入）')
+  assert.ok(r.executionPrompt.includes('思考必 ponder'), 'executionPrompt 含思考必ponder')
+  assert.ok(r.executionPrompt.includes('固定顺序一个不能少'), '含十阶段固定顺序')
+  assert.ok(r.executionPrompt.includes('run_id'), '含 run_id 回报')
+  assert.ok(r.executionPrompt.includes('黑板即真相'), '含黑板协议')
+  assert.ok(r.executionPrompt.includes('问题上行'), '含问题上行')
+  assert.ok(r.executionPrompt.includes('卡住限时上报'), '含卡住上报')
+  assert.ok(r.executionPrompt.includes('上下文准入'), '含上下文准入')
+  assert.ok(r.verdict.includes('executionPrompt'), 'verdict 提示注入')
+})

@@ -1484,11 +1484,24 @@ export const TOOLS = [
         '> 派活方提示：本须知由 jarvis_member_brief 生成，**每次派活都应附带**（成员看不到 jarvis 协议，不附 = 成员只能当执行手）。',
       ].join('\n')
 
+      // executionPrompt 版：注入 add_member 的 executionPrompt（成员系统 prompt 自带协议——根治"子代理只有角色卡不跑ponder"）
+      const executionPrompt = [
+        `你是「${role}」，本项目团队正式成员（不是执行手）。以下是你作为成员必须遵守的协议（写入你的系统 prompt，不是可选项）：`,
+        '① **思考必 ponder**：任何"需要产生判断"的动作必须先跑 ponder 十阶段（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis，固定顺序一个不能少）——包括：第一次分析需求/会议发言给观点前/方案决策/难点定位/返工根因/分歧判断/变更影响评估/收口判定/回应质疑别人观点；执行已定方案/汇报/查资料可不跑。',
+        `② ponder 执行（无 skill 工具用 bash 等价）：export PONDER_DATA_DIR="${dataDirHint}" → node ${sg} init "<问题>" → 逐阶段 before/after → verify 自检 → 回报 run_id+dataDir+evidenceDir（派活方用 jarvis_ponder_check 核验：顺序/完整性/子agent数/产出文件）。`,
+        '③ 黑板即真相：问题/发现/决策/风险/阻塞/接口变更/资源需求 → jarvis_board 写公屏；资源需求（尤其只有客户能给的）必须上公屏闭环，不许假装有。',
+        '④ 问题上行三件套：绕不开/无法抉择 → jarvis_escalate（问题+已尝试+风险细节+需决策什么），缺项打回；不许沉默/假装解决。',
+        '⑤ 卡住限时上报：同一问题排查约20-30分钟无进展必须上报；生产操作卡住立即上报；执行CEO当前最高优先级指令，不被低优先级细节带走。',
+        '⑥ 上下文准入：进场先读 .jarvis/（project.md 续接五件套+需求规格+方案+黑板决策），复述理解给CEO确认后才接任务。',
+        '⑦ 回应/质疑别人观点：会议中接话碰撞前先 ponder；回应须对前面发言给评价（同意/反驳/补充+理由），不许现编。',
+        '⑧ 真实优先：不迎合不编造；编造 source/数据/成果=一票否决；查证通道矩阵：查不到如实标注，绝不脑补补齐。',
+      ].join('\n')
       return {
         brief,
+        executionPrompt,
         mustRunPonder: true,
         sendsBack: ['runId', 'dataDir(PONDER_DATA_DIR)', 'evidenceDir(阶段产出目录)', '交付物路径', '阻塞/风险'],
-        verdict: `已生成「${role}」成员开工须知：含 ponder 十阶段执行路径（skill-free bash 版）、协议要点、回报格式${task ? '、本次任务' : ''}——派活时原文附上（create_task 描述 或 send_message）。`,
+        verdict: `已生成「${role}」成员开工须知：含 ponder 十阶段执行路径（skill-free bash 版）、协议要点、回报格式${task ? '、本次任务' : ''}——派活时原文附上（create_task 描述 或 send_message）；**executionPrompt 版同步给出（add_member 时注入成员系统 prompt，成员出生即带协议）**。`,
       }
     },
   },
