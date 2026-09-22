@@ -2133,3 +2133,33 @@ test('jarvis_coverage：无优先级条目不触发核心门禁（领域无关�
   assert.strictEqual(r.ok, true, '无优先级应不影响')
   assert.strictEqual(r.r_contract, undefined, '无核心条目不返回 r_contract')
 })
+
+// ── ws8634 借鉴：产物结构指纹（判断"产物是否真的变了"，防"我改完了"但没变——lyj 教训）──
+
+test('jarvis_fingerprint：只改内容没改结构 → 判未变（打回：改错地方/没真改）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_fingerprint')
+  const r = await def.handler({ mode: 'compare', before: '功能A：做A事情\n功能B：做B事情', after: '功能A：做A事情改了点内容\n功能B：做B事情' })
+  assert.strictEqual(r.changed, false, '只改内容不改结构=未真变')
+  assert.strictEqual(r.ok, false, '未变=打回')
+  assert.ok(r.verdict.includes('没真改'), '提示没真改')
+})
+
+test('jarvis_fingerprint：新增功能/结构 → 判真变（改动生效）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_fingerprint')
+  const r = await def.handler({ mode: 'compare', before: '功能A：做A事情\n功能B：做B事情', after: '功能A：做A事情\n功能B：做B事情\n功能C：新增C功能' })
+  assert.strictEqual(r.changed, true, '新增结构=真变')
+  assert.strictEqual(r.ok, true)
+})
+
+test('jarvis_fingerprint：文档结构（章节级）指纹——加章节=真变', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_fingerprint')
+  const r = await def.handler({ mode: 'compare', kind: 'doc', before: '## 一、需求\n## 二、方案', after: '## 一、需求\n## 二、方案\n## 三、新增章节' })
+  assert.strictEqual(r.changed, true, '加章节=真变')
+})
+
+test('jarvis_fingerprint：compute 模式算稳定指纹', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_fingerprint')
+  const r = await def.handler({ mode: 'compute', content: '## 一、需求\n## 二、方案', kind: 'doc' })
+  assert.strictEqual(r.ok, true)
+  assert.ok(r.fingerprint && r.fingerprint.length >= 8, '有稳定指纹')
+})

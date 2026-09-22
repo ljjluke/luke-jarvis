@@ -3419,6 +3419,115 @@ export const TOOLS = [
       }
     },
   },
+
+  {
+    name: 'jarvis_fingerprint',
+    description:
+      '产物结构指纹核验（ws8634 page_truth_fingerprint 借鉴，领域无关——判断"产物是否真的变了"的算法，防"我改完了"但实际没变（lyj 教训：用户说"没变化啊"））。算产物的**结构指纹**（可辨识结构的多重集，过滤内容噪音），改前改后比对：指纹相同 = 没真改 = 打回；不同 = 真变了。领域无关：软件代码=函数/类/字段/路由结构；制造=工序/参数/质检点；文书=章节/条款/字段名；界面=控件/路由——具体取什么由 kind 或内容定，算法通用（多重集哈希+结构行提取）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'compute=算结构指纹（输入 content）/ compare=比对改前改后（输入 before/after，判"真变了没"）' },
+        content: { type: 'string', description: 'compute 用：产物内容（文档/代码/文本）' },
+        before: { type: 'string', description: 'compare 用：修改前的内容' },
+        after: { type: 'string', description: 'compare 用：修改后的内容' },
+        kind: { type: 'string', description: '结构提取方式（可选）：code=提取函数/类/字段定义；doc=提取章节/条款标题；text=按行结构；默认自动（有函数/类/def 特征→code，有#/##/章节/条款→doc，否则 text）' },
+        detail: { type: 'boolean', description: 'true=输出指纹明细（提取了哪些结构项）' },
+      },
+      required: ['mode'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          verdict: { type: 'string' },
+          ok: { type: 'boolean' },
+          fingerprint: { type: 'string', description: '结构指纹（稳定哈希）' },
+          changed: { type: 'boolean', description: 'compare 用：是否真变了' },
+          structuralItems: { type: 'array', items: { type: 'string' }, description: '提取的结构项（detail=true 时）' },
+          detail: { type: 'string' },
+        },
+        required: ['verdict', 'ok'],
+      },
+      render: (r) => `【产物结构指纹】${r.verdict}`,
+    },
+    handler: async (args) => {
+      const crypto = _require('node:crypto')
+      const mode = String(args.mode ?? 'compute').trim()
+      // 结构提取：按 kind 或内容特征取"可辨识结构"（多重集），过滤内容噪音（值/文案/空白）
+      const extractStructural = (text, kind) => {
+        const t = String(text ?? '')
+        const lines = t.split(/\r?\n/)
+        const items = []
+        let k = kind || 'auto'
+        if (k === 'auto') {
+          if (/(^|\n)\s*(function|def|class|const\s+\w+\s*=\s*(async\s*)?\(|interface|struct|func\s)/.test(t)) k = 'code'
+          else if (/(^|\n)\s*(#|##|###|第[一二三四五六七八九十]+[章节条]|\d+\.\d*\s+[\u4e00-\u9fa5])/.test(t)) k = 'doc'
+          else k = 'text'
+        }
+        if (k === 'code') {
+          // 提取函数/类/字段定义行（结构，不含实现体）
+          for (const ln of lines) {
+            const m = ln.match(/^\s*(export\s+)?(async\s+)?(function|def|class|interface|struct|type|const|let|var|func)\s+([\w$]+)/)
+            if (m) items.push('DEF:' + m[4])
+            const f = ln.match(/^\s*([\u4e00-\u9fa5\w]+)\s*[:：]\s*(.+)$/)
+            if (f && !/^\s*[#\/\/]/.test(ln)) items.push('FIELD:' + f[1].trim())
+          }
+        } else if (k === 'doc') {
+          // 提取章节/条款标题（结构）
+          for (const ln of lines) {
+            const m = ln.match(/^\s*(#{1,6}\s+|第[一二三四五六七八九十]+[章节条]\s+|\d+\.\d*\s+)([\u4e00-\u9fa5\w]+)/)
+            if (m) items.push('SEC:' + m[2].slice(0, 30))
+          }
+        } else {
+          // text：提取"结构键"（行首的键名/标题，不含值）——防"只改内容没改结构"误判真变
+          for (const ln of lines) {
+            const s = ln.trim()
+            if (!s || s.length <= 1 || /^[\s\-—=*#]+$/.test(s)) continue
+            // 键：冒号/等号/括号前的部分（功能A：xxx → 功能A）；无分隔符则取行首 12 字符
+            const keyM = s.match(/^([\u4e00-\u9fa5A-Za-z0-9_\-]+)\s*[:：=]\s*/)
+            const key = keyM ? keyM[1] : s.slice(0, 12)
+            items.push('KEY:' + key)
+          }
+        }
+        return items
+      }
+      const computeFp = (text, kind) => {
+        const items = extractStructural(text, kind)
+        // 多重集指纹：排序后哈希（结构相同顺序不同也算同）
+        const sorted = [...items].sort()
+        const h = crypto.createHash('sha256').update(sorted.join('\n')).digest('hex').slice(0, 16)
+        return { fp: h, items }
+      }
+      if (mode === 'compute') {
+        const { fp, items } = computeFp(String(args.content ?? ''), String(args.kind ?? '').trim())
+        return {
+          verdict: `结构指纹已计算（${items.length} 个结构项）：${fp}`,
+          ok: true,
+          fingerprint: fp,
+          ...(args.detail ? { structuralItems: items.slice(0, 60), detail: `共 ${items.length} 项结构` } : {}),
+        }
+      }
+      if (mode === 'compare') {
+        const before = String(args.before ?? '')
+        const after = String(args.after ?? '')
+        if (!before && !after) return { verdict: '⛔ compare 需要 before（改前）和 after（改后）', ok: false, changed: false }
+        const { fp: fpB, items: itemsB } = computeFp(before, String(args.kind ?? '').trim())
+        const { fp: fpA, items: itemsA } = computeFp(after, String(args.kind ?? '').trim())
+        const changed = fpB !== fpA
+        return {
+          verdict: changed
+            ? `✅ 产物结构真变了（指纹 ${fpB} → ${fpA}，${itemsB.length}→${itemsA.length} 项结构）——改动生效`
+            : `⛔ 产物结构未变（指纹 ${fpB} 相同）——"改完了"但结构没变 = 没真改/改错地方 = 打回（核对是否改错文件/改在副本/只改内容没改结构）`,
+          ok: changed,
+          changed,
+          fingerprint: fpA,
+          ...(args.detail ? { structuralItems: itemsA.slice(0, 60), detail: `改前 ${itemsB.length} 项 → 改后 ${itemsA.length} 项` } : {}),
+        }
+      }
+      return { verdict: '⚠️ 未知 mode（应为 compute/compare）', ok: false }
+    },
+  },
 ]
 // ── jarvis_flowguard 辅助函数（模块级，TOOLS 数组外）──
 // 在目录里找含关键字的文件（fs 支持时；不支持则返回 true=放行，防环境缺 fs 误拦）
