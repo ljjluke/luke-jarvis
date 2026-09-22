@@ -34,9 +34,10 @@ const EVIDENCE_SECTIONS = [
  */
 const COLLAB_FOUR = ['位置', '依赖', '介入时机', '协同方式']
 
-/** 公屏（统一黑板）持久化路径：<cwd>/.jarvis/board.json（项目级，与 RPC/HTTP 读取同一约定） */
+/** 公屏（统一黑板）持久化路径：<workspace>/.jarvis/board.json（项目级，与 RPC/HTTP 读取同一约定）
+ * 工作区优先取当前会话 header.cwd（用户工作区），process.cwd 仅兜底——修复"写到服务目录非项目目录" */
 function boardFilePath() {
-  const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : ''
+  const cwd = resolveWorkspace(moduleCtx, latestExec) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
   return (cwd ? cwd + '/' : '') + '.jarvis/board.json'
 }
 
@@ -92,7 +93,7 @@ export function nextBoardId(items) {
 
 /** 公司状态文件路径（与 jarvis_company 同一文件，3D UI 数据源） */
 function companyStateFile() {
-  const cwd = typeof process !== 'undefined' && process.cwd ? process.cwd() : ''
+  const cwd = resolveWorkspace(moduleCtx, latestExec) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
   return (cwd ? cwd + '/' : '') + '.jarvis/company-state.json'
 }
 
@@ -1406,7 +1407,7 @@ export const TOOLS = [
       //   captain 只对"验证 ponder 的方法测试任务"附了须知，真实任务(实现/修复/验收)没附 → 成员没跑 ponder
       if (mode === 'audit') {
         const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
-        const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+        const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
         const teamDir = String(args.teamDir ?? '').trim()
         const tasksJson = String(args.tasksJson ?? '').trim()
         let tasks = []
@@ -1443,7 +1444,7 @@ export const TOOLS = [
       const task = String(args.task ?? '').trim()
       const stakes = String(args.stakes ?? 'medium').trim()
       const home = os.homedir ? os.homedir() : '/root'
-      const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+      const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
       const ponderDir = String(args.ponderDir ?? '').trim() || path.join(home, '.dsh/skills/ponder')
       const dataDirHint = projectDir + '/.jarvis/ponder-runs/<你的 run_id>/'
       const sg = ponderDir + '/scripts/step-guard.cjs'
@@ -2162,7 +2163,7 @@ export const TOOLS = [
       if (args.groupchat === true) {
         const path = _require('node:path')
         const fsSvc3 = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
-        const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+        const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
         const topic = String(args.topic ?? args.agenda ?? '未命名议题').trim()
         const attendees = String(args.attendees ?? '全员').trim().split(',').map((x) => x.trim()).filter(Boolean)
         const order = String(args.order ?? attendees.join('→')).trim() // 排队发言顺序
@@ -2428,7 +2429,7 @@ export const TOOLS = [
         })()
         if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
           try {
-            const cwd = process.cwd && process.cwd()
+            const cwd = resolveWorkspace(moduleCtx)
             const pPath = (cwd ? cwd + '/' : '') + '.jarvis/project.md'
             const target = await fsSvc.resolve(pPath)
             if (target) {
@@ -3193,7 +3194,7 @@ export const TOOLS = [
     handler: async (args) => {
       const path = _require('node:path')
       const step = String(args.step ?? '').trim()
-      const projectDir = String(args.projectDir ?? '').trim() || (process.cwd ? process.cwd() : '.')
+      const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
       const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
       const exists = async (rel) => {
         if (!fsSvc || typeof fsSvc.readText !== 'function') return false
@@ -3427,11 +3428,43 @@ export function jarvisCommand(requirement) {
 }
 
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
-export const inject = ['tools', 'webServer']
+export const inject = ['tools', 'webServer', 'agents']
+
+// ── 用户工作区解析（修复：插件原用 process.cwd()=服务进程目录，不是用户工作区
+//    ——导致 jarvis_board/company-state/记忆写到 /root/.dsh/profiles/web/.jarvis/
+//    而非项目 <workspace>/.jarvis/（用户实测"交付了但文件不存在"=路径漂移）；
+//    正确方式=从当前会话 header.cwd 拿用户工作区（agent-teams 同款），process.cwd 仅兜底）──
+let _resolvedWorkspace = null
+let moduleCtx = null
+let latestExec = null // 最近一次工具调用的 exec（供全局路径函数取会话 cwd）
+export function resolveWorkspace(ctx, exec) {
+  if (exec) {
+    try {
+      // 工具调用标准：exec.agent = 调用工具的会话 agent（agent-teams 同款：
+      //   agent.session.header.cwd = 用户工作区，process.cwd 仅兜底）
+      const agent = exec.agent || (exec.session && { session: exec.session })
+      const w = agent && agent.session && agent.session.header && agent.session.header.cwd
+      if (w && typeof w === 'string' && w.length > 0) return w
+    } catch { /* 拿不到则继续 */ }
+  }
+  if (_resolvedWorkspace) return _resolvedWorkspace
+  try {
+    const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
+    const me = agents && typeof agents.get === 'function'
+      ? (agents.get(ctx.scope?.sessionId) || agents.get(ctx.sessionId) || (agents.list && agents.list()?.[0]))
+      : undefined
+    const w = me && me.session && me.session.header && me.session.header.cwd
+    if (w && typeof w === 'string' && w.length > 0) { _resolvedWorkspace = w; return w }
+  } catch { /* 拿不到会话则用兜底 */ }
+  _resolvedWorkspace = (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
+  return _resolvedWorkspace
+}
 
 export default {
   inject,
   apply(ctx) {
+    moduleCtx = ctx
+    resolveWorkspace(ctx) // 预热：apply 时即解析用户工作区（首个工具调用即用对路径）
 
     // ── webServer route：client 静态 bundle 读取黑板（host.call 仅 dynamic 沙箱可用，静态走 HTTP）──
     try {
@@ -3447,7 +3480,7 @@ export default {
               }
               if (!req || req.method !== 'GET') return send(405, { items: [], error: 'method-not-allowed' })
               try {
-                const cwd = process.cwd && process.cwd()
+                const cwd = resolveWorkspace(moduleCtx)
                 const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
                 let fsSvc = null
                 try { fsSvc = ctx.get('fs') } catch { fsSvc = null }
@@ -3497,7 +3530,11 @@ export default {
                   return Array.isArray(text) ? text : [{ type: 'text', text: String(text) }]
                 },
               },
-              execute: handler,
+              execute: (args, exec) => {
+                // 把 exec（调用会话）传给 handler——修复工作区漂移（exec.agent.session.header.cwd=用户工作区）
+                try { moduleCtx = moduleCtx || (exec && exec.ctx); latestExec = latestExec || exec } catch {}
+                return handler(args, exec)
+              },
             }),
           ),
         )
@@ -3542,7 +3579,7 @@ export default {
             globalThis.harness.handle('jarvis/board', async (args) => {
               const sessionId = args && args.sessionId ? String(args.sessionId) : ''
               try {
-                const cwd = process.cwd && process.cwd()
+                const cwd = resolveWorkspace(moduleCtx)
                 const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
                 let fsSvc = null
                 try { fsSvc = ctx.get('fs') } catch { fsSvc = null }
