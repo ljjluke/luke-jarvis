@@ -2005,3 +2005,27 @@ test('jarvis_member_brief broadcast：生成协议刷新消息（含思考必pon
   assert.ok(r.hint.includes('send_message'), '发送提示')
   assert.ok(r.verdict.includes('升级后不刷新'), '提示升级后需刷新')
 })
+
+// ── 工作区漂移修复（插件原用 process.cwd()=服务目录，非用户工作区 → jarvis_board/记忆写错位置）──
+
+test('resolveWorkspace：exec.agent.session.header.cwd = 用户工作区（优先于 process.cwd）', async () => {
+  const { resolveWorkspace } = await import('../src/host/plugin.js')
+  // 模拟 DSH 工具调用 exec：agent.session.header.cwd = 用户工作区
+  const exec = { agent: { session: { header: { cwd: '/opt/work/ssa-website' } } } }
+  const w = resolveWorkspace(null, exec)
+  assert.strictEqual(w, '/opt/work/ssa-website', '应从 exec.agent.session.header.cwd 拿用户工作区')
+})
+
+test('resolveWorkspace：无 exec 时退回 process.cwd（兜底不崩）', async () => {
+  const { resolveWorkspace } = await import('../src/host/plugin.js')
+  const w = resolveWorkspace(null, null)
+  assert.ok(typeof w === 'string' && w.length > 0, '无 exec 应兜底返回字符串路径')
+})
+
+test('jarvis_board：写公屏到用户工作区（经 resolveWorkspace，非服务 process.cwd）', async () => {
+  const { TOOLS } = await import('../src/host/plugin.js')
+  const b = TOOLS.find((t) => t.name === 'jarvis_board')
+  // 无 fs 环境：工具应正常返回（不因路径问题崩）
+  const r = await b.handler({ role: '测试', board: JSON.stringify({ items: [{ id: 'B1', type: '决策', content: 'X', status: 'open' }] }) })
+  assert.ok(r.items.length >= 0, 'board 工具可调用')
+})

@@ -1262,8 +1262,12 @@ export const TOOLS = [
       const fs = _require('node:fs')
       const remoteUrl = String(args.remoteUrl ?? 'https://github.com/ljjluke/luke-jarvis.git')
       let localVersion = '0.2.0'
+      // 插件自身目录（import.meta.url 定位，不用 process.cwd()——服务进程 cwd 不是插件目录）
+      let pluginRoot = ''
+      try { pluginRoot = path.dirname(new URL(import.meta.url).pathname) } catch {}
+      if (!pluginRoot) { try { pluginRoot = process.cwd() } catch {} }
       try {
-        const pkgPath = path.join(process.cwd(), 'package.json')
+        const pkgPath = path.join(pluginRoot, 'package.json')
         if (fs.existsSync(pkgPath)) {
           const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
           if (pkg.version) localVersion = String(pkg.version)
@@ -1292,7 +1296,7 @@ export const TOOLS = [
       // 变更摘要：读 CHANGELOG 最新版本块
       const changelog = (() => {
         try {
-          const repo = path.join(process.cwd(), 'CHANGELOG.md')
+          const repo = path.join(pluginRoot, 'CHANGELOG.md')
           if (!fs.existsSync(repo)) return ''
           const s = fs.readFileSync(repo, 'utf8')
           const blocks = s.split(/^## /m)
