@@ -572,6 +572,34 @@ export function distillGuide(role, material, industry) {
 }
 
 /** 四个模型工具定义（ToolDefinition 形态，供 tools.register） */
+// 内容指纹核验（ws8634 借鉴 P0）：核验"声称结论 vs run 实际 synthesis/end-state 结论"一致性
+// 防空跑/结论脱节/编造结论——独立于 step-guard 记录（即使无 run 记录，有产出文件也能核验）
+function checkContentFingerprint(evidenceDir, claimedConcl) {
+  const _path = _require('node:path')
+  const _fs = _require('node:fs')
+  if (!claimedConcl) return null
+  const dir = String(evidenceDir ?? '').trim()
+  if (!dir) return '传了 claimedConclusion 但未传 evidenceDir——无法读 run 实际结论做一致性核验（防空跑）'
+  const synthCands = ['stage-synthesis.json', 'end-state.md', 'outcome.json']
+  let actualConcl = ''
+  for (const c of synthCands) {
+    try {
+      const p = _path.join(dir, c)
+      if (_fs.existsSync(p)) {
+        const txt = _fs.readFileSync(p, 'utf8')
+        const keys = ['recommendation', 'conclusion', '结论', '推荐']
+        if (keys.some((k) => txt.includes(k))) { actualConcl = txt.slice(0, 800); break }
+        if (c === 'end-state.md' || c === 'outcome.json') { actualConcl = txt.slice(0, 800); break }
+      }
+    } catch {}
+  }
+  if (!actualConcl) return '未找到 run 的 synthesis/end-state 产出——无法核验声称结论是否来自实际思考（防空跑）'
+  const claimKeys = String(claimedConcl).replace(/[，。；：、\s]/g, ' ').split(/\s+/).filter((x) => x.length >= 2).slice(0, 4)
+  const overlap = claimKeys.some((k) => actualConcl.includes(k))
+  if (!overlap) return '内容指纹不匹配：声称结论「' + String(claimedConcl).slice(0, 40) + '」在 run 实际 synthesis/end-state 产出中找不到对应——结论疑似脱节/编造（run 可能空跑或结论对不上）'
+  return null
+}
+
 export const TOOLS = [
   {
     name: 'jarvis_project',
@@ -1617,13 +1645,14 @@ export const TOOLS = [
   {
     name: 'jarvis_ponder_check',
     description:
-      'ponder 真实性核验器（防"声称跑完十阶段但实际乱序/缺阶段/无产出"——**成员汇报"ponder 已跑完"时必须用它校验，不许听自报**）：读取该 run 的 step-guard 状态 + 项目阶段产出，四查：①**完整性**（十阶段 interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis 是否全部记录，缺哪些）；②**顺序**（sequence 记录的先后是否符合固定顺序——completed 只是集合看不出顺序，无 sequence 记录=顺序无法核验）；③**子 agent 数**（各阶段是否达下限：bagua≥8/plans≥5/score≥3/simulate≥3/debate≥3）；④**产出证据**（给了 evidenceDir 就逐阶段查产出文件是否真落盘——记录完成却无产出=存疑）。另查 run_id 是否与声称一致（不一致=状态被别的 run 覆盖，本轮不可信）与 superseded_run（非空=init 覆盖过别人进度，多 agent 共用状态文件，须 per-run 隔离 PONDER_DATA_DIR）。verdict=PASS 才算真跑完；FAIL/无法核验 → 打回重跑，不许当"已深度思考"。',
+      'ponder 真实性核验器（防"声称跑完十阶段但实际乱序/缺阶段/无产出"——**成员汇报"ponder 已跑完"时必须用它校验，不许听自报**）：读取该 run 的 step-guard 状态 + 项目阶段产出，五查：①**完整性**（十阶段 interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis 是否全部记录，缺哪些）；②**顺序**（sequence 记录的先后是否符合固定顺序——completed 只是集合看不出顺序，无 sequence 记录=顺序无法核验）；③**子 agent 数**（各阶段是否达下限：bagua≥8/plans≥5/score≥3/simulate≥3/debate≥3）；④**产出证据**（给了 evidenceDir 就逐阶段查产出文件是否真落盘——记录完成却无产出=存疑）；⑤**内容指纹**（传了 claimedConclusion 就核验"声称结论 vs run 实际 synthesis/end-state 结论"一致性——防空跑/结论脱节/编造结论，ws8634 借鉴）。另查 run_id 是否与声称一致（不一致=状态被别的 run 覆盖，本轮不可信）与 superseded_run（非空=init 覆盖过别人进度，多 agent 共用状态文件，须 per-run 隔离 PONDER_DATA_DIR）。verdict=PASS 才算真跑完；FAIL/无法核验 → 打回重跑，不许当"已深度思考"。',
     parameters: {
       type: 'object',
       properties: {
         runId: { type: 'string', description: '成员声称的 ponder run_id（如 run_mtveu8l8_vdkc）——不传则只核验当前状态文件的完整性/顺序，无法比对声称' },
         dataDir: { type: 'string', description: '该 run 的 step-guard 数据目录（PONDER_DATA_DIR，默认 ~/.dsh/data/ponder）——多成员并发时每人应隔离到自己的目录，核验要指向本人目录' },
         evidenceDir: { type: 'string', description: '阶段产出目录（如 <项目>/.jarvis/ponder-runs/<run_id>/）——传了就核验每阶段产出文件是否真落盘' },
+        claimedConclusion: { type: 'string', description: '内容指纹核验（ws8634 借鉴 P0）：交付声称的结论/摘要——工具读 run 的 synthesis/end-state 产出，核验"声称结论 vs 实际结论"是否一致（防空跑/结论脱节/编造结论）' },
       },
     },
     output: {
@@ -1689,7 +1718,12 @@ export const TOOLS = [
         } catch { /* 试下一个 */ }
       }
 
+      // 内容指纹（即使无 run 记录也核验——有产出文件就能查声称结论是否来自实际思考；防空跑/结论脱节）
+      const fpIssueEarly = checkContentFingerprint(String(args.evidenceDir ?? args.dataDir ?? '').trim(), String(args.claimedConclusion ?? '').trim())
+
       if (!state) {
+        const earlyIssues = [`在 ${dataDir} 找不到有效 run 记录（step-guard.cjson/json 缺失或为空）——**声称跑过 ponder 但无任何记录 = 未跑**；若用了 per-run 隔离目录，先核对 dataDir 是否指对`]
+        if (fpIssueEarly) earlyIssues.push(fpIssueEarly)
         return {
           verdict: 'FAIL',
           runId: claimed ?? undefined,
@@ -1700,12 +1734,13 @@ export const TOOLS = [
           orderViolations: [],
           agentShortfalls: [],
           evidenceMissing: [],
-          issues: [`在 ${dataDir} 找不到有效 run 记录（step-guard.cjson/json 缺失或为空）——**声称跑过 ponder 但无任何记录 = 未跑**；若用了 per-run 隔离目录，先核对 dataDir 是否指对`],
+          issues: earlyIssues,
           action: '⛔ 打回重跑：要求该角色真实加载 ponder 跑完整十阶段（并在其隔离目录留下 step-guard 记录 + 阶段产出）',
         }
       }
 
       const issues = []
+      if (fpIssueEarly) issues.push(fpIssueEarly)
       const runIdMatch = claimed ? claimed === state.run_id : null
       if (claimed && !runIdMatch) issues.push(`run_id 不匹配：声称 ${claimed}，实际状态文件 ${state.run_id}（状态已被别的 run 覆盖，声称的 run 无法核验）`)
       if (state.superseded_run) issues.push(`本轮 init 覆盖过上一轮未完成的 ${state.superseded_run}（多 agent 共用同一状态文件——须 per-run 隔离 PONDER_DATA_DIR，否则顺序/完整性不可信）`)
@@ -1775,8 +1810,12 @@ export const TOOLS = [
         issues.push('未提供 evidenceDir——只核验了 step-guard 记录，**未核验阶段产出是否真落盘**（应收该角色项目 .jarvis/ponder-runs/<run_id>/）')
       }
 
+      // ⑤ 内容指纹核验（调用独立函数，防空跑/结论脱节）
+      const fpIssue = checkContentFingerprint(String(args.evidenceDir ?? args.dataDir ?? '').trim(), String(args.claimedConclusion ?? '').trim())
+      if (fpIssue) issues.push(fpIssue)
+
       const ok = missing.length === 0 && orderViolations.length === 0 && agentShortfalls.length === 0
-        && (!claimed || runIdMatch) && (evidenceDir ? evidenceMissing.length === 0 : true)
+        && (!claimed || runIdMatch) && (evidenceDir ? evidenceMissing.length === 0 : true) && !fpIssue
 
       return {
         verdict: ok ? 'PASS' : 'FAIL',

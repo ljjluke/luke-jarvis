@@ -2078,3 +2078,28 @@ test('jarvis_board：已定案决策 resolve 后进 resolvedItems（历史）', 
   assert.ok(r.resolvedItems.some((i) => i.id === 'B1'), 'B1 resolve 后进历史')
   assert.ok(r.openItems.some((i) => i.id === 'B2'), '真未决保持 open')
 })
+
+// ── ws8634 借鉴 P0：内容指纹核验（声称结论 vs run 实际结论一致性，防空跑/结论脱节）──
+
+test('jarvis_ponder_check：声称结论与 run 实际结论脱节 → 检出内容指纹不匹配', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fp-'))
+  fs.writeFileSync(path.join(tmp, 'stage-synthesis.json'), JSON.stringify({ stage: 'synthesis', recommendation: '采用姿态2+方案：Cesium+ECharts 底座加自研数据接入' }))
+  const r = await def.handler({ runId: 'run_x', dataDir: tmp, evidenceDir: tmp, claimedConclusion: '采用完全不同的A方案' })
+  assert.ok(r.issues.some((i) => i.includes('内容指纹不匹配')), '应检出声称结论与 run 实际结论脱节: ' + r.issues.join('|'))
+})
+
+test('jarvis_ponder_check：声称结论与 run 一致 → 无内容指纹问题', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fp-'))
+  fs.writeFileSync(path.join(tmp, 'stage-synthesis.json'), JSON.stringify({ stage: 'synthesis', recommendation: '采用姿态2+方案：Cesium+ECharts 底座加自研数据接入' }))
+  const r = await def.handler({ runId: 'run_x', dataDir: tmp, evidenceDir: tmp, claimedConclusion: '采用姿态2+方案' })
+  assert.ok(!r.issues.some((i) => i.includes('内容指纹')), '一致场景不应有内容指纹问题')
+})
+
+test('jarvis_ponder_check：无 run 产出但声称结论 → 报无法核验（防空跑）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fp2-'))
+  const r = await def.handler({ runId: 'run_x', dataDir: tmp, evidenceDir: tmp, claimedConclusion: '任何结论' })
+  assert.ok(r.issues.some((i) => i.includes('未找到 run 的 synthesis')), '无产出应报无法核验: ' + r.issues.join('|'))
+})
