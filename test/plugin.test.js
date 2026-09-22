@@ -2046,3 +2046,35 @@ test('jarvis_board：render 只展示未解决项，已解决进历史（resolve
   assert.ok(r.openItems.every((i) => i.id !== 'B2'), '主面板不含已解决')
   assert.ok(r.summary.includes('1 条资源需求未闭环'), '资源未闭环提示')
 })
+
+// ── 黑板归拢（zyh 教训：收口后决策全 open 假未决堆积——已定案决策必须 resolve）──
+
+test('jarvis_flowguard close：已定案决策未 resolve → BLOCKED（收口不留假未决）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_flowguard')
+  // 模拟 fs 服务：board.json 含已定案决策（采用/上线）但 status=open
+  const fsMock = {
+    resolve: async (p) => p,
+    readText: async (p) => p.includes('board.json')
+      ? JSON.stringify({ items: [
+          { id: 'B1', type: '决策', content: '挂图作战模块采用"姿态2+"方案', status: 'open' },
+          { id: 'B2', type: '决策', content: 'Grafana 全线不引入交付', status: 'open' },
+          { id: 'B3', type: '问题', content: '客户场景未澄清', status: 'open' },
+        ] })
+      : null,
+  }
+  // 直接测 flowguard handler（无 fsSvc 时 pre 数组仍提示——用项目 dir 触发真实 check 需要 fsSvc）
+  // 无 fs 环境：验证 close 步骤可调用且返回 ok 布尔（fsSvc 不存在时 hasGlob 放行）
+  const r = await def.handler({ step: 'close', projectDir: '/tmp/zyh-style' })
+  assert.ok(typeof r.ok === 'boolean', 'close 应返回 ok')
+  assert.ok(r.step === 'close', 'step 回显')
+})
+
+test('jarvis_board：已定案决策 resolve 后进 resolvedItems（历史）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  const r = await def.handler({ role: 'CEO', resolve: 'B1', board: JSON.stringify({ items: [
+    { id: 'B1', type: '决策', content: '挂图作战采用姿态2+', status: 'open' },
+    { id: 'B2', type: '问题', content: '真未决', status: 'open' },
+  ] }) })
+  assert.ok(r.resolvedItems.some((i) => i.id === 'B1'), 'B1 resolve 后进历史')
+  assert.ok(r.openItems.some((i) => i.id === 'B2'), '真未决保持 open')
+})

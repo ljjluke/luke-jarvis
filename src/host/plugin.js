@@ -3274,8 +3274,27 @@ export const TOOLS = [
           pre: ['黑板（.jarvis/board.json 无阻塞/未决项收敛）', '差异清单已销项（替代类 coverage）'],
           check: async (missing) => {
             const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis'), 'board.json')
-            if (!found) missing.push('黑板（.jarvis/board.json 不存在——没有决策/阻塞记录不许收口）')
-            else missing = missing.filter((m) => !m.startsWith('黑板'))
+            if (!found) { missing.push('黑板（.jarvis/board.json 不存在——没有决策/阻塞记录不许收口）'); return }
+            missing = missing.filter((m) => !m.startsWith('黑板'))
+            // 黑板归拢检查（zyh 教训：收口后 18 项决策/风险全 open 假未决堆积）：
+            // 已定案决策（含 采用/上线/不引入/轮不配/已交付/定稿/确认 等定案词）必须标 resolved；
+            // 已处理风险/问题（含 已/修复/闭环/解决 等）必须 resolve；否则=未归拢=不许收口
+            try {
+              if (fsSvc && typeof fsSvc.readText === 'function') {
+                const target = await fsSvc.resolve(path.join(projectDir, '.jarvis/board.json'))
+                const txt = await fsSvc.readText(target)
+                if (txt) {
+                  const data = JSON.parse(txt)
+                  const items = Array.isArray(data.items) ? data.items : []
+                  const DECIDED = /采用|上线|不引入|不交付|轮不配|已交付|已上线|定稿|已确认|确认.*方案|决定/
+                  const RESOLVED_WORD = /已修复|已闭环|已解决|已处理|已关闭|closed|resolved|已标/
+                  const openDecided = items.filter((i) => i.status === 'open' && DECIDED.test(String(i.content || '')) && !RESOLVED_WORD.test(String(i.content || '')))
+                  if (openDecided.length > 0) {
+                    missing.push('黑板有 ' + openDecided.length + ' 项已定案但未 resolve（如 ' + openDecided.slice(0, 3).map((i) => i.id).join('、') + '——采用/上线/定稿的决策必须标 resolved=已归拢，收口不留假未决；历史信息在 resolvedItems）')
+                  }
+                }
+              }
+            } catch {}
           },
           next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',
         },
