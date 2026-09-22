@@ -2029,3 +2029,20 @@ test('jarvis_board：写公屏到用户工作区（经 resolveWorkspace，非服
   const r = await b.handler({ role: '测试', board: JSON.stringify({ items: [{ id: 'B1', type: '决策', content: 'X', status: 'open' }] }) })
   assert.ok(r.items.length >= 0, 'board 工具可调用')
 })
+
+// ── 公屏展示规则（用户：未解决的展示、已解决的不展示（历史信息里面））──
+
+test('jarvis_board：render 只展示未解决项，已解决进历史（resolvedItems）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  const r = await def.handler({ role: 'CEO', board: JSON.stringify({ items: [
+    { id: 'B1', type: '问题', content: '未解决A', status: 'open' },
+    { id: 'B2', type: '问题', content: '已解决B', status: 'resolved' },
+    { id: 'B3', type: '资源需求', content: '未闭环C', status: 'open' },
+  ] }) })
+  assert.strictEqual(r.openItems.length, 2, '未解决 2 项')
+  assert.strictEqual(r.resolvedItems.length, 1, '已解决 1 项进历史')
+  assert.ok(r.resolvedItems[0].id === 'B2', '历史含 B2')
+  // render 只展示 open（B2 不在主面板）
+  assert.ok(r.openItems.every((i) => i.id !== 'B2'), '主面板不含已解决')
+  assert.ok(r.summary.includes('1 条资源需求未闭环'), '资源未闭环提示')
+})

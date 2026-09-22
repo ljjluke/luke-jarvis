@@ -2510,13 +2510,15 @@ export const TOOLS = [
           summary: { type: 'string' },
           openResources: { type: 'array', description: '未闭环的资源需求条目（依赖它们的任务不得标记完成）' },
           resourceBlockNote: { type: 'string', description: '资源未闭环提示（有 open 资源需求时输出）' },
+          resolvedItems: { type: 'array', description: '已解决条目（历史——主展示不含，需要时查看）' },
         },
         required: ['items', 'needsMeeting'],
       },
       render: (r) =>
-        `黑板 ${r.items.length} 项（未决 ${r.openItems.length} 项${r.blockers.length ? '，阻塞 ' + r.blockers.length + ' 项' : ''}）\n${r.items
-          .map((i) => `  [${i.id}][${i.status}](${i.type}) ${i.role}: ${i.content}`)
-          .join('\n')}\n二次会判定：${r.needsMeeting ? '⚠️ ' + r.reason : '✅ ' + r.reason}`,
+        // 只展示未解决（open）条目；已解决(resolved)进历史不占主面板——用户要求"未解决的展示、已解决的不展示(历史里)"
+        `黑板：${r.openItems.length} 项未解决（${r.blockers.length ? '含阻塞 ' + r.blockers.length + ' 项，' : ''}历史已解决 ${(r.items?.length || 0) - (r.openItems?.length || 0)} 项）\n${(r.openItems || [])
+          .map((i) => `  [${i.id}][${i.type}] ${i.role}: ${i.content}`)
+          .join('\n') || '  （无未解决项——黑板收敛）'}\n二次会判定：${r.needsMeeting ? '⚠️ ' + r.reason : '✅ ' + r.reason}`,
     },
     handler: async (args) => {
       const role = String(args.role ?? '?').trim() || '?'
@@ -2595,6 +2597,8 @@ export const TOOLS = [
         ? ('；⚠️ ' + openResources.length + ' 条资源需求未闭环（' + openResources.map((r) => r.id + '[' + r.content.slice(0, 24) + ']').join(', ') + '）——依赖这些资源的任务不得标记完成：CEO 分配/上报用户（只有客户能给的→问客户要）→ 提供后 resolve 闭环；资源未到前做不依赖它的任务，不许幻觉跳过/假装有')
         : ''
       const out = { items, openItems, blockers, needsMeeting, reason, summary: summary + resourceBlockNote, openResources, resourceBlockNote: resourceBlockNote.trim() || undefined }
+      // 用户要求"未解决的展示、已解决的不展示(历史信息里面)"——resolved 条目归入历史
+      out.resolvedItems = items.filter((i) => i.status === 'resolved')
       if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
         out.persisted = persisted.ok
         out.storage = persisted.ok ? '.jarvis/board.json' : undefined
