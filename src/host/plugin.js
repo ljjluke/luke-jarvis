@@ -2937,6 +2937,10 @@ export const TOOLS = [
           openItems: { type: 'array', items: { type: 'string' }, description: '未收口条目（status 非终态）' },
           evidenceLess: { type: 'array', items: { type: 'string' }, description: '标终态但无证据的条目（防自报式通过）' },
           coverage: { type: 'number', description: '覆盖率 0-1（被覆盖源条数/源总数）' },
+          r_plan: { type: 'number', description: '规划覆盖率：有计划落点(refs非空)的源/源总数（ws8634 三率算法）' },
+          r_verify: { type: 'number', description: '验证覆盖率：落点已终态且带evidence的源/源总数（needs_human/failed不算）' },
+          r_contract: { type: 'number', description: '核心契约率：P0/P1核心细节已验证/核心总数——防少列核心细节虚高；无核心条目时不返回该字段' },
+          coreGatePass: { type: 'boolean', description: '核心门禁是否通过（P0/P1 r_contract ≥ coreGate 阈值）' },
           ok: { type: 'boolean', description: '是否可过闸（全覆盖 + 无悬空 + 无未收口 + 终态有据）' },
           verdict: { type: 'string' },
         },
@@ -2991,13 +2995,49 @@ export const TOOLS = [
       for (const id of sourceIds) {
         if (!covered.has(id)) uncovered.push(`${id}${srcMeta[id]?.title ? '「' + srcMeta[id].title + '」' : ''}（无任何方案/测试/交付落点）`)
       }
+      // 三率算法（ws8634 capability_coverage 借鉴，领域无关）：
+      //   r_plan = 有计划落点(refs非空)的源 / 源总数
+      //   r_verify = 落点已终态且带 evidence 的 / 源总数（needs_human/failed 不算 verified）
+      //   r_contract = 核心细节(P0/P1)已验证 / 核心总数——防"少列核心细节虚高"
+      const FINAL_STRONG = /completed|通过|closed|done|confirmed|已确认|验收通过/
+      let planned = 0, verified = 0
+      const coreIds = []
+      for (const raw of source) {
+        const pri = String(raw?.priority ?? '').trim().toUpperCase()
+        if (pri === 'P0' || pri === 'P1') coreIds.push(String(raw?.id ?? ''))
+      }
+      let coreVerified = 0
+      for (const id of sourceIds) {
+        if (covered.has(id)) planned++
+        let idVerified = false
+        for (const tname of Object.keys(targets || {})) {
+          for (const t of (Array.isArray(targets[tname]) ? targets[tname] : [])) {
+            const refs2 = Array.isArray(t?.refs) ? t.refs : []
+            if (refs2.includes(id)) {
+              const ts = String(t?.status ?? '').trim()
+              const tev2 = String(t?.evidence ?? t?.result ?? '').trim()
+              if (FINAL_STRONG.test(ts) && tev2) idVerified = true
+            }
+          }
+        }
+        if (idVerified) verified++
+        if (coreIds.includes(id) && idVerified) coreVerified++
+      }
+      const n = sourceIds.size || 0
+      const r_plan = n ? Math.round((planned / n) * 1000) / 1000 : 0
+      const r_verify = n ? Math.round((verified / n) * 1000) / 1000 : 0
+      const coreN = coreIds.length || 0
+      const r_contract = coreN ? Math.round((coreVerified / coreN) * 1000) / 1000 : null // 无核心条目=不适用
+      const gateThreshold = Number(args.coreGate ?? 1.0)
+      const coreGatePass = coreN === 0 || r_contract >= gateThreshold
       const coverage = sourceIds.size ? covered.size / sourceIds.size : 0
-      const ok = issues.length === 0 && uncovered.length === 0 && dangling.length === 0 && openItems.length === 0 && evidenceLess.length === 0 && sourceIds.size > 0
+      const ok = issues.length === 0 && uncovered.length === 0 && dangling.length === 0 && openItems.length === 0 && evidenceLess.length === 0 && sourceIds.size > 0 && coreGatePass
       const parts = []
       if (uncovered.length) parts.push(`未覆盖 ${uncovered.length} 条`)
       if (dangling.length) parts.push(`悬空引用 ${dangling.length} 条`)
       if (openItems.length) parts.push(`未收口 ${openItems.length} 条`)
       if (evidenceLess.length) parts.push(`终态无证据 ${evidenceLess.length} 条`)
+      if (!coreGatePass) parts.push(`核心细节(P0/P1)未全验证：r_contract=${r_contract} < ${gateThreshold}（${coreVerified}/${coreN}）——防少列核心细节虚高`)
       return {
         sourceCount: sourceIds.size,
         uncovered: issues.length ? [] : uncovered,
@@ -3005,6 +3045,10 @@ export const TOOLS = [
         openItems,
         evidenceLess,
         coverage: Math.round(coverage * 100) / 100,
+        r_plan,
+        r_verify,
+        ...(r_contract === null ? {} : { r_contract }),
+        coreGatePass,
         ok,
         verdict: ok
           ? `✅ ${label}通过：${sourceIds.size} 条源全部被覆盖（覆盖率 ${Math.round(coverage * 100)}%），无悬空/未收口/无证据终态。可收口/过闸。`

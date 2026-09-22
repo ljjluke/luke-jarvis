@@ -2103,3 +2103,33 @@ test('jarvis_ponder_check：无 run 产出但声称结论 → 报无法核验（
   const r = await def.handler({ runId: 'run_x', dataDir: tmp, evidenceDir: tmp, claimedConclusion: '任何结论' })
   assert.ok(r.issues.some((i) => i.includes('未找到 run 的 synthesis')), '无产出应报无法核验: ' + r.issues.join('|'))
 })
+
+// ── ws8634 借鉴：覆盖率三率算法（r_plan/r_verify/r_contract + P0/P1 核心门禁，领域无关）──
+
+test('jarvis_coverage：P0 核心细节无落点 → r_contract=0 打回（防少列核心细节虚高）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_coverage')
+  const r = await def.handler({ label: '细节覆盖', source: JSON.stringify([
+    { id: 'R1', title: '认证页字段', priority: 'P0' },
+    { id: 'R2', title: '网站工具栏', priority: 'P2' },
+  ]), targets: JSON.stringify({ 实现: [{ id: 'D2', refs: ['R2'], status: 'completed', evidence: '核过' }] }) })
+  assert.strictEqual(r.ok, false, 'P0 无落点应打回')
+  assert.strictEqual(r.r_contract, 0, 'r_contract=0')
+  assert.ok(r.verdict.includes('核心细节'), '提示核心细节未全验证')
+})
+
+test('jarvis_coverage：P0 核心细节有落点+证据 → r_contract=1 通过', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_coverage')
+  const r = await def.handler({ label: '细节覆盖', source: JSON.stringify([
+    { id: 'R1', title: '认证页字段', priority: 'P0' },
+  ]), targets: JSON.stringify({ 实现: [{ id: 'D1', refs: ['R1'], status: 'completed', evidence: '对照旧版逐项核过' }] }) })
+  assert.strictEqual(r.ok, true, 'P0 全验应通过')
+  assert.strictEqual(r.r_contract, 1, 'r_contract=1')
+  assert.ok(r.r_plan === 1 && r.r_verify === 1, '三率齐全')
+})
+
+test('jarvis_coverage：无优先级条目不触发核心门禁（领域无关，普通清单不受影响）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_coverage')
+  const r = await def.handler({ label: '覆盖', source: JSON.stringify([{ id: 'R1', title: 'X' }]), targets: JSON.stringify({ T: [{ id: 'D1', refs: ['R1'], status: 'completed', evidence: 'e' }] }) })
+  assert.strictEqual(r.ok, true, '无优先级应不影响')
+  assert.strictEqual(r.r_contract, undefined, '无核心条目不返回 r_contract')
+})
