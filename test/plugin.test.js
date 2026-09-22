@@ -2163,3 +2163,30 @@ test('jarvis_fingerprint：compute 模式算稳定指纹', async () => {
   assert.strictEqual(r.ok, true)
   assert.ok(r.fingerprint && r.fingerprint.length >= 8, '有稳定指纹')
 })
+
+// ── ws8634 借鉴：多层通过判定（收口"算不算通过"按决策优先级——空产物BLOCK/削弱拒收/覆盖满ACCEPT）──
+
+test('jarvis_release checklist：覆盖满但成功标准被削弱 → 拒收（即使全链闭环）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const TC = { '需求规格': '✓', '方案设计': '✓', '测试验收单': '✓', '逐条闭环': '✓全链', '断链项': [] }
+  const r = await def.handler({ mode: 'checklist', version: 'v1', traceCheck: JSON.stringify(TC), successWeakened: '测试用 soft-if 绕过断言' })
+  assert.strictEqual(r.tracePassed, false, '削弱成功标准即使覆盖满也拒收')
+  assert.ok(r.traceCheckVerdict.includes('成功标准被削弱'), '提示削弱')
+})
+
+test('jarvis_release checklist：被测物空/占位 → BLOCK（先补真实产物）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const TC = { '需求规格': '✓', '方案设计': '✓', '测试验收单': '✓', '逐条闭环': '✓全链', '断链项': [] }
+  const r = await def.handler({ mode: 'checklist', version: 'v1', traceCheck: JSON.stringify(TC), sutEmpty: '交付物只有占位符 TODO' })
+  assert.strictEqual(r.tracePassed, false, '空产物应BLOCK')
+  assert.ok(r.traceCheckVerdict.includes('空/占位'), '提示空壳')
+})
+
+test('jarvis_release checklist：覆盖满+无削弱+非空 → ACCEPT；断链 → 补链', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_release')
+  const TC = { '需求规格': '✓', '方案设计': '✓', '测试验收单': '✓', '逐条闭环': '✓全链', '断链项': [] }
+  const ok = await def.handler({ mode: 'checklist', version: 'v1', traceCheck: JSON.stringify(TC) })
+  assert.strictEqual(ok.tracePassed, true, '覆盖满正常应ACCEPT')
+  const broken = await def.handler({ mode: 'checklist', version: 'v1', traceCheck: JSON.stringify({ '需求规格': '✓', '方案设计': '✗', '测试验收单': '✗', '逐条闭环': '✗', '断链项': ['R2无实现'] }) })
+  assert.strictEqual(broken.tracePassed, false, '断链应补链')
+})

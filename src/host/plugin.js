@@ -2355,6 +2355,8 @@ export const TOOLS = [
         selfTest: { type: 'string', description: '自测结果（checklist 用，每条交付物的验证证据）' },
         confirmDeadline: { type: 'string', description: '甲方确认时限（如 3 天 / 48小时；status 用，超时默认通过或挂起）' },
         traceCheck: { type: 'string', description: '三产物闭环核对（checklist/收口用）：传 JSON {"需求规格":"path或✓/✗","方案设计":"✓/✗","测试验收单":"✓/✗","逐条闭环":"每条需求→方案→测试→结果 全链 ✓/✗","断链项":["..."]}——防"需求→实现→验收"断链，断链不许收口' },
+        sutEmpty: { type: 'string', description: '多层通过判定①：被测物空/占位说明（交付物是空壳/未物化）——非空=BLOCK，先补真实产物' },
+        successWeakened: { type: 'string', description: '多层通过判定②：成功标准被削弱说明（soft-if/旁路/未物化主目标）——非空=CONTINUE拒收（即使覆盖满），先恢复真实成功标准' },
         submittedAt: { type: 'string', description: '交付给甲方确认的起始时间 ISO（status 用，启用真实超时判定：剩余时间/已超时）' },
         question: { type: 'string', description: '与甲方的沟通问题（communication 用）' },
         answer: { type: 'string', description: '甲方答复（communication 用）' },
@@ -2412,11 +2414,30 @@ export const TOOLS = [
             const hasTest = /✓|✅|true|存在|在/.test(String(tc['测试验收单'] ?? ''))
             const chainOk = /✓|✅|true|全链/.test(String(tc['逐条闭环'] ?? ''))
             const broken = Array.isArray(tc['断链项']) ? tc['断链项'] : []
-            const traceVerdict = hasSpec && hasDesign && hasTest && chainOk && broken.length === 0
-              ? `✅ 三产物闭环核对通过：需求规格→方案设计→测试验收单→逐条闭环 全链完整，可交付。`
-              : `⛔ 三产物闭环核对未过（断链不许收口）：${[!hasSpec ? '需求规格缺' : '', !hasDesign ? '方案设计缺' : '', !hasTest ? '测试验收单缺' : '', !chainOk ? '逐条闭环未全过' : ''].filter(Boolean).join('、')}${broken.length ? '；断链项：' + broken.join('、') : ''}——先补链再交付（每需求→方案→测试→结果）。`
+            const chainOkAll = hasSpec && hasDesign && hasTest && chainOk && broken.length === 0
+            // 多层通过判定（ws8634 heal_pass_acceptance 借鉴，领域无关——"算不算通过"按决策优先级，不只看覆盖）：
+            //   ① 被测物空/占位（sutEmpty）→ BLOCK（交付物是空的，先补产物）
+            //   ② 成功标准被削弱（successWeakened：soft-if/旁路/未物化主目标）→ CONTINUE（即使覆盖满也拒收）
+            //   ③ 全链闭环（chainOkAll）→ ACCEPT
+            //   ④ 否则 → 补链
+            const sutEmpty = String(args.sutEmpty ?? '').trim()
+            const successWeakened = String(args.successWeakened ?? '').trim()
+            let traceVerdict, tracePassed = false
+            if (sutEmpty) {
+              traceVerdict = `⛔ 被测物空/占位：${sutEmpty.slice(0, 80)}——交付物是空的/未物化，先补真实产物（防"空壳交付"）`
+              tracePassed = false
+            } else if (successWeakened) {
+              traceVerdict = `⛔ 成功标准被削弱：${successWeakened.slice(0, 80)}（soft-if/旁路/未物化主目标）——**即使覆盖满也拒收**，先恢复真实成功标准再交付（防"测试绿但业务没做"）`
+              tracePassed = false
+            } else if (chainOkAll) {
+              traceVerdict = `✅ 三产物闭环核对通过：需求规格→方案设计→测试验收单→逐条闭环 全链完整，可交付。`
+              tracePassed = true
+            } else {
+              traceVerdict = `⛔ 三产物闭环核对未过（断链不许收口）：${[!hasSpec ? '需求规格缺' : '', !hasDesign ? '方案设计缺' : '', !hasTest ? '测试验收单缺' : '', !chainOk ? '逐条闭环未全过' : ''].filter(Boolean).join('、')}${broken.length ? '；断链项：' + broken.join('、') : ''}——先补链再交付（每需求→方案→测试→结果）。`
+              tracePassed = false
+            }
             out.traceCheckVerdict = traceVerdict
-            out.tracePassed = hasSpec && hasDesign && hasTest && chainOk && broken.length === 0
+            out.tracePassed = tracePassed
             verdict = verdict + '\n' + traceVerdict
             out.verdict = verdict
           }
