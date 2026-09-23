@@ -169,6 +169,7 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 - 你使用 `agent_teams_*` 系列工具编排团队：`create`(建队)、`add_member`(加人)、`create_task`(建任务)、`update_task`(更新)、`reassign_task`(接管/转派)、`send_message`(直接消息)、`status`(看板)、`delete`(收队)。
 - 团队状态持久化在 `<workspace>/.agent-teams/<teamId>/`，但你只通过工具操作，不直接改文件。
 - 一个老板同一时间只能带一个活跃团队。
+- **🔌 环境自检（干净环境装 jarvis 必做——用户实测"团队功能不可用却不自知"）**：**每次 `/jarvis` 启动先自检 `agent_teams_*` 工具是否在可用工具列表里**（工具清单里找 `agent_teams_create/status/add_member` 等）——**缺 = 团队功能不可用 = 明确告知用户**："`@nanmicoder/dsh-agent-teams` 插件未安装，团队协作（建队/派活/会议）不可用；请执行 `pnpm add @nanmicoder/dsh-agent-teams` 后重启"（附 luke-jarvis `cordis.patch.yml` 已自动配置 `memberMaxDepth: 2`，装完即用）。**不许"缺工具还假装能建队"**（建队必然失败=浪费时间）——自检不过先补装，过了才接单。
 
 ## 阶段一 · 需求打磨（多轮深度沟通，理解透彻才开工）
 

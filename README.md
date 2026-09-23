@@ -132,6 +132,19 @@ cp -r skills/ponder/* ~/.dsh/skills/ponder/
 pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
 ```
 
+### ⚠️ 团队协作依赖（agent-teams）——干净环境安装必读
+
+jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmicoder/dsh-agent-teams` 插件提供的 `agent_teams_*` 工具：
+
+- **luke-jarvis 已声明依赖**（package.json `dependencies`），但**部分 pnpm 配置（`autoInstallPeers: false`）不会自动装传递依赖**；
+- **干净环境请手动确认**（缺了团队功能不可用）：
+  ```bash
+  pnpm add @nanmicoder/dsh-agent-teams
+  ```
+  或检查 `node_modules/@nanmicoder/dsh-agent-teams/` 是否存在；
+- **装完后**：luke-jarvis 的 `cordis.patch.yml` 会自动给 agent-teams 配置 `memberMaxDepth: 2`（成员跑 ponder 起子 agent 必需——默认 0 会报 `delegation limit (0) reached` 卡死八卦镜）。
+- **自检**：装完说 `/jarvis`，若提示 `agent_teams_*` 工具不可用 → 补装 agent-teams 后重启。
+
 ### 各组件装到哪（映射）
 
 | 组件 | 位置 | 安装到 |
