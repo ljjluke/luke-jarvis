@@ -39,6 +39,9 @@ grep -q "jarvis_essence" src/host/plugin.js && grep -q "jarvis_escalate" src/hos
 echo "== 9.5) 安装配置正确性（persona prefix——dsh-persona schema 要求 prefix 必填，用户安装后不该手动修） =="
 grep -q "    prefix: >-" preset/agent.cordis.yml && echo "   PRESET-PREFIX-OK（preset/agent.cordis.yml persona 用 prefix 字段）" || { echo "   PRESET-PREFIX-FAIL（persona 须用 prefix 不是 text——dsh-persona schema: prefix required）"; exit 1; }
 
+echo "== 9.6) agent-teams 成员委托深度（memberMaxDepth——ponder 在成员环境起子 agent 必需，默认0会拦） =="
+grep -q "memberMaxDepth: 2" cordis.patch.yml && echo "   MEMBER-DEPTH-OK（patch 含 memberMaxDepth: 2，用户安装自动带上）" || { echo "   MEMBER-DEPTH-FAIL（缺 memberMaxDepth——成员跑 ponder 八卦镜会 delegation limit 0 卡死）"; exit 1; }
+
 echo "== 10) 蒸馏深度硬闸行为实测（浅层卡须被拦） =="
 node -e "
 import('./src/host/plugin.js').then(async (m) => {

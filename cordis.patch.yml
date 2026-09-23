@@ -6,6 +6,15 @@
 #     由包根导出（package.json `main` → src/host/plugin.js）提供插件实现；
 #   - 该行把 Host 工具(jarvis_project/distill/review/think) 与 /jarvis 命令注册进
 #     当前作用域；铁律（现场蒸馏/source 必填/协同架构必含/真实优先/防冒名）全部内嵌插件源码。
+# ⚠️ agent-teams 成员委托深度（ponder 必需——成员跑 ponder 八卦镜/方案/评分/推演/辩论要起子 agent，
+#    平台默认 memberMaxDepth=0 会拦（Error: member delegation limit (0) reached），
+#    设为 2 允许成员起一层子 agent（八卦镜 8 维并行等），否则成员环境 ponder 卡死）。
+#    领域无关：这是 ponder 十阶段在成员环境运行的必要配置。
+- insert:
+    - id: agent-teams-patch
+      name: "@nanmicoder/dsh-agent-teams"
+      config:
+        memberMaxDepth: 2
 - insert:
     - id: jarvis-core
       name: luke-jarvis
