@@ -2553,7 +2553,10 @@ export const TOOLS = [
       type: 'object',
       properties: {
         board: { type: 'string', description: '当前黑板 JSON（items 数组），首次可为空' },
-        add: { type: 'string', description: '要登记的新条目；多条用换行分隔；可用"类型：内容"前缀' },
+        add: { type: 'string', description: '要登记的新条目；多条用换行分隔；可用"类型：内容"前缀；内容前加[需用户]标记"可能需要用户回答"（内部分析后再判定）' },
+        needUser: { type: 'string', description: '标记哪些新条目"可能需要用户回答"（内容关键词，可多行）——内部分析判定用' },
+        classify: { type: 'string', description: '内部分析判定 JSON {id或关键词:"internal:引用依据" | "needs_user[:原因]"}"——internal=内部能答(必须带引用依据,引用不出=信息缺口=须问用户)；needs_user=信息缺口须提升到最上层让用户解惑' },
+        userAnswer: { type: 'string', description: '用户回答 JSON {id或关键词:"用户答案"}——最上层沟通后写回，标 resolved(用户已解惑=闭环)' },
         resolve: { type: 'string', description: '要关闭的条目：id（如 B1）或内容关键词；多条用换行分隔' },
         audited: { type: 'string', description: '已过 jarvis_essence 需求本质审计的决策条目（id 或内容关键词）；多条用换行分隔' },
         role: { type: 'string', description: '登记人角色（默认 ?）' },
@@ -2573,6 +2576,7 @@ export const TOOLS = [
           openResources: { type: 'array', description: '未闭环的资源需求条目（依赖它们的任务不得标记完成）' },
           resourceBlockNote: { type: 'string', description: '资源未闭环提示（有 open 资源需求时输出）' },
           resolvedItems: { type: 'array', description: '已解决条目（历史——主展示不含，需要时查看）' },
+          needsUserItems: { type: 'array', description: '待用户回答条目（内部分析判定 needs_user 的信息缺口——最上层与用户沟通的候选，用户回答后 resolve）' },
         },
         required: ['items', 'needsMeeting'],
       },
@@ -2617,7 +2621,14 @@ export const TOOLS = [
           else if (/发现|实测|验证|复现/.test(content)) type = '发现'
           else type = '问题'
         }
-        items.push({ id: nextBoardId(items), role, type, content, status: 'open', essenceChecked: type === '决策' ? false : true, time: new Date().toISOString().slice(0, 16) })
+        // 是否需要用户回答（内部分析判定：needUser 参数标'需要用户'的条目，或内容带 [需用户] 前缀）
+        const needUserFlag = String(args.needUser ?? '')
+          .split(/\n/)
+          .map((x) => x.trim())
+          .filter(Boolean)
+        const isNeedUser = needUserFlag.some((x) => items.some((it) => it.content.includes(x))) || /^\[需用户\]/.test(content)
+        if (/^\[需用户\]/.test(content)) content = content.replace(/^\[需用户\]\s*/, '')
+        items.push({ id: nextBoardId(items), role, type, content, status: 'open', answerNeeded: isNeedUser ? 'needs_user' : 'unknown', essenceChecked: type === '决策' ? false : true, time: new Date().toISOString().slice(0, 16) })
       }
       // resolve：关闭条目（按 id 或内容关键词）
       const resolves = String(args.resolve ?? '')
@@ -2627,6 +2638,47 @@ export const TOOLS = [
       for (const rk of resolves) {
         const target = items.find((it) => it.status === 'open' && (it.id === rk || it.content.includes(rk)))
         if (target) target.status = 'resolved'
+      }
+      // classify：内部分析判定"是否需要用户回答"（B15 固化为 board 状态）——
+      //   internal_answer=内部能答（必须带引用依据，引用不出=信息缺口=须问用户）；
+      //   needs_user=信息缺口，须提升到最上层让用户解惑
+      const classify = String(args.classify ?? '').trim()
+      if (classify) {
+        let cj = null
+        try { cj = JSON.parse(classify) } catch { cj = null }
+        if (cj && typeof cj === 'object') {
+          for (const [idOrKey, verdict] of Object.entries(cj)) {
+            const target = items.find((it) => it.status === 'open' && (it.id === idOrKey || it.content.includes(idOrKey)))
+            if (!target) continue
+            const v = String(verdict ?? '').trim()
+            if (v.startsWith('internal:')) {
+              // 内部能答：必须带引用依据（哪份文档哪节/黑板哪条/哪次实测）
+              const ref = v.slice('internal:'.length).trim()
+              if (!ref || ref.length < 3) target.answerNeeded = 'needs_user' // 引用不出=信息缺口=须问用户
+              else { target.answerNeeded = 'internal_answer'; target.internalAnswer = ref }
+            } else if (v === 'needs_user' || v.startsWith('needs_user:')) {
+              target.answerNeeded = 'needs_user'
+              const why = v.slice('needs_user'.length).replace(/^:/, '').trim()
+              if (why) target.needUserReason = why
+            }
+          }
+        }
+      }
+      // userAnswer：用户回答写回（最上层沟通后）——标 resolved（用户已解惑）
+      const userAnswer = String(args.userAnswer ?? '').trim()
+      if (userAnswer) {
+        let ua = null
+        try { ua = JSON.parse(userAnswer) } catch { ua = null }
+        if (ua && typeof ua === 'object') {
+          for (const [idOrKey, answer] of Object.entries(ua)) {
+            const target = items.find((it) => it.id === idOrKey || it.content.includes(idOrKey))
+            if (!target) continue
+            target.userAnswer = String(answer ?? '')
+            target.answeredAt = new Date().toISOString().slice(0, 16)
+            target.status = 'resolved' // 用户已解惑=闭环
+            target.answerNeeded = 'user_answered'
+          }
+        }
       }
       // audited：标记已过 jarvis_essence 审计的决策条目
       const audited = String(args.audited ?? '')
@@ -2661,6 +2713,8 @@ export const TOOLS = [
       const out = { items, openItems, blockers, needsMeeting, reason, summary: summary + resourceBlockNote, openResources, resourceBlockNote: resourceBlockNote.trim() || undefined }
       // 用户要求"未解决的展示、已解决的不展示(历史信息里面)"——resolved 条目归入历史
       out.resolvedItems = items.filter((i) => i.status === 'resolved')
+      // 待用户回答清单（内部分析判定 needs_user 的条目——最上层与用户沟通的候选）
+      out.needsUserItems = items.filter((i) => i.answerNeeded === 'needs_user')
       if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
         out.persisted = persisted.ok
         out.storage = persisted.ok ? '.jarvis/board.json' : undefined

@@ -2190,3 +2190,38 @@ test('jarvis_release checklist：覆盖满+无削弱+非空 → ACCEPT；断链 
   const broken = await def.handler({ mode: 'checklist', version: 'v1', traceCheck: JSON.stringify({ '需求规格': '✓', '方案设计': '✗', '测试验收单': '✗', '逐条闭环': '✗', '断链项': ['R2无实现'] }) })
   assert.strictEqual(broken.tracePassed, false, '断链应补链')
 })
+
+// ── 公屏问题内部分析判定（用户：先内部分析清楚是否需要用户回答，需要才提升最上层让用户解惑）──
+
+test('jarvis_board classify：信息缺口(引用不出依据) → needs_user 进待用户回答清单', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  let r = await def.handler({ role: 'CEO', add: '问题：客户挂图作战具体场景未澄清' })
+  const bid = r.items.find((i) => i.content.includes('客户挂图作战')).id
+  r = await def.handler({ role: 'CEO', classify: JSON.stringify({ [bid]: 'needs_user:客户场景决定自研深度，内部无依据' }), board: JSON.stringify({ items: r.items }) })
+  const it = r.items.find((i) => i.id === bid)
+  assert.strictEqual(it.answerNeeded, 'needs_user', '信息缺口应标 needs_user')
+  assert.ok(r.needsUserItems.some((i) => i.id === bid), '进待用户回答清单')
+})
+
+test('jarvis_board classify：内部能答(带引用依据) → internal_answer 不进待用户清单', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  let r = await def.handler({ role: 'CEO', add: '问题：B5 修复方案选型' })
+  const bid = r.items.find((i) => i.content.includes('B5')).id
+  r = await def.handler({ role: 'CEO', classify: JSON.stringify({ [bid]: 'internal:参考验收判据定稿-r2-20260917.md B5节' }), board: JSON.stringify({ items: r.items }) })
+  const it = r.items.find((i) => i.id === bid)
+  assert.strictEqual(it.answerNeeded, 'internal_answer', '内部能答应标 internal_answer')
+  assert.ok(!r.needsUserItems.some((i) => i.id === bid), '不进待用户回答清单')
+})
+
+test('jarvis_board userAnswer：用户回答写回 → resolve 闭环（用户已解惑）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_board')
+  let r = await def.handler({ role: 'CEO', add: '问题：场景未澄清' })
+  const bid = r.items.find((i) => i.content.includes('场景未澄清')).id
+  r = await def.handler({ role: 'CEO', classify: JSON.stringify({ [bid]: 'needs_user' }), board: JSON.stringify({ items: r.items }) })
+  r = await def.handler({ role: '贾维斯', userAnswer: JSON.stringify({ [bid]: '场景是汇报展示为主' }), board: JSON.stringify({ items: r.items }) })
+  const it = r.items.find((i) => i.id === bid)
+  assert.strictEqual(it.status, 'resolved', '用户回答后 resolve')
+  assert.strictEqual(it.userAnswer, '场景是汇报展示为主', '答案写回')
+  assert.strictEqual(it.answerNeeded, 'user_answered', '标 user_answered')
+  assert.strictEqual(r.needsUserItems.length, 0, '待回答清零')
+})
