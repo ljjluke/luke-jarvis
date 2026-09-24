@@ -2225,3 +2225,16 @@ test('jarvis_board userAnswer：用户回答写回 → resolve 闭环（用户�
   assert.strictEqual(it.answerNeeded, 'user_answered', '标 user_answered')
   assert.strictEqual(r.needsUserItems.length, 0, '待回答清零')
 })
+
+// ── 会议纪要（用户：.jarvis 希望有每次内部开会的会议纪要——沟通主题/时间/人员/内容/结论）──
+
+test('jarvis_meeting minutes：产出结构化纪要（主题/时间/人员/内容/结论要素齐全）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const r = await def.handler({ groupchat: true, topic: 'B4 细节打磨', attendees: '专家A,专家B',
+    minutes: JSON.stringify({ topic: 'B4 细节打磨', date: '2026-09-23', startTime: '14:00', endTime: '14:30', type: 'cycle', attendees: ['专家A', '专家B'], agenda: ['B4 细节'], content: [{ who: '专家A', what: '提出细节问题' }], disputes: [{ issue: '阈值', resolvedBy: '0.80' }], conclusion: '细节清单定稿', resolutions: ['R1'], boardUpdates: ['B4 更新'], actions: [{ who: '专家A', what: '补清单' }] }) })
+  assert.strictEqual(r.ok, true, '纪要应可落盘')
+  assert.ok(r.minutesPath?.includes('-minutes.json'), '纪要路径含 -minutes.json')
+  assert.ok(r.verdict.includes('会议纪要已落盘'), '提示已落盘')
+  assert.strictEqual(r.minutes.conclusion, '细节清单定稿', '结论写入')
+  assert.ok(r.verdict.includes('6 项要素'), '要素完整（主题/时间/人员/内容/结论）')
+})

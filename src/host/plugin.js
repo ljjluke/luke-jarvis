@@ -2146,6 +2146,7 @@ export const TOOLS = [
         groupchat: { type: 'boolean', description: 'true=群聊会议模式：建共享发言线程（全员可见，每个人能发言、所有人能看到——真会议不是单对单）；输出广播话术+线程路径' },
         post: { type: 'string', description: '群聊模式：某个成员的发言（追加到共享线程，全员可见）；配合 groupchat=true' },
         speaker: { type: 'string', description: '群聊模式：发言者角色名（post 用）' },
+        minutes: { type: 'string', description: '会议纪要（落盘 .jarvis/meetings/<id>-minutes.json）：JSON {topic:沟通主题,date,startTime,endTime,type,attendees[],agenda[],content[{who,what}],disputes[],conclusion:结论,resolutions[],boardUpdates[],actions[{who,what}]}——每次内部开会都要有纪要（主题/时间/人员/内容/结论）' },
       },
     },
     output: {
@@ -2263,6 +2264,27 @@ export const TOOLS = [
             await fsSvc3.writeText(threadPath, protocol + '\n')
           }
         } catch {}
+        // 会议纪要（minutes 参数：产出/更新结构化纪要，落盘 .jarvis/meetings/<id>-minutes.json）
+        //   要素：沟通主题/时间/人员/内容/结论（用户要求每次内部开会都有纪要）
+        const minutesRaw = String(args.minutes ?? '').trim()
+        if (minutesRaw) {
+          try {
+            const minutesPath = path.join(projectDir, '.jarvis/meetings', meetId + '-minutes.json')
+            const existing = fsSvc3 && typeof fsSvc3.readText === 'function' ? await fsSvc3.readText(await fsSvc3.resolve(minutesPath)).catch(() => null) : null
+            let minutes = existing ? JSON.parse(existing) : {}
+            try { minutes = { ...minutes, ...JSON.parse(minutesRaw) } } catch { minutes = { ...minutes, minutes: minutesRaw } }
+            minutes.meetId = meetId; minutes.topic = minutes.topic || topic; minutes.attendees = minutes.attendees || attendees
+            if (fsSvc3 && typeof fsSvc3.writeText === 'function') {
+              await fsSvc3.writeText(minutesPath, JSON.stringify(minutes, null, 2))
+            }
+            return {
+              verdict: `会议纪要已落盘：主题=${minutes.topic || topic}，${Object.keys(minutes).filter((k) => ['date', 'startTime', 'endTime', 'conclusion', 'resolutions', 'actions'].includes(k)).length} 项要素（主题/时间/人员/内容/结论），路径=${'.jarvis/meetings/' + meetId + '-minutes.json'}`,
+              ok: true, meetId, thread: threadRel, minutesPath: '.jarvis/meetings/' + meetId + '-minutes.json', minutes,
+            }
+          } catch (e) {
+            return { verdict: '⚠️ 纪要落盘失败：' + (e.message || e), ok: false, meetId, thread: threadRel }
+          }
+        }
         const broadcast = `【群聊会议发起 · ${topic}】请到共享线程发言（真实会议形态：自由发言、可沉默、接话碰撞，CEO 主持人盯控该发声的没发声会点名；最多 ${maxRounds} 轮，所有细节没问题才散会）：${threadRel}`
         return {
           verdict: `群聊会议已发起：主题=${topic}，时长≤${maxRounds}轮，自由发言（可沉默）+主持人(CEO)盯控点名，收敛=所有细节无问题才结束`,
@@ -2326,7 +2348,7 @@ export const TOOLS = [
           '  ④ 分歧项 jarvis_review 裁决（吃双方观点+requirement）；\n' +
           '  ⑤ 决议落黑板 + 会后任务（谁负责什么）。\n' +
           '  自检：本次会有没有至少一个成员提出过质疑/不同观点？没有 = 全员附和 = 不算评审，重开。',
-        respondAs: `完成本次「${type}」会后，以 JSON 输出纪要：{"date":"","type":"${type}","attendees":["${attendees}"],"agenda":["…"],"memberViews":[{"role":"角色","view":"他用自己的卡+ponder 对议题的独立观点/质疑"}],"disputes":[{"issue":"分歧","resolvedBy":"jarvis_review 裁决结果"}],"resolutions":["按模板逐条"],"boardUpdates":["写回黑板的条目"],"actions":[{"who":"角色","what":"会后负责什么"}]}——纪要必须含每个成员的观点/质疑（没有=假开会）`,
+        respondAs: `完成本次「${type}」会后，以 JSON 输出完整会议纪要（含每个成员观点/质疑——没有=假开会）：{"topic":"沟通主题（一句话说清这次会解决什么）","date":"日期","startTime":"开始时间","endTime":"结束时间","type":"${type}","attendees":["${attendees}"],"agenda":["议题清单"],"content":[{"who":"发言者","what":"发言/观点/质疑内容"}],"disputes":[{"issue":"分歧","resolvedBy":"jarvis_review 裁决结果"}],"conclusion":"本次结论（最终定论：达成了什么/定了什么）","resolutions":["决议逐条"],"boardUpdates":["写回黑板的条目"],"actions":[{"who":"角色","what":"会后负责什么+截止"}]}——纪要要素完整：沟通主题/时间/人员/内容/结论，缺任一=不完整`,
         brainstormCheck: `🧠 头脑风暴三轮强制清单（代码级——每个提议必须走完三轮，缺任一=未充分碰撞=不能进归拢；过程留痕到会议纪要）：
   ① 提议：某角色抛出疑问/方案/想法（记录：谁提的 + 提了什么）；
   ② 开放回应：任何人可解答/补充/同意/反驳（记录：谁回应 + 同意/反驳 + 理由）；
