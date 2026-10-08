@@ -2,6 +2,19 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.4] - 2026-10-08
+
+### 新增
+
+- **jarvis_lesson（第 23 个工具）**：进度经验结构化器（ws8634 八类问题归档借鉴——防"自由文本教训不可检索/不可归因/不可复用"）：每条教训统一为 分类/主责/现场标记/修向/状态/复现脚本 六字段，机械校验缺项并输出可直接写入 .jarvis/lessons.md 的规范条目。模式：schema=字段规范 / validate=校验教训文本是否结构化（状态必须 open/fixed/verified，禁模糊状态）/ entry=从字段渲染规范条目。任何教训沉淀前先过本工具，防止"记了就以为解决了/同类问题反复踩"。
+
+### 变更
+
+- **jarvis_review 加可证伪预期门禁（ws8634 Evolution adopt 借鉴）**：裁决若构成"采纳方案/对外承诺/宣称改进"，必须带 expected_effect（如果有效应观察到什么：指标/场景+阈值+时限）；缺预期或预期空泛 → falsifiableGate=false 打回补预期，防"采纳了但没用/宣称改进实则没变"。
+- **jarvis_store save lesson 提示须过 jarvis_lesson 结构化**：写入 lessons.md 前强制走结构化工具。
+- `package.json`：version 0.2.3 → **0.2.4**。
+- `README.md`：版本徽标 v0.2.4、单测 116→189。
+
 ## [0.2.3] - 2026-09-03
 
 ### 新增

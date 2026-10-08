@@ -781,6 +781,9 @@ export const TOOLS = [
         reuseRule =
           '写入后即成为本项目记忆库：后续本项目需求直接读取复用（卡须过 jarvis_distill 校验+按新需求修订）；跨项目不共享。'
         verdict = `写入 ${savePath}（项目记忆库，非插件资产；按类型归档到对应子目录，不散在 .jarvis/ 根）——AI 识别到本项目直接读它继续，不用重分析源码。`
+        if (itemType === 'lesson') {
+          verdict += ' ⚠️ 教训必须过 jarvis_lesson 结构化（分类/主责/现场/修向/状态）再写入，防止自由文本不可检索/不可归因/不可复用。'
+        }
       } else {
         reuseRule =
           '插件无静态卡/无领域模板（领域无关）。角色卡与流程只能来自：① 本项目 .jarvis/ 沉淀（可复用起点）；② 现场 web 蒸馏（新需求/跨项目必走）。'
@@ -789,6 +792,87 @@ export const TOOLS = [
       const storeOut = { structure, reuseRule, verdict }
       if (savePath) storeOut.savePath = savePath
       return storeOut
+    },
+  },
+
+  {
+    name: 'jarvis_lesson',
+    description:
+      '进度经验结构化器（ws8634 八类问题归档借鉴——防"自由文本教训不可检索/不可归因/不可复用"）：把每条 lessons 教训写成统一结构化条目：分类(category)/主责(owner)/现场标记(scene)/修向(fix)/状态(status)/复现脚本(repro)。机械校验缺项，输出可直接写入 .jarvis/lessons.md 的规范条目。任何教训沉淀前先过本工具，防止"记了就以为解决了/同类问题反复踩"。',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', description: 'schema=输出结构化字段规范 / validate=校验一条教训文本是否结构化 / entry=从字段渲染规范条目（默认 schema）' },
+        lesson: { type: 'string', description: '教训全文（validate 用；应含 分类/主责/现场/修向/状态 标记）' },
+        category: { type: 'string', description: '问题分类（ws8634 八类参考：采证/并发/生成质量/假Pass/可达性/状态误标/语法门/其他——领域无关可自定义）' },
+        owner: { type: 'string', description: '主责（本仓/环境/用户/并行会话/其他）——防误诊' },
+        scene: { type: 'string', description: '现场标记（哪个单/哪个环节/触发场景）' },
+        problem: { type: 'string', description: '问题描述（一句话说清踩了什么坑）' },
+        fix: { type: 'string', description: '修向（怎么修/改哪里/防复发动作）' },
+        status: { type: 'string', description: '状态：open=刚发现/fixed=已修/verified=已验证（防"记了=解决了"）' },
+        repro: { type: 'string', description: '复现脚本路径或可重跑命令（可空但强烈建议，ws8634 scripts/ 290 个思路）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          mode: { type: 'string' },
+          schema: { type: 'string', description: '结构化字段规范' },
+          entry: { type: 'string', description: '可直接写入 lessons.md 的规范条目' },
+          missing: { type: 'array', items: { type: 'string' }, description: '缺失字段/标记' },
+          verdict: { type: 'string' },
+        },
+        required: ['mode', 'verdict'],
+      },
+      render: (r) =>
+        `【进度经验结构化 · ${r.mode}】\n${r.schema ? '规范：' + r.schema : ''}${r.entry ? '\n条目：\n' + r.entry : ''}${r.missing?.length ? '\n缺失：' + r.missing.join('、') : ''}\n判定：${r.verdict}`,
+    },
+    handler: async (args) => {
+      const mode = String(args.mode ?? 'schema').trim()
+      const schemaText =
+        '每条教训必须包含 6 个字段：分类(category)/主责(owner)/现场标记(scene)/修向(fix)/状态(status)/复现脚本(repro)。规范条目格式：\n' +
+        '`【教训 · 分类】主责=owner；现场=scene；状态=status；问题=problem；修向=fix；复现=repro`\n' +
+        '状态枚举：open / fixed / verified（verified=已验证防复发，否则不许标 closed/完成）。'
+      if (mode === 'schema') {
+        return { mode, schema: schemaText, verdict: '请按 6 字段结构化沉淀教训；任何教训写入 lessons.md 前先过本工具。' }
+      }
+      if (mode === 'validate') {
+        const lesson = String(args.lesson ?? '').trim()
+        if (!lesson) return { mode, missing: ['lesson'], verdict: '未提供教训文本——validate 需要传 lesson。' }
+        const required = [
+          ['分类', /分类[：:]|category[：:]/i],
+          ['主责', /主责[：:]|owner[：:]/i],
+          ['现场', /现场[：:]|scene[：:]/i],
+          ['修向', /修向[：:]|fix[：:]/i],
+          ['状态', /状态[：:]|status[：:]/i],
+        ]
+        const missing = required.filter(([label, re]) => !re.test(lesson)).map(([label]) => label)
+        if (missing.length) return { mode, missing, verdict: `教训未结构化（缺 ${missing.join('、')}）——补全后再沉淀，否则同类问题无法检索/归因/防复发。` }
+        const statusOk = /状态[：:]\s*(open|fixed|verified)/i.test(lesson)
+        if (!statusOk) return { mode, missing: ['状态枚举'], verdict: '状态必须为 open/fixed/verified（verified=已验证防复发）——不允许"已解决/完成"等模糊状态。' }
+        return { mode, missing: [], verdict: '✅ 教训已结构化（分类/主责/现场/修向/状态齐全，状态枚举合法）——可写入 lessons.md。' }
+      }
+      // mode=entry：从字段渲染规范条目
+      const category = String(args.category ?? '').trim()
+      const owner = String(args.owner ?? '').trim()
+      const scene = String(args.scene ?? '').trim()
+      const problem = String(args.problem ?? '').trim()
+      const fix = String(args.fix ?? '').trim()
+      const status = String(args.status ?? '').trim()
+      const repro = String(args.repro ?? '').trim()
+      const missing = []
+      if (!category) missing.push('category')
+      if (!owner) missing.push('owner')
+      if (!scene) missing.push('scene')
+      if (!problem) missing.push('problem')
+      if (!fix) missing.push('fix')
+      if (!status) missing.push('status')
+      if (!['open', 'fixed', 'verified'].includes(status)) missing.push('status枚举')
+      if (missing.length) return { mode, missing, verdict: '字段不全/状态非法——补全后再生成条目。' }
+      const entry = `【教训 · ${category}】主责=${owner}；现场=${scene}；状态=${status}；问题=${problem}；修向=${fix}${repro ? `；复现=${repro}` : ''}`
+      return { mode, entry, missing: [], verdict: '✅ 条目已生成，可直接追加到 .jarvis/lessons.md。' }
     },
   },
 
@@ -990,7 +1074,7 @@ export const TOOLS = [
   {
     name: 'jarvis_review',
     description:
-      '分歧升级裁决器：团队角色间对同一问题有冲突（如产品 vs 风控、测试 vs 研发）时，CEO 调用本工具采集双方观点并按裁判优先级裁决。裁判优先级(铁律)：需求本质 > 真实情况 > 用户需求 > 专业判断——LLM 不得迎合角色卡/主流方案/会议多数，裁决必须回归原始需求本质（为谁解决什么、怎样算成功）。可选传入双方 thinkA/thinkB（各角色先跑 jarvis_think_deep 的结构化思考 JSON），裁决时会引用双方的 反方攻击/真实核对/诚实边界 来防一面之词；必填 requirement（原始需求），输出 essenceCheck 强制核对裁决是否偏离需求本质。',
+      '分歧升级裁决器：团队角色间对同一问题有冲突（如产品 vs 风控、测试 vs 研发）时，CEO 调用本工具采集双方观点并按裁判优先级裁决。裁判优先级(铁律)：需求本质 > 真实情况 > 用户需求 > 专业判断——LLM 不得迎合角色卡/主流方案/会议多数，裁决必须回归原始需求本质（为谁解决什么、怎样算成功）。可选传入双方 thinkA/thinkB（各角色先跑 jarvis_think_deep 的结构化思考 JSON），裁决时会引用双方的 反方攻击/真实核对/诚实边界 来防一面之词；必填 requirement（原始需求），输出 essenceCheck 强制核对裁决是否偏离需求本质。**可证伪预期门禁（ws8634 Evolution adopt 借鉴）**：本裁决若构成"采纳方案/对外承诺/宣称改进"，必须带 expected_effect——写明"如果有效，应观察到什么（指标/场景 + 阈值 + 时限）"；没有可证伪预期 = 事后无法验证 = 打回补预期（防"采纳了但没用/宣称改进实则没变"）。',
     parameters: {
       type: 'object',
       properties: {
@@ -1000,6 +1084,7 @@ export const TOOLS = [
         requirement: { type: 'string', description: '原始需求（必填：裁决必须回归需求本质，不许脱离需求空谈）' },
         thinkA: { type: 'string', description: 'A 方 jarvis_think_deep 的结构化思考 JSON（可选）' },
         thinkB: { type: 'string', description: 'B 方 jarvis_think_deep 的结构化思考 JSON（可选）' },
+        expected_effect: { type: 'string', description: '可证伪预期（ws8634 借鉴）：如果采纳本裁决/采纳某方案/对外承诺，应观察到什么可验证结果？格式：指标/场景 + 阈值 + 时限，如"接入后接单路由准确率 ≥90%，跑 100 条历史单回放验证"。没有可证伪预期的采纳 = 事后无法验证 = 打回补预期。' },
       },
       required: ['issue'],
     },
@@ -1012,11 +1097,14 @@ export const TOOLS = [
           basis: { type: 'string', description: '裁决依据（需求本质/真实情况/用户需求/专业判断）' },
           analysis: { type: 'string', description: '基于双方深度思考帧的对抗分析（可选）' },
           essenceCheck: { type: 'string', description: '回归需求本质的强制核对指令' },
+          expectedEffect: { type: 'string', description: '可证伪预期（用户传入 expected_effect 的回显）' },
+          falsifiableGate: { type: 'boolean', description: '可证伪预期门禁是否通过（false=该裁决尚不可事后验证，须补预期才算定案）' },
+          falsifiableGateNote: { type: 'string', description: '门禁判定说明（缺失/不达标/通过）' },
         },
         required: ['ruling'],
       },
       render: (r) =>
-        `裁决：${r.ruling}\n依据：${r.basis ?? ''}${r.analysis ? '\n分析：' + r.analysis : ''}${r.essenceCheck ? '\n需求本质核对：' + r.essenceCheck : ''}`,
+        `裁决：${r.ruling}\n依据：${r.basis ?? ''}${r.analysis ? '\n分析：' + r.analysis : ''}${r.essenceCheck ? '\n需求本质核对：' + r.essenceCheck : ''}${r.falsifiableGateNote ? '\n可证伪预期门禁：' + r.falsifiableGateNote : ''}`,
     },
     handler: async (args) => {
       const issue = String(args.issue ?? '')
@@ -1059,6 +1147,23 @@ export const TOOLS = [
         reviewOut.oneSidedNote = '⛔ 防一面之词未满足：' + missingSide.join('、') + ' 未提供深度思考帧（jarvis_think_deep/ponder）——**该裁决建立在信息不全上，置信度降级**；除非该分歧低赌注/单方可确认，否则应先补另一方深度思考再裁决（否则=迎合一面之词风险）'
       }
       if (notes.length) reviewOut.analysis = notes.join('\n')
+      // ws8634 借鉴 P1：可证伪预期门禁——采纳方案/承诺/宣称改进必须带"如果有效会观察到什么"（无预测不采纳）
+      const expectedEffect = String(args.expected_effect ?? '').trim()
+      reviewOut.expectedEffect = expectedEffect
+      const FALSIFIABLE_RE = /观察|回放|复现|验证|指标|阈值|达到|达标|≥|>|=\s*[0-9]|率|条|天|周|月|上线|接入|跑\s*[0-9]/
+      if (!expectedEffect) {
+        reviewOut.falsifiableGate = false
+        reviewOut.falsifiableGateNote =
+          '⛔ 可证伪预期缺失（ws8634 Evolution adopt 门禁借鉴）：本裁决若构成"采纳方案/对外承诺/宣称改进"，必须补 expected_effect——写明"如果有效，应观察到什么（指标/场景 + 阈值 + 时限）"，例如"接入后接单路由准确率 ≥90%，跑 100 条历史单回放验证"。没有可证伪预期 = 事后无法验证 = 防"采纳了但没用/宣称改进实则没变"。'
+      } else if (!FALSIFIABLE_RE.test(expectedEffect) || expectedEffect.length < 8) {
+        reviewOut.falsifiableGate = false
+        reviewOut.falsifiableGateNote =
+          `⚠️ 可证伪预期不达标：当前预期='${expectedEffect.slice(0, 80)}'——缺少可观察信号（指标/阈值/回放/复现/时限等）。请改成"如果 X 有效，应观察到 Y（阈值/时限/回放场景）"，否则视为无法验证。`
+      } else {
+        reviewOut.falsifiableGate = true
+        reviewOut.falsifiableGateNote =
+          `✅ 可证伪预期已具备：${expectedEffect}——事后可按此核验裁决/承诺是否兑现。`
+      }
       return reviewOut
     },
   },

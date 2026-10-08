@@ -2238,3 +2238,68 @@ test('jarvis_meeting minutes：产出结构化纪要（主题/时间/人员/内�
   assert.strictEqual(r.minutes.conclusion, '细节清单定稿', '结论写入')
   assert.ok(r.verdict.includes('6 项要素'), '要素完整（主题/时间/人员/内容/结论）')
 })
+
+// ── ws8634 借鉴 P1 迭代：可证伪预期门禁 + lessons 结构化（2026-10-08）──
+
+test('jarvis_review：缺 expected_effect → falsifiableGate=false 并提示补可证伪预期', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({ issue: 'x', sideA: 'a', sideB: 'b' })
+  assert.strictEqual(r.falsifiableGate, false, '缺预期 = 门禁不通过')
+  assert.ok(r.falsifiableGateNote.includes('可证伪预期缺失'), '明确提示缺失')
+  assert.ok(r.falsifiableGateNote.includes('expected_effect'), '指向补预期字段')
+})
+
+test('jarvis_review：expected_effect 含可观察信号 → falsifiableGate=true', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({ issue: 'x', sideA: 'a', sideB: 'b', expected_effect: '接入后接单路由准确率 ≥90%，跑 100 条历史单回放验证' })
+  assert.strictEqual(r.falsifiableGate, true, '可证伪预期达标 = 门禁通过')
+  assert.ok(r.falsifiableGateNote.includes('已具备'), '标注已具备')
+})
+
+test('jarvis_review：expected_effect 空泛无指标 → falsifiableGate=false 并提示不达标', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_review')
+  const r = await def.handler({ issue: 'x', sideA: 'a', sideB: 'b', expected_effect: '会更好' })
+  assert.strictEqual(r.falsifiableGate, false, '空泛预期不通过')
+  assert.ok(r.falsifiableGateNote.includes('不达标'), '提示不达标')
+})
+
+test('jarvis_lesson：schema 输出字段规范', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_lesson')
+  const r = await def.handler({ mode: 'schema' })
+  assert.strictEqual(r.mode, 'schema')
+  assert.ok(r.schema.includes('分类'), '含分类字段')
+  assert.ok(r.schema.includes('状态'), '含状态字段')
+})
+
+test('jarvis_lesson：validate 结构化教训通过', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_lesson')
+  const lesson = '分类：假Pass；主责：本仓；现场：ws8634 验收；修向：补证据链门禁；状态：verified；复现：scripts/verify.mjs'
+  const r = await def.handler({ mode: 'validate', lesson })
+  assert.deepStrictEqual(r.missing, [])
+  assert.ok(r.verdict.includes('可写入 lessons.md'), '判定可写入')
+})
+
+test('jarvis_lesson：validate 缺字段/状态非法 → FAIL', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_lesson')
+  const r1 = await def.handler({ mode: 'validate', lesson: '今天踩了个坑，下次注意。' })
+  assert.ok(r1.missing.length > 0, '自由文本缺结构')
+  assert.ok(r1.verdict.includes('未结构化'), '提示未结构化')
+  const r2 = await def.handler({ mode: 'validate', lesson: '分类：假Pass；主责：本仓；现场：x；修向：y；状态：已解决' })
+  assert.ok(r2.missing.includes('状态枚举'), '模糊状态不合法')
+})
+
+test('jarvis_lesson：entry 从字段渲染规范条目，缺字段打回', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_lesson')
+  const ok = await def.handler({ mode: 'entry', category: '假Pass', owner: '本仓', scene: 'ws8634', problem: '脚本绿但业务不 Pass', fix: '加证据链门禁', status: 'fixed', repro: 'scripts/verify.mjs' })
+  assert.ok(ok.entry.includes('【教训 · 假Pass】'), '条目含分类')
+  assert.ok(ok.entry.includes('状态=fixed'), '条目含状态')
+  assert.ok(ok.entry.includes('复现=scripts/verify.mjs'), '条目含复现')
+  const bad = await def.handler({ mode: 'entry', category: '假Pass', owner: '本仓', scene: 'x', problem: 'y', fix: 'z', status: 'done' })
+  assert.ok(bad.missing.includes('status枚举'), '非法状态打回')
+})
+
+test('jarvis_store：save lesson 提示须过 jarvis_lesson 结构化', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_store')
+  const r = await def.handler({ mode: 'save', itemType: 'lesson', name: 'lesson', projectDir: '/x/proj/.jarvis/' })
+  assert.ok(r.verdict.includes('jarvis_lesson'), 'save lesson 提示结构化工具')
+})
