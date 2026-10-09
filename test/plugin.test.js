@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2302,4 +2302,59 @@ test('jarvis_store：save lesson 提示须过 jarvis_lesson 结构化', async ()
   const def = TOOLS.find((t) => t.name === 'jarvis_store')
   const r = await def.handler({ mode: 'save', itemType: 'lesson', name: 'lesson', projectDir: '/x/proj/.jarvis/' })
   assert.ok(r.verdict.includes('jarvis_lesson'), 'save lesson 提示结构化工具')
+})
+
+// ── v0.2.5：建队人才层前置硬闸（glm-test 教训——无猎头/无角色卡直接建队必须被 flowguard 拦住）──
+
+function fakeTalentFs({ cards = [], teams = [] } = {}) {
+  const files = {}
+  for (const c of cards) files[`/proj/.jarvis/cards/${c}`] = '卡内容'
+  for (const t of teams) files[`/proj/.agent-teams/${t}/team.json`] = JSON.stringify(t)
+  return {
+    async list(dir) {
+      const prefix = dir.endsWith('/') ? dir : dir + '/'
+      const names = Object.keys(files)
+        .filter((p) => p.startsWith(prefix))
+        .map((p) => p.slice(prefix.length).split('/')[0])
+      return [...new Set(names)]
+    },
+    async readText(p) { return files[p] || null },
+    async resolve(p) { return p },
+  }
+}
+
+test('checkTalentPreconditions：无猎头卡/带队卡/角色卡 → 全部缺失（BLOCKED 依据）', async () => {
+  const fs = fakeTalentFs({
+    cards: [],
+    teams: [{ name: 'demo', members: [{ name: '总经理', role: '总经理' }, { name: '架构师', role: '架构师' }] }],
+  })
+  const missing = await checkTalentPreconditions(fs, '/proj', { join: (...a) => a.join('/') })
+  assert.ok(missing.some((m) => m.includes('猎头卡')), '缺猎头卡')
+  assert.ok(missing.some((m) => m.includes('带队/CEO卡')), '缺带队卡')
+  assert.ok(missing.some((m) => m.includes('角色卡：架构师')), '缺架构师角色卡')
+})
+
+test('checkTalentPreconditions：猎头+带队+各岗位卡齐备 → 通过', async () => {
+  const fs = fakeTalentFs({
+    cards: ['猎头-人才寻访.md', 'CEO-组织与变革.md', '架构师-软件架构.md', 'Go协议工程师.md'],
+    teams: [{ name: 'demo', members: [{ name: '总经理', role: '总经理' }, { name: '架构师', role: '架构师' }, { name: 'Go协议工程师', role: 'Go协议工程师' }] }],
+  })
+  const missing = await checkTalentPreconditions(fs, '/proj', { join: (...a) => a.join('/') })
+  assert.deepStrictEqual(missing, [], '人才层前置齐备')
+})
+
+test('checkTalentPreconditions：有猎头/带队但某岗位无卡 → 只缺该岗位角色卡', async () => {
+  const fs = fakeTalentFs({
+    cards: ['猎头.md', 'CEO.md'],
+    teams: [{ name: 'demo', members: [{ name: '总经理', role: '总经理' }, { name: '协议工程师', role: '协议工程师' }] }],
+  })
+  const missing = await checkTalentPreconditions(fs, '/proj', { join: (...a) => a.join('/') })
+  assert.ok(!missing.some((m) => m.includes('猎头卡')), '有猎头卡')
+  assert.ok(!missing.some((m) => m.includes('带队/CEO卡')), '有带队卡')
+  assert.ok(missing.some((m) => m.includes('角色卡：协议工程师')), '缺协议工程师卡')
+})
+
+test('checkTalentPreconditions：无 fs 环境 → 放行（不误拦）', async () => {
+  const missing = await checkTalentPreconditions(null, '/proj', { join: (...a) => a.join('/') })
+  assert.deepStrictEqual(missing, [], '无 fs 放行')
 })

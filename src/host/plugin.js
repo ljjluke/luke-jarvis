@@ -3537,6 +3537,9 @@ export const TOOLS = [
             const fd = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
             if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许建队派活）')
             else missing = missing.filter((m) => !m.startsWith('方案设计'))
+            // 人才层前置硬闸（glm-test 教训：无猎头/无角色卡直接建普通角色队 = 跳过蒸馏流程）
+            const talentMissing = await checkTalentPreconditions(fsSvc, projectDir, path)
+            missing.push(...talentMissing)
             // 派活必带开工须知：audit 团队任务
             const teamFound = await hasGlob(fsSvc, path.join(projectDir, '.agent-teams'), 'team.json')
             if (teamFound) {
@@ -3544,7 +3547,7 @@ export const TOOLS = [
               if (!briefOk) missing.push('有团队成员任务缺「开工须知」（派活后跑 jarvis_member_brief audit——成员没须知=不会跑 ponder）')
             }
           },
-          next: '派活（每任务附开工须知）→ 成员开工先 ponder → 执行',
+          next: '先蒸馏猎头→CEO→各岗位角色卡（cards/ 齐备）→ 再建队派活（每任务附开工须知）→ 成员开工先 ponder → 执行',
         },
         execute: {
           label: '执行',
@@ -3771,6 +3774,50 @@ async function auditTeamBriefs(fsSvc, projectDir, path) {
     }
     return !anyMissing
   } catch { return true }
+}
+
+// 建队人才层前置硬闸（glm-test 教训：跳过猎头/蒸馏直接建普通角色队——flowguard 原只查需求/方案/须知，
+// 没拦住"无猎头/无角色卡"建队）。规则：cards/ 必须有猎头卡 + 带队卡；若已有团队，每个成员岗位要有对应角色卡。
+// 无 fs 环境返回空数组=放行（防环境缺 fs 误拦，与 hasGlob 一致）。
+const LEADER_CARD_RE = /CEO|总经理|厂长|店长|院长|校长|带队|leader/i
+const HEADHUNTER_CARD_RE = /猎头|headhunter|人才寻访|recruiter/i
+export async function checkTalentPreconditions(fsSvc, projectDir, path) {
+  const missing = []
+  if (!fsSvc || typeof fsSvc.list !== 'function') return missing
+  try {
+    const cardsDir = path.join(projectDir, '.jarvis/cards')
+    let cardNames = []
+    try { cardNames = (await fsSvc.list(cardsDir)) || [] } catch { cardNames = [] }
+    const names = cardNames.map((n) => String(n))
+    const hasHeadhunter = names.some((n) => HEADHUNTER_CARD_RE.test(n))
+    if (!hasHeadhunter) missing.push('猎头卡（.jarvis/cards/ 缺 猎头/headhunter 卡——建队必须先蒸馏该领域猎头）')
+    const hasLeader = names.some((n) => LEADER_CARD_RE.test(n))
+    if (!hasLeader) missing.push('带队/CEO卡（.jarvis/cards/ 缺 CEO/总经理/厂长/店长 等带队卡——建队必须先蒸馏带队者）')
+    // 已有团队 → 每个成员岗位要有对应角色卡
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    let teamNames = []
+    try { teamNames = (await fsSvc.list(teamsDir)) || [] } catch { teamNames = [] }
+    for (const team of teamNames) {
+      try {
+        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        if (!txt) continue
+        const d = JSON.parse(txt)
+        for (const m of d.members || []) {
+          const role = String(m.role || m.name || '').trim()
+          if (!role) continue
+          let hasCard
+          if (LEADER_CARD_RE.test(role)) hasCard = hasLeader
+          else if (HEADHUNTER_CARD_RE.test(role)) hasCard = hasHeadhunter
+          else hasCard = names.some((n) => {
+            const base = n.replace(/\.md$/i, '')
+            return base.includes(role) || role.includes(base)
+          })
+          if (!hasCard) missing.push(`角色卡：${m.name || role}（.jarvis/cards/ 缺该岗位卡——每个岗位必须先蒸馏）`)
+        }
+      } catch {}
+    }
+  } catch {}
+  return missing
 }
 
 
