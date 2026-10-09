@@ -2,6 +2,12 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.6] - 2026-10-09
+
+### 修复
+
+- **jarvis_flowguard 输出 schema 补 `step`/`recorded` 字段**（运行时 additionalProperties:false 校验失败 → 工具实际不可用的 bug）——handler 返回了这两个字段但 schema 未声明，导致调用即报"invalid output"。现在正常返回 verdict/ok/step/missing/recorded/next。
+
 ## [0.2.5] - 2026-10-09
 
 ### 变更

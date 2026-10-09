@@ -3478,7 +3478,9 @@ export const TOOLS = [
         properties: {
           verdict: { type: 'string' },
           ok: { type: 'boolean' },
+          step: { type: 'string', description: '本次检查的步骤' },
           missing: { type: 'array', items: { type: 'string' }, description: '缺失的前置产物（打回补齐项）' },
+          recorded: { type: 'string', description: '步骤完成留痕路径（done=true 时写入 flow-progress.json）' },
           next: { type: 'string', description: '下一步该做什么' },
         },
         required: ['verdict', 'ok'],
