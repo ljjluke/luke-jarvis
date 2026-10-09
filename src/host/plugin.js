@@ -3480,7 +3480,7 @@ export const TOOLS = [
           ok: { type: 'boolean' },
           step: { type: 'string', description: '本次检查的步骤' },
           missing: { type: 'array', items: { type: 'string' }, description: '缺失的前置产物（打回补齐项）' },
-          recorded: { type: 'string', description: '步骤完成留痕路径（done=true 时写入 flow-progress.json）' },
+          recorded: { type: 'string', description: '步骤完成留痕路径（done=true 时写入 flow-progress.json；未 done 不返回）' },
           next: { type: 'string', description: '下一步该做什么' },
         },
         required: ['verdict', 'ok'],
@@ -3616,14 +3616,15 @@ export const TOOLS = [
           } catch {}
         }
       }
-      return {
+      const out = {
         verdict: ok ? `✅ ${cfg.label}前置齐备，可进入${recorded ? '（已记录完成→' + recorded + '）' : ''}` : `⛔ BLOCKED：${cfg.label}缺前置产物——${missing.join('；')}`,
         ok,
         step,
         missing,
-        recorded,
         next: ok ? cfg.next : `先补齐缺失项（${missing.join('；')}）再进${cfg.label}`,
       }
+      if (recorded) out.recorded = recorded
+      return out
     },
   },
 

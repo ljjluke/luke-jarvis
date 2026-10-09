@@ -2,6 +2,12 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.7] - 2026-10-09
+
+### 修复
+
+- **jarvis_flowguard `recorded` 未完成时不返回**（schema 只声明 string，运行时若返回 null 会校验失败）——handler 在 recorded 为 null 时省略该字段，done=true 时才返回留痕路径。
+
 ## [0.2.6] - 2026-10-09
 
 ### 修复
