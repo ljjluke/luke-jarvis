@@ -2,6 +2,12 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.8] - 2026-10-09
+
+### 修复
+
+- **jarvis_flowguard build 步骤校验"需求规格"是否存在**（原只把"需求规格"列进 pre 但从不校验，导致 build 永远误报缺失）——存在则放行、不存在才 BLOCKED，与 decompose 一致。
+
 ## [0.2.7] - 2026-10-09
 
 ### 修复

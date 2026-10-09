@@ -3536,6 +3536,10 @@ export const TOOLS = [
           label: '建队派活',
           pre: ['需求规格', '方案设计（.jarvis/docs/方案设计-*.md）'],
           check: async (missing) => {
+            // 需求规格（与 decompose 一致：存在则移除，不存在则留）
+            const reqFound = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '需求规格')
+            if (reqFound) missing = missing.filter((m) => !m.startsWith('需求规格'))
+            else missing.push('需求规格（.jarvis/docs/需求规格-*.md 不存在——需求没打磨清楚不许建队派活）')
             const fd = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
             if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许建队派活）')
             else missing = missing.filter((m) => !m.startsWith('方案设计'))
