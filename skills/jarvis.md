@@ -35,7 +35,8 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 **🧰 建队/派活操作铁律（来自真实运行报错回执，违反必踩错）**：
 - **加人前先查重**：`agent_teams_add_member` 前先 `agent_teams_status` 列出现有成员；**同名已存在 → 复用该成员或换名**（直接加同名会报 `member name "X" has already been used`；被移除的成员名也不可复用）。
 - **派活 vs 唤醒要分清（assigned ≠ 已唤醒）**：`agent_teams_create_task(assignee=X)` 只登记任务；**真正让成员跑起来要用 `agent_teams_reassign_task(task_id, assignee=X)`**。
-  - 成员**会话休眠/任务卡住**（`claimed` 无产出、attempt 高）→ `reassign_task` 唤醒；
+  - 成员**会话还活着、只是任务卡住**（`claimed` 无产出）→ `reassign_task` 唤醒；
+  - 成员**会话已 end-seed**（曾被中止/重启后，自检实证 reassign 必失败）→ **不要 reassign**：`agent_teams_remove_member` 移除后 `agent_teams_add_member` 换新名重建（新成员首次派活即起新会话，实测一次成功）；
   - 成员**正在忙**（报 `member "X" is busy with tN; finish or reassign it first`）→ **不要对它 reassign**，先 `agent_teams_status` 看它在跑什么：等它跑完，或先把 tN 处理掉（完成/改派）再派新活。
 - **成员改文件前必须 Read**：成员/子代理任何 `edit`/`write` 前必须先 `read` 同一文件（平台强制 read-before-edit；不读就改报 `file has not been read`）。
 - **自改场景单独提示**：任务涉及修改 luke-jarvis 插件/协议自身（"jarvis 改 jarvis"）时，派活 brief 必须写明：改前备份、`node --check`、跑单测、回报回滚路径。
