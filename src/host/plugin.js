@@ -3995,6 +3995,60 @@ export function jarvisCommand(requirement) {
   }
 }
 
+// ── 插件级「顶层 captain 不得亲自执行」硬拦截 ─────────────────────────────
+// 背景（scan 教训）：老会话的 preset 带完整执行工具（bash/edit），且 preset 在会话创建时
+// 固化、无法追溯修改 → 顶层 captain 于是自己把活干完（实证：某 captain 会话 bash 5.7 万次）。
+// 此 guard 直接拦在工具执行前，**对已存在会话同样生效**：
+//   • 仅当调用会话 = 「jarvis 工作区（有 .jarvis/）+ 某团队 team.json 的 captainSessionId」时才拦；
+//   • 只拦执行类工具（bash/pwsh/edit/write/subagent/workflow/ralph）；
+//     read/glob/grep（只读查看）与 agent_teams_*/jarvis_*（派发与流程）不受影响；
+//   • 成员会话（非 captain）完全不受影响。
+const CAPTAIN_DENY_TOOLS = new Set([
+  'bash', 'pwsh', 'edit', 'write',
+  'subagent', 'subagent_fork', 'subagent_codex', 'subagent_claude_code',
+  'workflow', 'ralph',
+])
+const _captainCache = { at: 0, cwd: '', ids: new Set() }
+function _captainIds(cwd) {
+  const now = Date.now()
+  if (_captainCache.cwd === cwd && now - _captainCache.at < 3000) return _captainCache.ids
+  const ids = new Set()
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    // 只对 jarvis 工作区生效（非 jarvis 项目不受影响）；.jarvis/allow-captain-exec = 逃生阀
+    if (fs.existsSync(path.join(cwd, '.jarvis')) && !fs.existsSync(path.join(cwd, '.jarvis/allow-captain-exec'))) {
+      const teamsDir = path.join(cwd, '.agent-teams')
+      for (const team of fs.readdirSync(teamsDir)) {
+        try {
+          const d = JSON.parse(fs.readFileSync(path.join(teamsDir, team, 'team.json'), 'utf8'))
+          if (d && d.captainSessionId) ids.add(String(d.captainSessionId))
+        } catch { /* 单个团队坏文件忽略 */ }
+      }
+    }
+  } catch { /* 无 .agent-teams/权限 → 不拦 */ }
+  _captainCache.at = now
+  _captainCache.cwd = cwd
+  _captainCache.ids = ids
+  return ids
+}
+/** guard：返回字符串 = 拒绝该次工具调用；返回 undefined = 放行。 */
+export function captainExecutionGuard(exec) {
+  try {
+    const name = String((exec && exec.name) || '')
+    if (!CAPTAIN_DENY_TOOLS.has(name)) return undefined
+    const agent = exec && exec.agent
+    const session = agent && agent.session
+    const sessionId = session && session.id
+    const cwd = session && session.header && session.header.cwd
+    if (!sessionId || !cwd) return undefined
+    if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
+    return `【jarvis 严格闸·插件级】你是该团队的顶层 captain，不得用 ${name} 亲自执行——请改用 agent_teams_create_task / agent_teams_reassign_task 把活派给团队成员（成员会话不受此限制）；只读查看请用 read/glob/grep。`
+  } catch {
+    return undefined
+  }
+}
+
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
 export const inject = ['tools', 'webServer', 'agents']
 
@@ -4110,6 +4164,13 @@ export default {
     } else {
       console.error('[luke-jarvis] tools 服务不可用，模型工具未注册')
     }
+
+    // 1.5) 插件级硬拦截：顶层 captain 不得亲自执行（作用于**已存在**会话——preset 无法追溯修改时的兜底）
+    try {
+      if (toolsSvc && typeof toolsSvc.guard === 'function') {
+        ctx.effect(() => toolsSvc.guard(captainExecutionGuard))
+      }
+    } catch {}
 
     // 2) /jarvis 命令：commands 为可选服务——优先懒注入（就绪后自动注册），无 inject 能力时降级 get
     const registerJarvisCommand = (commandCtx) => {

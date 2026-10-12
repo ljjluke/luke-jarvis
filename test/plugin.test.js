@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2470,4 +2470,32 @@ test('/jarvis 续跑：正常需求不受影响（仍走领域判定流程）', 
   const r = jarvisCommand('做一个金融风控系统')
   assert.ok(!r.content.includes('续跑 ≠ 新需求'), '正常需求不应走续跑分支')
   assert.ok(r.content.includes('猎头'), '仍走人才流程')
+})
+
+// ── v0.3.4：插件级拦截——顶层 captain 不得亲自执行（作用于已存在会话）──
+
+test('captainExecutionGuard：captain 在 jarvis 工作区用 bash/edit → 拒绝；成员/只读/非 jarvis/逃生阀 → 放行', () => {
+  const base = fs.mkdtempSync('/tmp/jarvis-guard-')
+  const proj = path.join(base, 'proj')
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  fs.mkdirSync(path.join(proj, '.agent-teams', 't1'), { recursive: true })
+  fs.writeFileSync(
+    path.join(proj, '.agent-teams', 't1', 'team.json'),
+    JSON.stringify({ name: 't1', captainSessionId: 'sess-cap' }),
+  )
+  const plain = path.join(base, 'plain')
+  fs.mkdirSync(plain, { recursive: true })
+  const exec = (name, sid, cwd) => ({ name, agent: { session: { id: sid, header: { cwd } } } })
+
+  assert.strictEqual(typeof captainExecutionGuard(exec('bash', 'sess-cap', proj)), 'string', 'captain bash 应拒绝')
+  assert.strictEqual(typeof captainExecutionGuard(exec('edit', 'sess-cap', proj)), 'string', 'captain edit 应拒绝')
+  assert.strictEqual(typeof captainExecutionGuard(exec('subagent', 'sess-cap', proj)), 'string', 'captain subagent 应拒绝')
+  assert.strictEqual(captainExecutionGuard(exec('bash', 'sess-member', proj)), undefined, '成员 bash 放行')
+  assert.strictEqual(captainExecutionGuard(exec('read', 'sess-cap', proj)), undefined, 'captain read 放行')
+  assert.strictEqual(captainExecutionGuard(exec('bash', 'sess-cap', plain)), undefined, '非 jarvis 工作区放行')
+  assert.strictEqual(captainExecutionGuard({ name: 'bash' }), undefined, '无 agent 放行')
+
+  // 逃生阀
+  fs.writeFileSync(path.join(proj, '.jarvis', 'allow-captain-exec'), '')
+  assert.strictEqual(captainExecutionGuard(exec('bash', 'sess-cap', proj)), undefined, '逃生阀存在时放行')
 })

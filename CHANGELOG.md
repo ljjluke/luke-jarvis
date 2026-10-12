@@ -2,6 +2,13 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.4] - 2026-10-12
+
+### 新增
+
+- **插件级「顶层 captain 不得亲自执行」硬拦截**（`tools.guard`）：对**已存在会话**同样生效（preset 在会话创建时固化、无法追溯修改的兜底）。规则：调用会话 = jarvis 工作区（有 `.jarvis/`）里某团队的 `captainSessionId` 时，拒绝执行类工具 `bash/pwsh/edit/write/subagent/workflow/ralph`；`read/glob/grep` 与 `agent_teams_*`/`jarvis_*` 不受影响；成员会话不受影响；逃生阀 = `.jarvis/allow-captain-exec`。
+  - 背景：scan 某 captain 会话（preset=standard）亲手 bash 5.7 万次 + edit 1685 次，把活全干了。
+
 ## [0.3.3] - 2026-10-12
 
 ### 修复
