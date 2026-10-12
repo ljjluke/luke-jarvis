@@ -2,6 +2,12 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.6] - 2026-10-12
+
+### 变更
+
+- **captain 拦截拒绝文案改为强制派活指令**：明确要求 ① `agent_teams_reassign_task`（唤醒休眠成员）② `agent_teams_create_task`（派新活）③ 只读用 read/glob/grep ④ 不要重试被拦工具——解决"拦住了自己干、但没转向派活、页面看不到子任务"的空转问题。
+
 ## [0.3.5] - 2026-10-12
 
 ### 修复

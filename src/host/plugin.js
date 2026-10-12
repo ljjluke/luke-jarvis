@@ -4050,7 +4050,7 @@ export function captainExecutionGuard(exec) {
       )
     } catch {}
     if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
-    return `【jarvis 严格闸·插件级】你是该团队的顶层 captain，不得用 ${name} 亲自执行——请改用 agent_teams_create_task / agent_teams_reassign_task 把活派给团队成员（成员会话不受此限制）；只读查看请用 read/glob/grep。`
+    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① agent_teams_reassign_task（把卡住的任务派给成员——成员会话休眠时 reassign 会唤醒它）；② agent_teams_create_task（把当前待办建成任务并 assignee=成员）；③ 只读查看用 read/glob/grep；④ **不要重试本工具**——reassign 后成员会开始干活，页面即可看到子任务工作。`
   } catch {
     return undefined
   }
