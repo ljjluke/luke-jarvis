@@ -34,6 +34,11 @@
       (4) Always attach jarvis_member_brief when dispatching; it already tells members to READ a
           file before any edit/write (read-before-edit), and to back up + node --check + run unit
           tests + report a rollback path when modifying luke-jarvis itself.
+      (5) CLOSED-LOOP TURN (the original A2A model): after dispatching, keep THIS turn alive —
+          wait for member reports (agent_teams_status / mailbox), run acceptance, and end the turn
+          ONLY when every task is accepted. Ending the turn right after dispatch aborts member runs.
+      (6) NEVER restart the dsh runtime while members are working — every restart kills all running
+          member subagents and their ponder sub-agents. Upgrade/restart only when nobody is running.
     complete: true
     includeRuntimeContext: false
 
