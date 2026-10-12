@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2398,4 +2398,28 @@ test('auditCaptainOwnedTasks：已完成 captain 任务 / 成员任务 → 不�
   ])
   const r = await auditCaptainOwnedTasks(fs, '/proj', PATH)
   assert.deepStrictEqual(r, [], '完成/成员任务不命中')
+})
+
+// ── v0.3.0：卡死任务必须 reassign（scan 教训——成员会话 end-seed 后任务停在 claimed）──
+
+test('auditStaleTasks：claimed 未交付 → 命中', async () => {
+  const fs = fakeTeamFs([{ id: 't12', subject: '后端接口', status: 'claimed', assignee: '部署升级专家', attempt: 4, output: '' }])
+  const r = await auditStaleTasks(fs, '/proj', PATH)
+  assert.ok(r.some((x) => x.includes('t12')), 'claimed 未交付应命中')
+})
+
+test('auditStaleTasks：attempt≥4 且产出为空 → 命中；有产出/已完成不命中', async () => {
+  const fs = fakeTeamFs([
+    { id: 't50', subject: '弹窗修复', status: 'in_progress', assignee: '前端实现B', attempt: 6, output: '' },
+    { id: 't47', subject: '误报处置', status: 'in_progress', assignee: '测试验证', attempt: 6, output: '有产出内容' },
+    { id: 't1', subject: '勘察', status: 'completed', assignee: '部署升级专家', attempt: 1, output: '' },
+  ])
+  const r = await auditStaleTasks(fs, '/proj', PATH)
+  assert.ok(r.some((x) => x.includes('t50')), 't50 应命中')
+  assert.ok(!r.some((x) => x.includes('t47')), 't47 有产出不命中')
+  assert.ok(!r.some((x) => x.includes('t1')), '已完成不命中')
+})
+
+test('auditStaleTasks：无 fs → 放行', async () => {
+  assert.deepStrictEqual(await auditStaleTasks(null, '/proj', PATH), [])
 })

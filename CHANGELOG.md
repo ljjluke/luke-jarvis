@@ -2,6 +2,13 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.0] - 2026-10-10
+
+### 变更
+
+- **jarvis_flowguard execute 加"卡死任务必须 reassign"硬闸（scan 教训）**：未完成任务里 `claimed` 未交付、或 `attempt≥4` 且产出为空 → BLOCKED，要求 `agent_teams_reassign_task` 唤醒成员或换人，禁止顶层自己顶替。防"成员会话被 end-seed 后任务停在 claimed、没人管，captain 只能自己干"。
+- `package.json`：version 0.2.9 → **0.3.0**；`README.md`：单测 196→199。
+
 ## [0.2.9] - 2026-10-10
 
 ### 变更

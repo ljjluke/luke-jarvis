@@ -3569,6 +3569,13 @@ export const TOOLS = [
                 `captain 自领未完成任务：${captainOwned.join('、')}（顶层 captain/贾维斯不得亲自执行——必须 agent_teams_reassign_task 派给团队成员以唤醒成员会话；纯协调/验收/汇报类任务请在 subject 标注【协调】豁免）`
               )
             }
+            // 卡死任务必须 reassign（scan 教训：成员会话 end-seed 后任务停在 claimed/in_progress 没人管）
+            const staleTasks = await auditStaleTasks(fsSvc, projectDir, path)
+            if (staleTasks.length) {
+              missing.push(
+                `疑似卡死任务：${staleTasks.join('、')}（claimed 未交付 / attempt≥4 产出为空——必须 agent_teams_reassign_task 唤醒成员或换人，不许顶层自己顶替）`
+              )
+            }
           },
           next: '开发-测试迭代（对照基准）+ 质量自循环深挖 → 收口',
         },
@@ -3861,6 +3868,34 @@ export async function auditCaptainOwnedTasks(fsSvc, projectDir, path) {
     }
   } catch {}
   return ids
+}
+
+// 卡死任务必须处理（scan 教训：成员会话被 end-seed 后任务停在 claimed/in_progress，没人 reassign → 顶层只能自己干）。
+// 规则：未完成任务里 status==='claimed'（领了没交）或 attempt>=4 且产出为空 = 疑似卡死 → 必须 reassign 唤醒成员/换人。
+export async function auditStaleTasks(fsSvc, projectDir, path) {
+  const stale = []
+  if (!fsSvc || typeof fsSvc.list !== 'function') return stale
+  try {
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    let teamNames = []
+    try { teamNames = (await fsSvc.list(teamsDir)) || [] } catch { teamNames = [] }
+    for (const team of teamNames) {
+      try {
+        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        if (!txt) continue
+        const d = JSON.parse(txt)
+        for (const t of d.tasks || []) {
+          const st = String(t.status || '')
+          if (['completed', 'cancelled'].includes(st)) continue
+          const attempt = Number(t.attempt || 0)
+          const outLen = String(t.output || '').trim().length
+          if (st === 'claimed') stale.push(`${team}/${t.id}（claimed 未交付）`)
+          else if (attempt >= 4 && outLen === 0) stale.push(`${team}/${t.id}（attempt=${attempt} 产出为空）`)
+        }
+      } catch {}
+    }
+  } catch {}
+  return stale
 }
 
 
