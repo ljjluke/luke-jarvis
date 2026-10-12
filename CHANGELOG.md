@@ -2,6 +2,12 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.3] - 2026-10-12
+
+### 修复
+
+- **`/jarvis 继续` 续跑意图**：原来"继续/接着上次/resume"会被判成模糊需求、反而反问用户"想做什么"（实测）。现识别为**续跑**：先读现状（jarvis_store check + project.md/board.json/lessons.md + agent_teams_status）→ 判身份（非 captain 无法接管旧团队，须回原会话或授权新建）→ 处理卡死任务（reassign 唤醒成员，顶层不顶替）→ 过 `jarvis_flowguard(execute)` → 派活续跑。续跑不等于新需求：不重新判领域、不重新建队。
+
 ## [0.3.2] - 2026-10-10
 
 ### 修复

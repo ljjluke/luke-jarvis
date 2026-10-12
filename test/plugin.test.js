@@ -2451,3 +2451,23 @@ test('preset/jarvis-captain.cordis.yml：严格预设——无执行工具，有
   assert.ok(/name:\s*luke-jarvis/.test(t), '应挂 luke-jarvis')
   assert.ok(/dsh-agent-teams/.test(t), '应挂 agent-teams')
 })
+
+// ── v0.3.3：/jarvis 续跑意图（"继续"不能被判成模糊需求）──
+
+test('/jarvis 继续：识别为续跑意图（不反问"想做什么"），给出读现状→判身份→唤醒成员→过闸', () => {
+  for (const q of ['继续', '接着上次的做', '继续 scan 的升级包工作', 'resume']) {
+    const r = jarvisCommand(q)
+    assert.ok(r.content.includes('续跑'), `${q} 应识别为续跑`)
+    assert.ok(!r.content.includes('判不出领域'), `${q} 不应被判模糊`)
+    assert.ok(r.content.includes('不要重新建队'), `${q} 提示不重建队`)
+    assert.ok(r.content.includes('agent_teams_reassign_task'), `${q} 应给唤醒成员动作`)
+    assert.ok(r.content.includes('无法接管旧团队'), `${q} 应说明非 captain 无法接管`)
+    assert.ok(r.content.includes('严格模式'), `${q} 应附严格模式`)
+  }
+})
+
+test('/jarvis 续跑：正常需求不受影响（仍走领域判定流程）', () => {
+  const r = jarvisCommand('做一个金融风控系统')
+  assert.ok(!r.content.includes('续跑 ≠ 新需求'), '正常需求不应走续跑分支')
+  assert.ok(r.content.includes('猎头'), '仍走人才流程')
+})
