@@ -3970,8 +3970,15 @@ export function jarvisCommand(requirement) {
     ]
     guidance = hit.domainDeterminable ? '✅ 领域可从文本判断，启动人才流程（**注意：先按角色卡思考需求、真疑问才问，再建队；每个阶段过 jarvis_flowguard 步骤守卫，缺前置产物=BLOCKED 不许跳过**）' : '（小需求/无领域线索但可直接做——按需走或直接做，但有真疑问就先问；每个阶段过 jarvis_flowguard 步骤守卫）'
   }
+  const strict = [
+    '【严格模式 · 用户显式调用 /jarvis 时不可违反】',
+    '• 能力自检（第一步）：确认可用工具里有 jarvis_flowguard / jarvis_project / jarvis_distill / jarvis_distill_guide / jarvis_member_brief / jarvis_ponder_check / jarvis_coverage / jarvis_board 等 jarvis_* 工具；缺任一 = jarvis 能力未注册 → 明确告知用户「jarvis 能力未注册（插件/预设问题），请检查 luke-jarvis 是否装入当前预设」并停止，禁止用普通会话硬做（否则=跳过 jarvis 能力）。',
+    '• 顶层只做四件事：接单判领域 / 派发任务 / 盯控与裁决 / 回显结果。绝不亲自实现、测试、写代码、改文件、跑数据——顶层亲自干 = 缺陷。',
+    '• 执行一律由团队成员完成：任务用 agent_teams_create_task 派给成员；成员会话休眠/任务卡住（claimed 未交付、attempt 高产出空）→ agent_teams_reassign_task 唤醒成员或换人，禁止顶层自己顶替。',
+    '• 每步过闸：jarvis_flowguard(step=clarify/decompose/design/build/execute/close)；execute 阶段出现「captain 自领未完成任务」或「疑似卡死任务」= BLOCKED，先处理（reassign/换人）再继续。',
+  ].join('\n')
   return {
-    content: `已收到需求[${text.slice(0, 120)}]。\n${guidance}\n\n【接下来 5 分钟该做什么（照做即可）】\n${actions.join('\n')}\n\n（完整协议见 jarvis 技能：核心协议 5 步主干 + 判领域/猎头调度/CEO+专家打磨/三产物闸/测试返工/收口核对。铁律：真实优先不编造；做客户要的；卡不贵多贵有用。）`,
+    content: `已收到需求[${text.slice(0, 120)}]。\n${guidance}\n\n${strict}\n\n【接下来 5 分钟该做什么（照做即可）】\n${actions.join('\n')}\n\n（完整协议见 jarvis 技能：核心协议 5 步主干 + 判领域/猎头调度/CEO+专家打磨/三产物闸/测试返工/收口核对。铁律：真实优先不编造；做客户要的；卡不贵多贵有用。）`,
   }
 }
 

@@ -2,6 +2,14 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.1] - 2026-10-10
+
+### 变更
+
+- **/jarvis 严格模式**：用户显式 `/jarvis` 时输出严格模式约束——① 能力自检（缺 jarvis_* 工具=明确告知"jarvis 能力未注册"并停止，不许普通会话硬做）；② 顶层只做接单/派发/盯控/回显，绝不亲自实现测试改文件；③ 执行一律派给团队成员，成员卡住用 reassign 唤醒而非顶层顶替；④ 每步过 jarvis_flowguard。
+- `skills/jarvis.md`：新增「🔒 严格模式」协议段。
+- `package.json`：version 0.3.0 → **0.3.1**；`README.md`：单测 199→200。
+
 ## [0.3.0] - 2026-10-10
 
 ### 变更

@@ -2423,3 +2423,15 @@ test('auditStaleTasks：attempt≥4 且产出为空 → 命中；有产出/已�
 test('auditStaleTasks：无 fs → 放行', async () => {
   assert.deepStrictEqual(await auditStaleTasks(null, '/proj', PATH), [])
 })
+
+// ── v0.3.1：/jarvis 严格模式（能力自检 + 顶层只派发不亲自干 + 每步过闸）──
+
+test('/jarvis 命令：显式调用 → 输出严格模式（能力自检/顶层不亲自干/执行由成员/每步过闸）', () => {
+  const r = jarvisCommand('做一个金融风控系统')
+  assert.ok(r.content.includes('严格模式'), '含严格模式')
+  assert.ok(r.content.includes('能力自检'), '要求能力自检')
+  assert.ok(r.content.includes('jarvis_flowguard'), '要求走步骤守卫')
+  assert.ok(r.content.includes('绝不亲自实现'), '顶层不亲自实现')
+  assert.ok(r.content.includes('agent_teams_reassign_task'), '卡住要唤醒成员而非自己顶替')
+  assert.ok(r.content.includes('jarvis 能力未注册'), '缺能力时明确告知不硬做')
+})
