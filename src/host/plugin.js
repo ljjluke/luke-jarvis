@@ -3562,6 +3562,13 @@ export const TOOLS = [
             const fd = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
             if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许执行实现）')
             else missing = missing.filter((m) => !m.startsWith('方案设计'))
+            // 顶层不得自领执行任务（scan 教训：成员会话死后 captain 自己 claim 任务干完 → "全是上层在干活"）
+            const captainOwned = await auditCaptainOwnedTasks(fsSvc, projectDir, path)
+            if (captainOwned.length) {
+              missing.push(
+                `captain 自领未完成任务：${captainOwned.join('、')}（顶层 captain/贾维斯不得亲自执行——必须 agent_teams_reassign_task 派给团队成员以唤醒成员会话；纯协调/验收/汇报类任务请在 subject 标注【协调】豁免）`
+              )
+            }
           },
           next: '开发-测试迭代（对照基准）+ 质量自循环深挖 → 收口',
         },
@@ -3825,6 +3832,35 @@ export async function checkTalentPreconditions(fsSvc, projectDir, path) {
     }
   } catch {}
   return missing
+}
+
+// 顶层不得自领执行任务（scan 教训：成员会话死后 captain 自己 claim 任务干完 → "全是上层在干活"）。
+// 规则：未完成任务里 assignee==='captain' 且 subject 未标协调类豁免 = 顶层亲自执行 → BLOCKED。
+const COORD_TASK_RE = /【协调】|协调|需求分析|拆解|排期|会议|汇报|盯控|裁决|验收|评审/
+export async function auditCaptainOwnedTasks(fsSvc, projectDir, path) {
+  const ids = []
+  if (!fsSvc || typeof fsSvc.list !== 'function') return ids
+  try {
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    let teamNames = []
+    try { teamNames = (await fsSvc.list(teamsDir)) || [] } catch { teamNames = [] }
+    for (const team of teamNames) {
+      try {
+        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        if (!txt) continue
+        const d = JSON.parse(txt)
+        for (const t of d.tasks || []) {
+          const st = String(t.status || '')
+          if (['completed', 'cancelled'].includes(st)) continue
+          if (String(t.assignee || '') !== 'captain') continue
+          const subj = String(t.subject || '')
+          if (COORD_TASK_RE.test(subj)) continue
+          ids.push(String(t.id || subj))
+        }
+      } catch {}
+    }
+  } catch {}
+  return ids
 }
 
 

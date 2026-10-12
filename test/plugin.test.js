@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2357,4 +2357,45 @@ test('checkTalentPreconditions：有猎头/带队但某岗位无卡 → 只缺�
 test('checkTalentPreconditions：无 fs 环境 → 放行（不误拦）', async () => {
   const missing = await checkTalentPreconditions(null, '/proj', { join: (...a) => a.join('/') })
   assert.deepStrictEqual(missing, [], '无 fs 放行')
+})
+
+// ── v0.2.9：顶层不得自领执行任务（scan 教训——成员会话死后 captain 自己 claim 干完）──
+
+function fakeTeamFs(tasks) {
+  const files = {
+    '/proj/.agent-teams/demo/team.json': JSON.stringify({ name: 'demo', members: [{ name: '实现A' }], tasks }),
+  }
+  return {
+    async list(dir) {
+      const prefix = dir.endsWith('/') ? dir : dir + '/'
+      const names = Object.keys(files)
+        .filter((p) => p.startsWith(prefix))
+        .map((p) => p.slice(prefix.length).split('/')[0])
+      return [...new Set(names)]
+    },
+    async readText(p) { return files[p] || null },
+    async resolve(p) { return p },
+  }
+}
+const PATH = { join: (...a) => a.join('/') }
+
+test('auditCaptainOwnedTasks：captain 自领未完成执行任务 → 命中', async () => {
+  const fs = fakeTeamFs([{ id: 't1', subject: '实现升级包上传接口', status: 'in_progress', assignee: 'captain' }])
+  const r = await auditCaptainOwnedTasks(fs, '/proj', PATH)
+  assert.deepStrictEqual(r, ['t1'], '应命中 captain 自领执行任务')
+})
+
+test('auditCaptainOwnedTasks：协调/验收类 captain 任务豁免', async () => {
+  const fs = fakeTeamFs([{ id: 't2', subject: '10.21.10.11 实机验收', status: 'in_progress', assignee: 'captain' }])
+  const r = await auditCaptainOwnedTasks(fs, '/proj', PATH)
+  assert.deepStrictEqual(r, [], '验收类豁免')
+})
+
+test('auditCaptainOwnedTasks：已完成 captain 任务 / 成员任务 → 不命中', async () => {
+  const fs = fakeTeamFs([
+    { id: 't3', subject: '实现 X', status: 'completed', assignee: 'captain' },
+    { id: 't4', subject: '实现 Y', status: 'in_progress', assignee: '实现A' },
+  ])
+  const r = await auditCaptainOwnedTasks(fs, '/proj', PATH)
+  assert.deepStrictEqual(r, [], '完成/成员任务不命中')
 })

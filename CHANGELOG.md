@@ -2,6 +2,13 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.2.9] - 2026-10-10
+
+### 变更
+
+- **jarvis_flowguard execute 加"顶层不得自领执行任务"硬闸（scan 教训）**：`captain` 名下未完成的执行类任务 → BLOCKED，要求 `agent_teams_reassign_task` 派给团队成员（唤醒成员会话）；纯协调/验收/汇报类任务在 subject 标注【协调】豁免。防"成员会话死后 captain 自己 claim 任务干完 → 全是上层在干活"。
+- `package.json`：version 0.2.8 → **0.2.9**；`README.md`：单测 193→196。
+
 ## [0.2.8] - 2026-10-09
 
 ### 修复
