@@ -4042,6 +4042,13 @@ export function captainExecutionGuard(exec) {
     const sessionId = session && session.id
     const cwd = session && session.header && session.header.cwd
     if (!sessionId || !cwd) return undefined
+    // 临时诊断（确认 guard 是否全局生效/是否匹配 captain）→ /tmp/jarvis-captain-guard.log
+    try {
+      _require('node:fs').appendFileSync(
+        '/tmp/jarvis-captain-guard.log',
+        `${new Date().toISOString()} tool=${name} sid=${sessionId} cwd=${cwd} captains=[${[..._captainIds(String(cwd))].join(',')}]\n`,
+      )
+    } catch {}
     if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
     return `【jarvis 严格闸·插件级】你是该团队的顶层 captain，不得用 ${name} 亲自执行——请改用 agent_teams_create_task / agent_teams_reassign_task 把活派给团队成员（成员会话不受此限制）；只读查看请用 read/glob/grep。`
   } catch {

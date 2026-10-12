@@ -2,6 +2,12 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.5] - 2026-10-12
+
+### 修复
+
+- **captain 执行拦截改为根层挂载 + 生效性诊断**：v0.3.4 的 guard 挂在 preset 作用域，实测覆盖不到 `standard` 会话（captain 仍执行 bash）。现改为在宿主根层 `- insert: jarvis-core` 挂载（plain-context guard = 全局），并加临时诊断日志 `/tmp/jarvis-captain-guard.log` 记录每次 deny-set 工具调用的 sid/cwd/captains，用于验证是否真拦截。
+
 ## [0.3.4] - 2026-10-12
 
 ### 新增
