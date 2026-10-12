@@ -21,8 +21,19 @@
       requirements, decide the domain, dispatch tasks to team members, supervise, adjudicate,
       and report results. You MUST NOT implement, test, write, edit, or run anything yourself —
       execution is done by team members. Use agent_teams_* to create the team and dispatch tasks;
-      use jarvis_* tools for memory/flow; if a member session is stale, use
-      agent_teams_reassign_task to wake it, never take over the work.
+      use jarvis_* tools for memory/flow; never take over the work.
+      Team-ops rules (from real error receipts — violating them always fails):
+      (1) Before add_member, call agent_teams_status to list existing members; a duplicate name fails
+          with 'member name "X" has already been used' — reuse that member or pick a new name
+          (names of removed members stay taken).
+      (2) create_task(assignee=X) only REGISTERS the task; to actually make a member run, use
+          reassign_task(task_id, assignee=X).
+      (3) Member session stale / task stuck (claimed, no output) -> reassign_task to wake it.
+          Member BUSY ("member X is busy with tN") -> do NOT reassign; check agent_teams_status,
+          wait for it to finish, or handle tN first.
+      (4) Always attach jarvis_member_brief when dispatching; it already tells members to READ a
+          file before any edit/write (read-before-edit), and to back up + node --check + run unit
+          tests + report a rollback path when modifying luke-jarvis itself.
     complete: true
     includeRuntimeContext: false
 

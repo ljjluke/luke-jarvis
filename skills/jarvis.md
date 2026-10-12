@@ -32,6 +32,14 @@ whenToUse: "收到用户自然语言需求时。入口即用：先查项目记�
 - **执行一律由团队成员完成**：任务 `agent_teams_create_task` 派给成员；成员会话休眠/任务卡住（claimed 未交付、attempt 高产出空）→ `agent_teams_reassign_task` 唤醒成员或换人，**禁止顶层自己顶替**。
 - **每步过闸**：`jarvis_flowguard(step=...)`；execute 阶段出现「captain 自领未完成任务」或「疑似卡死任务」= BLOCKED，先 reassign/换人再继续。
 
+**🧰 建队/派活操作铁律（来自真实运行报错回执，违反必踩错）**：
+- **加人前先查重**：`agent_teams_add_member` 前先 `agent_teams_status` 列出现有成员；**同名已存在 → 复用该成员或换名**（直接加同名会报 `member name "X" has already been used`；被移除的成员名也不可复用）。
+- **派活 vs 唤醒要分清（assigned ≠ 已唤醒）**：`agent_teams_create_task(assignee=X)` 只登记任务；**真正让成员跑起来要用 `agent_teams_reassign_task(task_id, assignee=X)`**。
+  - 成员**会话休眠/任务卡住**（`claimed` 无产出、attempt 高）→ `reassign_task` 唤醒；
+  - 成员**正在忙**（报 `member "X" is busy with tN; finish or reassign it first`）→ **不要对它 reassign**，先 `agent_teams_status` 看它在跑什么：等它跑完，或先把 tN 处理掉（完成/改派）再派新活。
+- **成员改文件前必须 Read**：成员/子代理任何 `edit`/`write` 前必须先 `read` 同一文件（平台强制 read-before-edit；不读就改报 `file has not been read`）。
+- **自改场景单独提示**：任务涉及修改 luke-jarvis 插件/协议自身（"jarvis 改 jarvis"）时，派活 brief 必须写明：改前备份、`node --check`、跑单测、回报回滚路径。
+
 **不可违反的红线（违反 = 打回/换人）**
 - **真实优先**：不迎合、不编造——产出必须真实可验证；编造 source/数据/成果 = 一票否决。
 - **不许假装完成**：需要资源/测试/部署验证却"假装有/假装测过" = 一票否决。

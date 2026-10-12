@@ -1626,6 +1626,8 @@ export const TOOLS = [
         '- **需要时找专业同事直连**：跨角色的接口/口径问题直接 agent_teams_send_message 找当事人（不必事事经 captain/CEO 中转）；分歧各自跑 ponder 后交 jarvis_review 裁决。',
         '- **我的模块质量深挖（质量自循环）**：你是自己负责模块的"质量第一责任人"——按本单质量维度清单（`.jarvis/docs/质量维度-<需求>.md`）对自己负责的模块自循环深挖（深挖→修→再深挖直到无问题），**不是等质量评审角色来挑**；连续一轮清单全部维度无毛病才算达标；会议归拢时把碰撞出的新细节方向回报 CEO（回流清单）。',
         '- **不要自己发挥**：成果要对照需求/参照基准做（功能对齐、不加基准里没有的东西）；拿不准先问，不凭感觉加。',
+        '- **✍️ 改文件前必须先 Read（平台强制 read-before-edit）**：任何 `edit`/`write`（尤其改代码/插件源码）之前，**必须先用 `read` 读同一文件**——不读就改会被平台直接拒绝（报 `cannot modify "…": file has not been read`），白费一轮；改完再用 `read`/跑测试确认真改到了。',
+        '- **⚠️ 自改风险（改的是 jarvis/luke-jarvis 自己的插件、协议、脚本时）**：这类"自改"必须 ①改前备份原文件（`cp x x.bak_<时间>`）②`node --check` 语法自检 ③跑相关单测 ④在回报里写清回滚路径；**不许不留备份直接覆盖正在运行的安装副本**（改坏=整个公司停摆）。',
         '- **⚖️ ponder 多次执行是常态（你工作下来会跑很多次 ponder，不是跑一次就完）**：每个"需要产生判断"的动作（会议发言/方案决策/难点定位/回应质疑/变更影响/收口判定…）都先跑 ponder；**高赌注（首次分析需求/方案选择/分歧裁决）满血十阶段+完整子agent；中低赌注（日常判断/发言/回应）精简跑（十阶段骨架一个不少，子agent减少）——阶段不省、必出 run_id；跑前先读历史 run 结论（衔接深化，不从零想）。',
         '- **🔗 上下文准入（追加/新进场成员必做——不读记忆就接手 = 名义追加、实际重建）**：进场后**必须先读项目记忆**（`.jarvis/project.md` 续接五件套[当前进度/下一步/未决项/团队清单/关键决策与依据] + 需求规格 + 方案设计 + 一阶段交付物 + lessons + 黑板决策记录），然后**向 CEO 复述"我理解项目做到哪、为什么这么做、我要接什么"**，CEO 确认理解到位 → 才 claim 任务；**没读记忆/复述不过 → 不许接任务**（先补上下文，否则会重复问已解决的/做出一阶段不一致的东西）。',
         '- **⏱ 卡住限时上报（硬时限，不许自查到地老天荒）**：同一技术问题连续排查约 20-30 分钟仍无进展 → **必须上报**（写黑板：卡在哪 + 已试什么 + 需要什么 + 是否阻塞本任务/其他任务 + 预计何时能给），不许反复自查沉默；**生产/真实操作（升级/部署/改数据）卡住更要立即上报**；同时**执行 CEO 当前最高优先级指令，不被低优先级细节带走**（CEO 说"先X、Y延后"→先做X，Y记下延后）。',
@@ -4050,7 +4052,7 @@ export function captainExecutionGuard(exec) {
       )
     } catch {}
     if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
-    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① agent_teams_reassign_task（把卡住的任务派给成员——成员会话休眠时 reassign 会唤醒它）；② agent_teams_create_task（把当前待办建成任务并 assignee=成员）；③ 只读查看用 read/glob/grep；④ **不要重试本工具**——reassign 后成员会开始干活，页面即可看到子任务工作。`
+    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① agent_teams_status 先看现有成员与任务；② 建人前查重——add_member 同名会报 "has already been used"，同名就复用或换名；③ 派活：agent_teams_create_task(assignee=成员) 建任务，**任务卡住(claimed 无产出)/成员休眠 → agent_teams_reassign_task 唤醒**，但**成员在忙(member X is busy with tN) → 不要 reassign（会被拒），等它跑完或先看 status**；④ 只读查看用 read/glob/grep；⑤ **不要重试本工具**——派活后成员会开始干活，页面即可看到子任务工作。`
   } catch {
     return undefined
   }

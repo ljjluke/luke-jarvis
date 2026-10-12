@@ -2499,3 +2499,24 @@ test('captainExecutionGuard：captain 在 jarvis 工作区用 bash/edit → 拒�
   fs.writeFileSync(path.join(proj, '.jarvis', 'allow-captain-exec'), '')
   assert.strictEqual(captainExecutionGuard(exec('bash', 'sess-cap', proj)), undefined, '逃生阀存在时放行')
 })
+
+// ── v0.3.7：真实运行报错回执的三处修复（建队查重 / busy 判断 / read-before-edit）──
+
+test('jarvis_member_brief：须知含 read-before-edit 铁律 + 自改备份要求（报错回执 #3）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '测试员' })
+  const brief = String(r.brief || r.text || JSON.stringify(r))
+  assert.ok(/改文件前必须先 Read|read-before-edit/.test(brief), '须知须含 read-before-edit 铁律')
+  assert.ok(brief.includes('自改'), '须知须含自改风险提示')
+  assert.ok(brief.includes('node --check'), '须知须含语法自检')
+})
+
+test('协议与预设：含"同名 has already been used"与"member is busy"判断（报错回执 #1/#2）', () => {
+  const files = ['skills/jarvis.md', 'preset/agent.cordis.yml', 'preset/jarvis-captain.cordis.yml']
+  for (const f of files) {
+    const t = fs.readFileSync(path.resolve(f), 'utf8')
+    assert.ok(t.includes('has already been used'), `${f} 须含同名报错与查重要求`)
+    assert.ok(/busy with|正在忙|BUSY/.test(t), `${f} 须含 busy 判断（busy 时不要 reassign）`)
+    assert.ok(t.includes('reassign_task'), `${f} 须含 reassign 派活/唤醒指引`)
+  }
+})

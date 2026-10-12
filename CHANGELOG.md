@@ -2,6 +2,14 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.7] - 2026-10-12
+
+### 修复（来自真实运行报错回执）
+
+- **成员开工须知补两条铁律**：① 任何 `edit`/`write` 前**必须先 `read` 同一文件**（平台强制 read-before-edit，不读就改报 `file has not been read`）；② **自改场景**（改 luke-jarvis 插件/协议自身）必须备份 + `node --check` + 跑单测 + 回报回滚路径。
+- **建队/派活操作铁律**（写入 `skills/jarvis.md` + `preset/agent.cordis.yml` + `preset/jarvis-captain.cordis.yml`）：① 加人前先 `agent_teams_status` 查重，同名会报 `member name "X" has already been used` → 复用或换名；② `create_task` 只登记，**真正拉起成员要用 `reassign_task`**；③ 成员**休眠/任务卡死** → `reassign_task` 唤醒，成员**在忙**（报 `member "X" is busy with tN`）→ **不要 reassign**，等它跑完或先处理 tN。
+- **captain 拦截拒绝文案**同步加入查重与 busy 判断指引。
+
 ## [0.3.6] - 2026-10-12
 
 ### 变更
