@@ -2435,3 +2435,19 @@ test('/jarvis 命令：显式调用 → 输出严格模式（能力自检/顶层
   assert.ok(r.content.includes('agent_teams_reassign_task'), '卡住要唤醒成员而非自己顶替')
   assert.ok(r.content.includes('jarvis 能力未注册'), '缺能力时明确告知不硬做')
 })
+
+// ── v0.3.2：自带预设必须挂 luke-jarvis（修"预设只有人设没有工具"根因）──
+
+test('preset/agent.cordis.yml：必须挂 luke-jarvis 插件（否则 jarvis-org 预设没有 jarvis_* 工具）', () => {
+  const t = fs.readFileSync(path.resolve('preset/agent.cordis.yml'), 'utf8')
+  assert.ok(/name:\s*luke-jarvis/.test(t), 'agent.cordis.yml 应挂 luke-jarvis')
+})
+
+test('preset/jarvis-captain.cordis.yml：严格预设——无执行工具，有 agent-teams + luke-jarvis', () => {
+  const t = fs.readFileSync(path.resolve('preset/jarvis-captain.cordis.yml'), 'utf8')
+  assert.ok(!/dsh-tool-bash|dsh-tool-pwsh/.test(t), '不应含 bash/pwsh')
+  assert.ok(!/name:\s*'@deepseek-ai\/dsh-tool-fs'/.test(t), '不应含可写 fs 工具')
+  assert.ok(!/dsh-tool-subagent|dsh-tool-workflow|dsh-tool-ralph/.test(t), '不应含子代理/工作流')
+  assert.ok(/name:\s*luke-jarvis/.test(t), '应挂 luke-jarvis')
+  assert.ok(/dsh-agent-teams/.test(t), '应挂 agent-teams')
+})

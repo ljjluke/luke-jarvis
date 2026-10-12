@@ -1,4 +1,4 @@
-# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.3.1`
+# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.3.2`
 
 > **别再一句一句地"问 AI"了——把需求丢给一家替你干活的数字公司。**
 > 你说一句（哪怕模糊的）需求 → 它自动组建一支由**真实大佬思维驱动**的多角色 AI 团队，像真实公司一样澄清、拆解、分工、验证、返工——最后交给你**能逐条验收的成果**。
@@ -122,7 +122,16 @@
 
 ```bash
 # 方式 A：预设使用（推荐）
+# 1) 拷贝预设文件
+#    jarvis-org     = 完整公司预设（Jarvis 人设 + jarvis_* 工具 + agent-teams）
+#    jarvis-captain = 严格预设（顶层只派发，无 bash/edit/write/subagent —— 不能自己干活）
 cp -r preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/jarvis-org/
+cp -r preset/jarvis-captain.cordis.yml ~/.dsh/.agent-presets/jarvis-captain/
+# 2) ⚠️ dsh 0.2+ 不再自动发现 ~/.dsh/.agent-presets —— 必须在**当前 profile** 的
+#    cordis.patch.yml 里用 `- insert:` + dsh-agent-preset 行显式注册（plugins 内联对应
+#    .cordis.yml 的插件列表）；否则预设不生效——这正是"装了预设但 agent 预设里没有 jarvis"
+#    的根因。可参照 profile 里 preset-anchored-standard 的写法。
+# 3) 技能与 ponder
 mkdir -p ~/.dsh/skills/jarvis
 cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
 rm -rf ~/.dsh/skills/ponder && mkdir -p ~/.dsh/skills/ponder
@@ -149,7 +158,8 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 | 组件 | 位置 | 安装到 |
 |---|---|---|
-| Agent 预设 | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/` |
+| Agent 预设（完整） | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/`（须在 profile 的 cordis.patch.yml 显式注册） |
+| Agent 预设（严格·顶层只派发） | `preset/jarvis-captain.cordis.yml` | `~/.dsh/.agent-presets/jarvis-captain/`（须显式注册） |
 | 技能（唯一入口） | `skills/jarvis.md` | `~/.dsh/skills/jarvis/SKILL.md` |
 | ponder 满血（随包自带） | `skills/ponder/`（自包含单目录） | `~/.dsh/skills/ponder/`（整个目录） |
 | 核心插件 | `src/host/plugin.js` | 注册为核心插件 |
@@ -166,7 +176,7 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ## 🧪 质量保证
 
-- 单测 **200 项**（含蒸馏深度闸/防展示型空泛/绩效对齐度/覆盖核查/任务编排图/公司状态同步等硬闸测试）
+- 单测 **202 项**（含蒸馏深度闸/防展示型空泛/绩效对齐度/覆盖核查/任务编排图/公司状态同步等硬闸测试）
 - verify_host_pipeline **48 用例 0 VIOLATION**
 - selfcheck **11 项发布前自检**
 - 部署双形态验证（仓库 + 实体部署）全链路跑通

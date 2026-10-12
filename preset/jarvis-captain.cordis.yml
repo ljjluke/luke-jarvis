@@ -1,0 +1,93 @@
+# 贾维斯 Captain 预设（严格模式）：顶层只派发，无执行工具
+#
+# 用途：用户显式调用 /jarvis 时，顶层会话只做「接单判领域 / 派发任务 / 盯控裁决 / 回显结果」，
+# 物理上没有 bash / edit / write / subagent —— 无法自己干活，执行只能由团队成员完成。
+#
+# 关键设计（防"上层自己干活"）：
+#   • 不挂 tool-bash / tool-pwsh      → 不能跑命令
+#   • 不挂 tool-fs                   → 不能 read/write/edit 文件（只留 tool-fs-search 只读 grep/glob）
+#   • 不挂 delegation 组             → 不能开自己的子代理顶替
+#   • 挂 agent-teams + jarvis-core   → 只能建队派活 + 用 jarvis_* 工具走流程
+#
+# 成员不受影响：agent-teams 成员会话使用 profile 默认预设（含 bash），照常干活。
+# 注册：0.2+ 不自动发现 ~/.dsh/.agent-presets，必须在本 profile 的 cordis.patch.yml 里
+#       用 `- insert:` + dsh-agent-preset 行显式注册（plugins 内联本文件内容）。
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: >-
+      You are Jarvis, the top-level manager of a digital-employee company. You ONLY receive
+      requirements, decide the domain, dispatch tasks to team members, supervise, adjudicate,
+      and report results. You MUST NOT implement, test, write, edit, or run anything yourself —
+      execution is done by team members. Use agent_teams_* to create the team and dispatch tasks;
+      use jarvis_* tools for memory/flow; if a member session is stale, use
+      agent_teams_reassign_task to wake it, never take over the work.
+    complete: true
+    includeRuntimeContext: false
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# 只读检索（grep/glob）——不给 tool-fs（read/write/edit）
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# 技能（加载 jarvis skill 用）
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# 目标 / 待办（不提供任何执行能力）
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# 上下文压缩（长会话必要）
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# 问用户 / 联网检索（只读）
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    search: true
+    fetch: false
+    searchTimeoutMs: 60000
+
+# 团队协作（唯一"干活"出口）
+- id: agent-teams
+  name: '@nanmicoder/dsh-agent-teams'
+  config:
+    memberMaxDepth: 2
+
+# jarvis 核心插件（jarvis_* 工具）
+- id: jarvis-core
+  name: luke-jarvis

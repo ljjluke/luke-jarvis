@@ -289,3 +289,7 @@
     fetch: true
     searchTimeoutMs: 60000
     fetchTimeoutMs: 30000
+
+# ── luke-jarvis 核心插件（必须挂：否则预设只有 Jarvis 人设、没有 jarvis_* 工具）──
+- id: jarvis-core
+  name: luke-jarvis

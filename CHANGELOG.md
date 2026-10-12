@@ -2,6 +2,14 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.3.2] - 2026-10-10
+
+### 修复
+
+- **自带预设 `preset/agent.cordis.yml` 补挂 luke-jarvis 插件**：原预设只有 Jarvis 人设、没有 jarvis_* 工具（用户实测"agent 预设里没有 jarvis"的根因）——现补 `- id: jarvis-core / name: luke-jarvis`。
+- **新增严格预设 `preset/jarvis-captain.cordis.yml`**：顶层只派发——无 `tool-bash`/`tool-pwsh`/`tool-fs`（可写）/`delegation`（子代理），只留只读检索 + agent-teams + jarvis-core；顶层物理上不能自己干活，执行只能由成员完成。
+- **README 安装说明修正**：dsh 0.2+ 不自动发现 `~/.dsh/.agent-presets`，必须在 profile 的 `cordis.patch.yml` 用 `- insert:` 显式注册（plugins 内联），否则预设不生效。
+
 ## [0.3.1] - 2026-10-10
 
 ### 变更
