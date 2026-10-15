@@ -3122,11 +3122,11 @@ export const TOOLS = [
   {
     name: 'jarvis_baseline',
     description:
-      '基线清单生成器（**改造/替换/移植/重构类任务的第一步，防"覆盖面丢失"**——真实教训：webui 换一套 UI 后大量页面/子页面功能丢失、样式崩，根因是没把"旧系统有哪些单元"变成可枚举清单，验收只抽查了几页）。把基线变成**可枚举、可逐条勾对**的清单：①web-ui：扫页面目录(pages/views/screens)+路由/菜单配置，提取页面文件与路由路径；②files：按 roots 枚举文件；③custom：直接传 items（流程/文档/设备/接口等非代码清单）。**基线必须来自真实可枚举来源（读代码/路由表/菜单配置），不许凭印象列举**（凭印象=必漏）。产出 <项目>/.jarvis/docs/基线清单-<slug>.json + .md，下一步用 jarvis_coverage 做逐条覆盖矩阵，收口闸强制覆盖率。',
+      '基线清单生成器（**领域无关**：任何"改造/替换/移植/重构/换皮"类任务的第一步，防"覆盖面丢失"——真实教训：webui 换一套 UI 后大量页面/子页面功能丢失、样式崩，根因是没把"旧系统有哪些单元"变成可枚举清单，验收只抽查了几页；同样的风险存在于任何领域：流程步骤、文档章节、接口、字段、设备、权限点……）。把基线变成**可枚举、可逐条勾对**的清单。kind 决定抽取器（领域无关的通用抽取，不是领域模板）：web-ui=页面目录+路由/菜单；files=按 roots 枚举文件；docs=文档章节标题；text=文本条目(编号/列表，用于流程/SOP/需求清单)；api=OpenAPI paths+常见框架路由声明；db=SQL 表/视图；custom=直接传 items。**基线必须来自真实可枚举来源（读代码/配置/文档原始内容），不许凭印象列举**（凭印象=必漏）。产出 <项目>/.jarvis/docs/基线清单-<slug>.json + .md；下一步用 jarvis_coverage(persist=true, slug=同名) 建逐条覆盖矩阵，收口闸强制覆盖率。',
     parameters: {
       type: 'object',
       properties: {
-        kind: { type: 'string', description: '单元类型：web-ui（默认）/ files（按 roots 枚举文件）/ custom（配合 items）' },
+        kind: { type: 'string', description: '单元类型（领域无关）：web-ui（默认，页面+路由）/ files（按 roots 枚举文件）/ docs（文档章节）/ text（文本条目：流程/SOP/需求清单）/ api（接口：OpenAPI+框架路由）/ db（SQL 表/视图）/ custom（配合 items 自定）' },
         roots: { type: 'string', description: '扫描根 JSON 数组字符串（如 ["src","app"]）；缺省=自动探测 pages/views/router/config 等常见目录' },
         items: { type: 'string', description: '显式条目 JSON 数组 [{id?,title,source?,category?}]——给了就跳过扫描（非代码类改造用）' },
         slug: { type: 'string', description: '清单名（用于文件名，如 webui-r11）' },
@@ -3179,38 +3179,98 @@ export const TOOLS = [
         }
       } catch {}
       if (items.length === 0) {
+        // 领域无关抽取器：web-ui(页面/路由) / files(文件) / docs(文档章节) / text(文本条目) / api(接口) / db(表视图)
         const rootsArg = (() => { try { const a = JSON.parse(String(args?.roots ?? 'null')); return Array.isArray(a) ? a.map(String) : null } catch { return null } })()
-        const auto = ['src', 'app', 'pages', 'views', 'src/pages', 'src/views', 'src/router', 'src/routes', 'router', 'routes', 'config', 'webui', 'webui-src']
-        const roots = (rootsArg && rootsArg.length ? rootsArg : auto).map((r) => path.join(projectDir, r)).filter((r) => fs.existsSync(r))
+        const autoWeb = ['src', 'app', 'pages', 'views', 'src/pages', 'src/views', 'src/router', 'src/routes', 'router', 'routes', 'config', 'webui', 'webui-src']
+        const autoDocs = ['docs', 'doc', 'spec', 'specs', '.jarvis/docs', 'requirements', 'design', 'process']
+        const autoAny = ['.', 'src', 'app', 'lib', 'services', 'server', 'backend', 'api', 'db', 'sql', 'migrations', 'docs', 'config']
+        const auto = kind === 'docs' ? autoDocs
+          : kind === 'text' ? autoDocs
+          : (kind === 'api' || kind === 'db') ? autoAny
+          : kind === 'files' ? ['.']
+          : autoWeb
+        const roots = (rootsArg && rootsArg.length ? rootsArg : auto).map((r) => path.join(projectDir, r)).filter((r) => { try { return fs.existsSync(r) } catch { return false } })
         const files = []
-        for (const r of roots) walk(r, files)
-        const ROUTE_HINT = /(route|routes|router|menu|nav)/i
-        const PAGE_HINT = /(^|[\\/])(pages|views|screens)[\\/]/i
-        const EXT = /\.(js|jsx|ts|tsx|vue|html)$/
+        for (const r of roots) {
+          try { if (fs.statSync(r).isFile()) { files.push(r); continue } } catch {}
+          walk(r, files)
+        }
         const seen = new Set()
-        for (const f of files) {
-          if (!EXT.test(f)) continue
-          const rel = path.relative(projectDir, f)
-          const isRouteFile = ROUTE_HINT.test(rel) // 路由/菜单文件按**路径**识别（如 src/router/index.ts）
-          const isPage = PAGE_HINT.test(f)
-          if (kind === 'web-ui' && !isRouteFile && !isPage) continue
-          const id = 'file:' + rel
-          if (!seen.has(id)) {
-            seen.add(id)
-            items.push({ id, title: path.basename(f), source: rel, category: isRouteFile ? 'route-config' : 'page' })
-          }
-          if (isRouteFile) {
+        const push = (id, title, source, category) => {
+          const k = String(id)
+          if (!k || seen.has(k) || items.length >= 8000) return
+          seen.add(k)
+          items.push({ id: k, title: String(title).slice(0, 160), source: String(source), category })
+        }
+        if (kind === 'docs' || kind === 'text') {
+          // 文档类（任何领域的规范/SOP/需求/设计文档）：章节标题 + 文本条目
+          for (const f of files) {
+            const rel = path.relative(projectDir, f)
+            if (!/\.(md|markdown|txt|rst|adoc)$/i.test(f)) continue
             let txt = ''
-            try { txt = fs.readFileSync(f, 'utf8') } catch {}
-            const re = /(?:path|to)\s*:\s*['"`]([^'"`]+)['"`]/g
+            try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
+            let n = 0
+            for (const line of txt.split('\n')) {
+              const h = line.match(/^(#{1,6})\s+(.+?)\s*$/)
+              if (h) { n++; push('sec:' + rel + '#' + n, h[2], rel, 'section'); continue }
+              if (kind === 'text') {
+                const li = line.match(/^\s*(?:[-*+]|\d+[.)、])\s+(.+?)\s*$/)
+                if (li && li[1].length > 1) { n++; push('item:' + rel + '#' + n, li[1], rel, 'item') }
+              }
+            }
+          }
+        } else if (kind === 'api') {
+          // 接口类（任何语言/框架）：OpenAPI paths + 常见路由声明
+          const OPENAPI_PATH = /^\s{0,8}['"]?(\/[A-Za-z0-9_\-./{}:]*?)['"]?\s*:\s*$/gm
+          const CODE_ROUTE = /(?:\b(?:app|router|r|route|server|api|group|mux)\s*\.\s*(?:get|post|put|delete|patch|head|options|all|add|handle|HandleFunc)\s*\(\s*['"`]([^'"`]+)|@(?:Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"]|(?:path|url|endpoint)\s*[:=]\s*['"`](\/[^'"`]*))/gi
+          for (const f of files) {
+            const rel = path.relative(projectDir, f)
+            if (!/\.(js|jsx|ts|tsx|vue|py|go|java|kt|rb|php|cs|ya?ml|json)$/i.test(f)) continue
+            let txt = ''
+            try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
+            if (/\.(ya?ml|json)$/i.test(f)) {
+              let m
+              while ((m = OPENAPI_PATH.exec(txt)) !== null) push('api:' + m[1], m[1], rel, 'endpoint')
+            }
+            let cm
+            while ((cm = CODE_ROUTE.exec(txt)) !== null) {
+              const ep = cm[1] || cm[2] || cm[3]
+              if (ep && ep.length < 200) push('api:' + ep, ep, rel, 'endpoint')
+            }
+          }
+        } else if (kind === 'db') {
+          // 数据库类：表/视图清单
+          for (const f of files) {
+            const rel = path.relative(projectDir, f)
+            if (!/\.(sql|ddl)$/i.test(f)) continue
+            let txt = ''
+            try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
+            const re = /create\s+(?:or\s+replace\s+)?(table|view)\s+(?:if\s+not\s+exists\s+)?[`"'\[]?([A-Za-z0-9_.]+)/gi
             let m
-            while ((m = re.exec(txt)) !== null && items.length < 6000) {
-              const rp = String(m[1] || '').trim()
-              if (!rp || rp.length > 120) continue
-              const rid = 'route:' + rp
-              if (seen.has(rid)) continue
-              seen.add(rid)
-              items.push({ id: rid, title: rp, source: rel, category: 'route' })
+            while ((m = re.exec(txt)) !== null) push('db:' + m[2], m[2], rel, m[1].toLowerCase() === 'view' ? 'view' : 'table')
+          }
+        } else {
+          // web-ui：页面文件 + 路由表；files：全量文件
+          const ROUTE_HINT = /(route|routes|router|menu|nav)/i
+          const PAGE_HINT = /(^|[\\/])(pages|views|screens)[\\/]/i
+          const EXT = /\.(js|jsx|ts|tsx|vue|html)$/
+          for (const f of files) {
+            const rel = path.relative(projectDir, f)
+            if (kind === 'web-ui' && !EXT.test(f)) continue
+            const isRouteFile = ROUTE_HINT.test(rel)
+            const isPage = PAGE_HINT.test(f)
+            if (kind === 'web-ui' && !isRouteFile && !isPage) continue
+            push('file:' + rel, path.basename(f), rel, isRouteFile ? 'route-config' : 'page')
+            if (isRouteFile) {
+              let txt = ''
+              try { txt = fs.readFileSync(f, 'utf8') } catch {}
+              const re = /(?:path|to)\s*:\s*['"`]([^'"`]+)['"`]/g
+              let m
+              while ((m = re.exec(txt)) !== null) {
+                const rp = String(m[1] || '').trim()
+                if (!rp || rp.length > 120) continue
+                push('route:' + rp, rp, rel, 'route')
+              }
             }
           }
         }

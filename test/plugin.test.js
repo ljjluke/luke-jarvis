@@ -2572,3 +2572,30 @@ test('jarvis_baseline：扫页面/路由生成可枚举基线并落盘', async (
   assert.ok(saved.items.some((i) => i.id === 'route:/home'), '提取到路由 /home')
   assert.ok(saved.items.some((i) => i.id.startsWith('file:src/pages/')), '枚举到页面文件')
 })
+
+// ── v0.4.2：基线抽取器领域无关（docs 章节 / api 接口 / db 表 / text 条目）──
+
+test('jarvis_baseline：docs 抽文档章节；api 抽接口；db 抽表（领域无关）', async () => {
+  const os = await import('node:os')
+  const fsm = fs
+  const dir = fsm.mkdtempSync(path.join(os.tmpdir(), 'jarvis-base2-'))
+  fsm.mkdirSync(path.join(dir, 'docs'), { recursive: true })
+  fsm.writeFileSync(path.join(dir, 'docs/流程.md'), '# 总则\n\n## 申报\n- 提交材料\n- 复核\n\n## 归档\n')
+  fsm.mkdirSync(path.join(dir, 'server'), { recursive: true })
+  fsm.writeFileSync(path.join(dir, 'server/api.go'), 'router.GET("/users", h)\nrouter.POST("/users/:id", h2)')
+  fsm.mkdirSync(path.join(dir, 'sql'), { recursive: true })
+  fsm.writeFileSync(path.join(dir, 'sql/schema.sql'), 'CREATE TABLE users (id int);\nCREATE VIEW v_users AS SELECT 1;')
+  const def = TOOLS.find((t) => t.name === 'jarvis_baseline')
+
+  const d1 = await def.handler({ projectDir: dir, kind: 'docs', slug: 'doc1', roots: '["docs"]' })
+  assert.ok(d1.count >= 3, `docs 应抽到章节（实际 ${d1.count}）`)
+
+  const d2 = await def.handler({ projectDir: dir, kind: 'text', slug: 'txt1', roots: '["docs/流程.md"]' })
+  assert.ok(d2.count >= 4, `text 应抽到章节+条目（实际 ${d2.count}）`)
+
+  const d3 = await def.handler({ projectDir: dir, kind: 'api', slug: 'api1', roots: '["server"]' })
+  assert.ok(d3.count >= 2, `api 应抽到接口（实际 ${d3.count}）`)
+
+  const d4 = await def.handler({ projectDir: dir, kind: 'db', slug: 'db1', roots: '["sql"]' })
+  assert.ok(d4.count >= 2, `db 应抽到表/视图（实际 ${d4.count}）`)
+})

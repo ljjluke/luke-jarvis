@@ -2,6 +2,22 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.4.2] - 2026-10-12
+
+### 变更：基线抽取器提升为**领域无关**
+
+用户指出：覆盖细节能力必须是**领域无关**的（不只 webui 换皮，流程/文档/接口/设备/字段同样会丢覆盖面）。`jarvis_baseline` 的 kind 现为通用抽取器（非领域模板）：
+
+- `web-ui` 页面目录+路由/菜单配置（按路径识别 router/menu，提取 `path:`/`to:`）
+- `files` 按 roots 枚举文件
+- `docs` 文档章节标题（md/txt/rst/adoc）
+- `text` 文本条目（编号/列表 → 流程/SOP/需求清单）
+- `api` 接口（OpenAPI `paths:` + 常见框架路由声明 `router.GET(...)`/`@GetMapping(...)`）
+- `db` SQL 表/视图（`CREATE TABLE|VIEW`）
+- `custom` 显式 items
+
+配套：覆盖矩阵与收口硬闸本就领域无关（只认「基线清单-*.json → 覆盖矩阵-*.json」的引用闭合 + 状态收敛 + 终态有据）。
+
 ## [0.4.0] - 2026-10-12
 
 ### 新增：覆盖优先机制（防"改造类任务丢页面/丢功能"）
