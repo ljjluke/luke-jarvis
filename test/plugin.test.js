@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2519,4 +2519,56 @@ test('协议与预设：含"同名 has already been used"与"member is busy"判�
     assert.ok(/busy with|正在忙|BUSY/.test(t), `${f} 须含 busy 判断（busy 时不要 reassign）`)
     assert.ok(t.includes('reassign_task'), `${f} 须含 reassign 派活/唤醒指引`)
   }
+})
+
+// ── v0.4.0：覆盖优先（基线→覆盖矩阵→收口硬闸，防"换UI丢页面"）──
+
+function fakeDocsFs(files) {
+  return {
+    async list(dir) {
+      const prefix = dir.endsWith('/') ? dir : dir + '/'
+      return [...new Set(Object.keys(files).filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length).split('/')[0]))]
+    },
+    async readText(p) { return files[p] ?? null },
+    async resolve(p) { return p },
+  }
+}
+const PDIR = { join: (...a) => a.join('/') }
+
+test('checkCoverageGate：无基线→放行；有基线无矩阵→拦', async () => {
+  const fs1 = fakeDocsFs({ '/proj/.jarvis/docs/需求规格-x.md': 'x' })
+  assert.deepStrictEqual(await checkCoverageGate(fs1, '/proj', PDIR), [], '无基线不拦')
+  const fs2 = fakeDocsFs({ '/proj/.jarvis/docs/基线清单-webui.json': '{"items":[]}' })
+  const r2 = await checkCoverageGate(fs2, '/proj', PDIR)
+  assert.ok(r2.some((m) => m.includes('覆盖矩阵')), '有基线必须有矩阵')
+})
+
+test('checkCoverageGate：未覆盖→拦；豁免后放行；r_verify<1→拦', async () => {
+  const base = { '/proj/.jarvis/docs/基线清单-webui.json': '{"items":[]}' }
+  const fs3 = fakeDocsFs({ ...base, '/proj/.jarvis/docs/覆盖矩阵-webui.json': JSON.stringify({ uncovered: ['route:/a'], r_verify: 1 }) })
+  assert.ok((await checkCoverageGate(fs3, '/proj', PDIR)).some((m) => m.includes('覆盖率未闭环')), '未覆盖应拦')
+  const fs4 = fakeDocsFs({ ...base, '/proj/.jarvis/docs/覆盖矩阵-webui.json': JSON.stringify({ uncovered: ['route:/a'], exemptions: ['route:/a'], r_verify: 1 }) })
+  assert.deepStrictEqual(await checkCoverageGate(fs4, '/proj', PDIR), [], '豁免后放行')
+  const fs5 = fakeDocsFs({ ...base, '/proj/.jarvis/docs/覆盖矩阵-webui.json': JSON.stringify({ uncovered: [], r_verify: 0.6 }) })
+  assert.ok((await checkCoverageGate(fs5, '/proj', PDIR)).some((m) => m.includes('验证覆盖率不足')), 'r_verify<1 应拦')
+})
+
+test('jarvis_baseline：扫页面/路由生成可枚举基线并落盘', async () => {
+  const os = await import('node:os')
+  const fsm = fs
+  const pathm = path
+  const dir = fsm.mkdtempSync(pathm.join(os.tmpdir(), 'jarvis-base-'))
+  fsm.mkdirSync(pathm.join(dir, 'src/pages'), { recursive: true })
+  fsm.mkdirSync(pathm.join(dir, 'src/router'), { recursive: true })
+  fsm.writeFileSync(pathm.join(dir, 'src/pages/Home.tsx'), 'export default function Home(){return null}')
+  fsm.writeFileSync(pathm.join(dir, 'src/pages/User.tsx'), 'export default function User(){return null}')
+  fsm.writeFileSync(pathm.join(dir, 'src/router/index.ts'), "export const routes=[{path:'/home',component:Home},{path:'/user',component:User}]")
+  const def = TOOLS.find((t) => t.name === 'jarvis_baseline')
+  const r = await def.handler({ projectDir: dir, slug: 'selftest', kind: 'web-ui' })
+  assert.ok(r.ok && r.count >= 4, `应枚举出页面+路由（实际 ${r.count}）`)
+  assert.ok(r.written.some((w) => w.includes('基线清单-selftest.json')), '写 json')
+  assert.ok(fsm.existsSync(pathm.join(dir, '.jarvis/docs/基线清单-selftest.json')), '文件真落盘')
+  const saved = JSON.parse(fsm.readFileSync(pathm.join(dir, '.jarvis/docs/基线清单-selftest.json'), 'utf8'))
+  assert.ok(saved.items.some((i) => i.id === 'route:/home'), '提取到路由 /home')
+  assert.ok(saved.items.some((i) => i.id.startsWith('file:src/pages/')), '枚举到页面文件')
 })

@@ -1627,6 +1627,7 @@ export const TOOLS = [
         '- **我的模块质量深挖（质量自循环）**：你是自己负责模块的"质量第一责任人"——按本单质量维度清单（`.jarvis/docs/质量维度-<需求>.md`）对自己负责的模块自循环深挖（深挖→修→再深挖直到无问题），**不是等质量评审角色来挑**；连续一轮清单全部维度无毛病才算达标；会议归拢时把碰撞出的新细节方向回报 CEO（回流清单）。',
         '- **不要自己发挥**：成果要对照需求/参照基准做（功能对齐、不加基准里没有的东西）；拿不准先问，不凭感觉加。',
         '- **✍️ 改文件前必须先 Read（平台强制 read-before-edit）**：任何 `edit`/`write`（尤其改代码/插件源码）之前，**必须先用 `read` 读同一文件**——不读就改会被平台直接拒绝（报 `cannot modify "…": file has not been read`），白费一轮；改完再用 `read`/跑测试确认真改到了。',
+        '- **🧭 改造/替换类任务禁区（防覆盖面丢失）**：凡是"换 UI/换框架/移植/重构/替换设备或流程"这类**改造**任务，**不许只按需求文档做、不许只抽查几页就算完**——必须先 `jarvis_baseline` 建旧系统**可枚举基线**（页面/路由/菜单/接口/字段，来自真实代码或配置），逐条覆盖到新实现并留验证证据；**未覆盖项一律显式登记**（补做或写理由豁免），静默丢功能/丢页面 = 一票打回。',
         '- **⚠️ 自改风险（改的是 jarvis/luke-jarvis 自己的插件、协议、脚本时）**：这类"自改"必须 ①改前备份原文件（`cp x x.bak_<时间>`）②`node --check` 语法自检 ③跑相关单测 ④在回报里写清回滚路径；**不许不留备份直接覆盖正在运行的安装副本**（改坏=整个公司停摆）。',
         '- **⚖️ ponder 多次执行是常态（你工作下来会跑很多次 ponder，不是跑一次就完）**：每个"需要产生判断"的动作（会议发言/方案决策/难点定位/回应质疑/变更影响/收口判定…）都先跑 ponder；**高赌注（首次分析需求/方案选择/分歧裁决）满血十阶段+完整子agent；中低赌注（日常判断/发言/回应）精简跑（十阶段骨架一个不少，子agent减少）——阶段不省、必出 run_id；跑前先读历史 run 结论（衔接深化，不从零想）。',
         '- **🔗 上下文准入（追加/新进场成员必做——不读记忆就接手 = 名义追加、实际重建）**：进场后**必须先读项目记忆**（`.jarvis/project.md` 续接五件套[当前进度/下一步/未决项/团队清单/关键决策与依据] + 需求规格 + 方案设计 + 一阶段交付物 + lessons + 黑板决策记录），然后**向 CEO 复述"我理解项目做到哪、为什么这么做、我要接什么"**，CEO 确认理解到位 → 才 claim 任务；**没读记忆/复述不过 → 不许接任务**（先补上下文，否则会重复问已解决的/做出一阶段不一致的东西）。',
@@ -3119,6 +3120,136 @@ export const TOOLS = [
   },
 
   {
+    name: 'jarvis_baseline',
+    description:
+      '基线清单生成器（**改造/替换/移植/重构类任务的第一步，防"覆盖面丢失"**——真实教训：webui 换一套 UI 后大量页面/子页面功能丢失、样式崩，根因是没把"旧系统有哪些单元"变成可枚举清单，验收只抽查了几页）。把基线变成**可枚举、可逐条勾对**的清单：①web-ui：扫页面目录(pages/views/screens)+路由/菜单配置，提取页面文件与路由路径；②files：按 roots 枚举文件；③custom：直接传 items（流程/文档/设备/接口等非代码清单）。**基线必须来自真实可枚举来源（读代码/路由表/菜单配置），不许凭印象列举**（凭印象=必漏）。产出 <项目>/.jarvis/docs/基线清单-<slug>.json + .md，下一步用 jarvis_coverage 做逐条覆盖矩阵，收口闸强制覆盖率。',
+    parameters: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', description: '单元类型：web-ui（默认）/ files（按 roots 枚举文件）/ custom（配合 items）' },
+        roots: { type: 'string', description: '扫描根 JSON 数组字符串（如 ["src","app"]）；缺省=自动探测 pages/views/router/config 等常见目录' },
+        items: { type: 'string', description: '显式条目 JSON 数组 [{id?,title,source?,category?}]——给了就跳过扫描（非代码类改造用）' },
+        slug: { type: 'string', description: '清单名（用于文件名，如 webui-r11）' },
+        projectDir: { type: 'string', description: '项目目录（缺省=当前会话工作区）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          count: { type: 'number' },
+          slug: { type: 'string' },
+          written: { type: 'array', items: { type: 'string' } },
+          sample: { type: 'array', items: { type: 'string' } },
+          verdict: { type: 'string' },
+        },
+        required: ['ok', 'count', 'verdict'],
+      },
+      render: (r) => `基线清单（${r.slug || ''}）：${r.ok ? '✅' : '❌'} 共 ${r.count} 条\n写入：${(r.written || []).join('\n')}\n样例：${(r.sample || []).slice(0, 6).join(' | ')}\n${r.verdict}`,
+    },
+    handler: async (args, exec) => {
+      const path = _require('node:path')
+      const fs = _require('node:fs')
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+      const slug = String(args?.slug ?? 'baseline').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
+      const kind = String(args?.kind ?? 'web-ui').trim()
+      const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.jarvis', 'archive'])
+      const walk = (root, out, depth = 0) => {
+        if (depth > 8 || out.length > 6000) return
+        let ents = []
+        try { ents = fs.readdirSync(root, { withFileTypes: true }) } catch { return }
+        for (const e of ents) {
+          if (SKIP.has(e.name)) continue
+          const fp = path.join(root, e.name)
+          if (e.isDirectory()) walk(fp, out, depth + 1)
+          else out.push(fp)
+        }
+      }
+      let items = []
+      try {
+        const arr = JSON.parse(String(args?.items ?? 'null'))
+        if (Array.isArray(arr)) {
+          items = arr.map((it, i) => ({
+            id: String(it?.id ?? 'L' + (i + 1)),
+            title: String(it?.title ?? ''),
+            source: String(it?.source ?? ''),
+            category: String(it?.category ?? 'custom'),
+          }))
+        }
+      } catch {}
+      if (items.length === 0) {
+        const rootsArg = (() => { try { const a = JSON.parse(String(args?.roots ?? 'null')); return Array.isArray(a) ? a.map(String) : null } catch { return null } })()
+        const auto = ['src', 'app', 'pages', 'views', 'src/pages', 'src/views', 'src/router', 'src/routes', 'router', 'routes', 'config', 'webui', 'webui-src']
+        const roots = (rootsArg && rootsArg.length ? rootsArg : auto).map((r) => path.join(projectDir, r)).filter((r) => fs.existsSync(r))
+        const files = []
+        for (const r of roots) walk(r, files)
+        const ROUTE_HINT = /(route|routes|router|menu|nav)/i
+        const PAGE_HINT = /(^|[\\/])(pages|views|screens)[\\/]/i
+        const EXT = /\.(js|jsx|ts|tsx|vue|html)$/
+        const seen = new Set()
+        for (const f of files) {
+          if (!EXT.test(f)) continue
+          const rel = path.relative(projectDir, f)
+          const isRouteFile = ROUTE_HINT.test(rel) // 路由/菜单文件按**路径**识别（如 src/router/index.ts）
+          const isPage = PAGE_HINT.test(f)
+          if (kind === 'web-ui' && !isRouteFile && !isPage) continue
+          const id = 'file:' + rel
+          if (!seen.has(id)) {
+            seen.add(id)
+            items.push({ id, title: path.basename(f), source: rel, category: isRouteFile ? 'route-config' : 'page' })
+          }
+          if (isRouteFile) {
+            let txt = ''
+            try { txt = fs.readFileSync(f, 'utf8') } catch {}
+            const re = /(?:path|to)\s*:\s*['"`]([^'"`]+)['"`]/g
+            let m
+            while ((m = re.exec(txt)) !== null && items.length < 6000) {
+              const rp = String(m[1] || '').trim()
+              if (!rp || rp.length > 120) continue
+              const rid = 'route:' + rp
+              if (seen.has(rid)) continue
+              seen.add(rid)
+              items.push({ id: rid, title: rp, source: rel, category: 'route' })
+            }
+          }
+        }
+      }
+      const docsDir = path.join(projectDir, '.jarvis/docs')
+      const jsonPath = path.join(docsDir, '基线清单-' + slug + '.json')
+      const mdPath = path.join(docsDir, '基线清单-' + slug + '.md')
+      const written = []
+      let ok = items.length > 0
+      try {
+        const fsSvc = (() => { try { return moduleCtx && typeof moduleCtx.get === 'function' ? moduleCtx.get('fs') : null } catch { return null } })()
+        try { fs.mkdirSync(docsDir, { recursive: true }) } catch {}
+        const payload = { slug, kind, generatedAt: new Date().toISOString(), count: items.length, items }
+        const md = ['# 基线清单 ' + slug + '（' + kind + '）', '', '共 ' + items.length + ' 条 —— **改造/替换类任务必须逐条覆盖**（用 jarvis_coverage persist=true slug=' + slug + ' 生成覆盖矩阵，收口闸强制覆盖率）', '', '| id | 标题 | 来源 | 类别 |', '|---|---|---|---|']
+          .concat(items.slice(0, 3000).map((it) => '| ' + String(it.id).replace(/\|/g, '\\|') + ' | ' + String(it.title).replace(/\|/g, '\\|') + ' | ' + String(it.source).replace(/\|/g, '\\|') + ' | ' + it.category + ' |'))
+          .join('\n')
+        if (fsSvc && typeof fsSvc.writeText === 'function') {
+          await fsSvc.writeText(await fsSvc.resolve(jsonPath), JSON.stringify(payload, null, 2))
+          await fsSvc.writeText(await fsSvc.resolve(mdPath), md)
+          written.push(jsonPath, mdPath)
+        } else {
+          fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2))
+          fs.writeFileSync(mdPath, md)
+          written.push(jsonPath, mdPath)
+        }
+      } catch { ok = false }
+      return {
+        ok,
+        count: items.length,
+        slug,
+        written,
+        sample: items.slice(0, 8).map((it) => it.id + ' ← ' + it.source),
+        verdict: ok
+          ? '基线已建（' + items.length + ' 条）。下一步：jarvis_coverage(source=基线条目, targets={"新实现":[逐条 refs+status+evidence]}, persist=true, slug="' + slug + '") 生成覆盖矩阵；收口闸会强制"未覆盖(除豁免)=0 且 r_verify=100%"'
+          : '未生成（检查 roots/items 或目录权限）',
+      }
+    },
+  },
+  {
     name: 'jarvis_coverage',
     description:
       '覆盖核查器（收口前/阶段闸的硬校验——防"清单对清单"漏对应，领域无关：只核查 清单A→清单B 的逐条覆盖关系，不预设任何领域清单类型）。团队解决问题要全面不遗漏 → 靠"每条都有落点"的自动闸，不靠人眼数。输入若干清单（每条={id,status,refs}），自动核查：①**逐条覆盖**——每条源清单条目是否被目标清单引用（refs 非空）；②**悬空引用**——refs 指向的 id 在目标清单里不存在；③**未收口**——status 非终态(completed/通过/closed/done/confirmed/已确认)的条目数；④**无证据终态**——标终态但无 evidence 的条目（防"说完成但没证据"= 自报式通过）；⑤**覆盖率**——被覆盖条数/总数。**不做领域判断**：清单是什么（需求清单/问题清单/验收项/交付项…）由 CEO 现场定义，工具只查"引用闭合 + 状态收敛 + 终态有据"。典型用法：收口前把《需求规格》条目(源) 与《方案设计》落点/《测试验收单》用例/交付状态(目标) 做覆盖核查——任一需求条无落点/无测试/无交付证据 → 打回补链。',
@@ -3128,6 +3259,10 @@ export const TOOLS = [
         source: { type: 'string', description: '源清单 JSON 数组（被覆盖方）：[{id:"R1", title:"…", status:"open|completed|…"}]——如需求规格条目' },
         targets: { type: 'string', description: '目标清单 JSON 对象（覆盖方，可多个）：{"方案设计":[{id:"D1", refs:["R1"], status:"completed", evidence:"…"}], "测试验收":[{id:"T1", refs:["R1"], status:"completed", evidence:"…"}]}——每个目标清单条目用 refs 声明覆盖了源清单哪些 id' },
         label: { type: 'string', description: '本次核查场景名（如"收口前覆盖核查"），仅用于输出可读性' },
+        persist: { type: 'string', description: 'true=把覆盖矩阵落盘到 <项目>/.jarvis/docs/覆盖矩阵-<slug>.json+.md（收口闸据此强制覆盖率——改造/替换类任务必用）' },
+        slug: { type: 'string', description: 'persist 用：矩阵 slug（与 jarvis_baseline 的 slug 一致，如 webui-r11）' },
+        exemptions: { type: 'string', description: 'persist 用：豁免条目 JSON 数组（如 ["route:/dev/null"]）——确实不做的基线项须登记理由，否则收口闸按未覆盖拦' },
+        projectDir: { type: 'string', description: 'persist 用：项目目录（缺省=当前会话工作区）' },
       },
     },
     output: {
@@ -3152,7 +3287,7 @@ export const TOOLS = [
       },
       render: (r) => `覆盖核查（${r.label || ''}）：${r.ok ? '✅ 可过闸' : '❌ 打回补链'} · 覆盖率 ${Math.round((r.coverage || 0) * 100)}%（${r.sourceCount ?? 0} 条源）\n未覆盖：${(r.uncovered ?? []).slice(0, 5).join('、') || '无'}\n未收口：${(r.openItems ?? []).slice(0, 5).join('、') || '无'}\n悬空：${(r.danglingRefs ?? []).slice(0, 3).join('、') || '无'}\n${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const label = String(args?.label ?? '覆盖核查')
       let source = []
       try { source = JSON.parse(String(args?.source ?? '[]')) } catch { source = [] }
@@ -3242,8 +3377,38 @@ export const TOOLS = [
       if (openItems.length) parts.push(`未收口 ${openItems.length} 条`)
       if (evidenceLess.length) parts.push(`终态无证据 ${evidenceLess.length} 条`)
       if (!coreGatePass) parts.push(`核心细节(P0/P1)未全验证：r_contract=${r_contract} < ${gateThreshold}（${coreVerified}/${coreN}）——防少列核心细节虚高`)
+      // persist：覆盖矩阵落盘（收口闸据此强制覆盖率——改造/替换类任务防"覆盖面丢失"）
+      let persisted = []
+      try {
+        const want = String(args?.persist ?? '').toLowerCase()
+        if (want === 'true' || want === '1') {
+          const path = _require('node:path')
+          const fsm = _require('node:fs')
+          const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+          const slug = String(args?.slug ?? 'matrix').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
+          let exemptions = []
+          try { const a = JSON.parse(String(args?.exemptions ?? '[]')); if (Array.isArray(a)) exemptions = a.map(String) } catch {}
+          const fsSvc = (() => { try { return moduleCtx && typeof moduleCtx.get === 'function' ? moduleCtx.get('fs') : null } catch { return null } })()
+          const docsDir = path.join(projectDir, '.jarvis/docs')
+          const jsonPath = path.join(docsDir, '覆盖矩阵-' + slug + '.json')
+          const mdPath = path.join(docsDir, '覆盖矩阵-' + slug + '.md')
+          const payload = { slug, label, generatedAt: new Date().toISOString(), sourceCount: sourceIds.size, coverage, r_plan, r_verify, r_contract, uncovered, danglingRefs: dangling, openItems, evidenceLess, exemptions, ok }
+          const md = ['# 覆盖矩阵 ' + slug + '（' + label + '）', '', '- 基线条数 ' + sourceIds.size + '，覆盖率 ' + Math.round(coverage * 100) + '%', '- r_plan ' + Math.round(r_plan * 100) + '% / r_verify ' + Math.round(r_verify * 100) + '%' + (r_contract === null ? '' : ' / r_contract ' + Math.round(r_contract * 100) + '%'), '- 未覆盖 ' + uncovered.length + ' 条' + (uncovered.length ? '：' + uncovered.slice(0, 20).join('、') : ''), '- 豁免 ' + exemptions.length + ' 条' + (exemptions.length ? '：' + exemptions.join('、') : ''), '', '> 收口闸规则：未覆盖（除豁免）必须为 0，且 r_verify 必须 =100% 才放行。'].join('\n')
+          try { fsm.mkdirSync(docsDir, { recursive: true }) } catch {}
+          if (fsSvc && typeof fsSvc.writeText === 'function') {
+            await fsSvc.writeText(await fsSvc.resolve(jsonPath), JSON.stringify(payload, null, 2))
+            await fsSvc.writeText(await fsSvc.resolve(mdPath), md)
+            persisted.push(jsonPath, mdPath)
+          } else {
+            fsm.writeFileSync(jsonPath, JSON.stringify(payload, null, 2))
+            fsm.writeFileSync(mdPath, md)
+            persisted.push(jsonPath, mdPath)
+          }
+        }
+      } catch {}
       return {
         sourceCount: sourceIds.size,
+        persisted,
         uncovered: issues.length ? [] : uncovered,
         danglingRefs: dangling,
         openItems,
@@ -3606,6 +3771,11 @@ export const TOOLS = [
                   }
                 }
               }
+            } catch {}
+            // 改造/替换类任务：基线→覆盖矩阵 硬闸（防"换 UI 丢页面/丢功能"）
+            try {
+              const covMissing = await checkCoverageGate(fsSvc, projectDir, path)
+              missing.push(...covMissing)
             } catch {}
           },
           next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',
@@ -4056,6 +4226,45 @@ export function captainExecutionGuard(exec) {
   } catch {
     return undefined
   }
+}
+
+// ── 基线/覆盖矩阵硬闸：改造/替换类任务防"覆盖面丢失"（webui 换皮丢页面教训）──
+const BASELINE_FILE_RE = /^基线清单[-_](.+)\.json$/
+export async function checkCoverageGate(fsSvc, projectDir, path) {
+  const missing = []
+  if (!fsSvc || typeof fsSvc.list !== 'function') return missing
+  try {
+    const docsDir = path.join(projectDir, '.jarvis/docs')
+    let names = []
+    try { names = (await fsSvc.list(docsDir)) || [] } catch { names = [] }
+    const bases = names.map(String).filter((n) => BASELINE_FILE_RE.test(n))
+    if (bases.length === 0) return missing // 没建基线 = 非改造类任务，不拦
+    for (const b of bases) {
+      const slug = b.match(BASELINE_FILE_RE)[1]
+      const matrixName = `覆盖矩阵-${slug}.json`
+      if (!names.map(String).includes(matrixName)) {
+        missing.push(`覆盖矩阵：.jarvis/docs/${matrixName} 不存在（已建基线清单 ${b} —— 改造/替换类任务必须逐条覆盖；用 jarvis_coverage(persist=true, slug="${slug}") 生成）`)
+        continue
+      }
+      try {
+        const txt = await fsSvc.readText(await fsSvc.resolve(path.join(docsDir, matrixName)))
+        const d = JSON.parse(txt || '{}')
+        const uncovered = Array.isArray(d.uncovered) ? d.uncovered.map(String) : []
+        const exempt = Array.isArray(d.exemptions) ? d.exemptions.map(String) : []
+        const left = uncovered.filter((u) => !exempt.some((e) => e && u.includes(e)))
+        if (left.length > 0) {
+          missing.push(`覆盖率未闭环（${slug}）：${left.length} 条基线无落点 → ${left.slice(0, 3).join('、')}（补实现，或在 jarvis_coverage 传 exemptions 登记豁免+理由后才能收口）`)
+        }
+        const rv = typeof d.r_verify === 'number' ? d.r_verify : 1
+        if (rv < 1) {
+          missing.push(`验证覆盖率不足（${slug}）：r_verify=${Math.round(rv * 100)}%（落点须标终态且带 evidence 才算验证通过——防"改完没验"）`)
+        }
+      } catch (e) {
+        missing.push(`覆盖矩阵读取失败（${slug}）：${String((e && e.message) || e)}`)
+      }
+    }
+  } catch {}
+  return missing
 }
 
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）

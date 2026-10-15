@@ -2,6 +2,17 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.4.0] - 2026-10-12
+
+### 新增：覆盖优先机制（防"改造类任务丢页面/丢功能"）
+
+用户实测缺陷：让 jarvis 做 webui 换一套 UI（后端不变），交付后大量页面/子页面功能丢失、样式崩——根因是**没有"旧系统可枚举基线"，验收只抽查几页**。现补三件套：
+
+- **`jarvis_baseline`（新工具）**：把旧系统变成可枚举基线——web-ui 扫页面目录(pages/views/screens)+路由/菜单配置（按**路径**识别 router/menu 文件，提取 `path:`/`to:` 路由表），files 按 roots 枚举文件，custom 传 items；产出 `.jarvis/docs/基线清单-<slug>.json+.md`。**基线必须来自真实可枚举来源，不许凭印象列举**。
+- **`jarvis_coverage` 增加 `persist`/`slug`/`exemptions`**：把逐条覆盖矩阵落盘 `.jarvis/docs/覆盖矩阵-<slug>.json+.md`（含 coverage / r_plan / r_verify / r_contract / uncovered / exemptions），供收口闸读取。
+- **flowguard `close` 硬闸 `checkCoverageGate`**：检测到基线清单 → 必须有对应覆盖矩阵，且「未覆盖（除 exemptions）= 0」且「r_verify = 100%」才放行，否则 BLOCKED（补实现或登记豁免+理由）。
+- 协议/成员须知同步：改造/替换/移植/重构类任务必须走「建基线 → 建矩阵 → 逐条验收 → 覆盖率闸」，**静默丢功能/丢页面 = 一票打回**。
+
 ## [0.3.8] - 2026-10-12
 
 ### 修复
