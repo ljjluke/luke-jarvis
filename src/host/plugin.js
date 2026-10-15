@@ -3227,11 +3227,16 @@ export const TOOLS = [
         const md = ['# 基线清单 ' + slug + '（' + kind + '）', '', '共 ' + items.length + ' 条 —— **改造/替换类任务必须逐条覆盖**（用 jarvis_coverage persist=true slug=' + slug + ' 生成覆盖矩阵，收口闸强制覆盖率）', '', '| id | 标题 | 来源 | 类别 |', '|---|---|---|---|']
           .concat(items.slice(0, 3000).map((it) => '| ' + String(it.id).replace(/\|/g, '\\|') + ' | ' + String(it.title).replace(/\|/g, '\\|') + ' | ' + String(it.source).replace(/\|/g, '\\|') + ' | ' + it.category + ' |'))
           .join('\n')
+        let wrote = false
         if (fsSvc && typeof fsSvc.writeText === 'function') {
-          await fsSvc.writeText(await fsSvc.resolve(jsonPath), JSON.stringify(payload, null, 2))
-          await fsSvc.writeText(await fsSvc.resolve(mdPath), md)
-          written.push(jsonPath, mdPath)
-        } else {
+          try {
+            await fsSvc.writeText(await fsSvc.resolve(jsonPath), JSON.stringify(payload, null, 2))
+            await fsSvc.writeText(await fsSvc.resolve(mdPath), md)
+            written.push(jsonPath, mdPath)
+            wrote = true
+          } catch { wrote = false } // 跨工作区时 fs 沙箱会拒写 → 走 node fs 兜底
+        }
+        if (!wrote) {
           fs.writeFileSync(jsonPath, JSON.stringify(payload, null, 2))
           fs.writeFileSync(mdPath, md)
           written.push(jsonPath, mdPath)
@@ -3395,11 +3400,16 @@ export const TOOLS = [
           const payload = { slug, label, generatedAt: new Date().toISOString(), sourceCount: sourceIds.size, coverage, r_plan, r_verify, r_contract, uncovered, danglingRefs: dangling, openItems, evidenceLess, exemptions, ok }
           const md = ['# 覆盖矩阵 ' + slug + '（' + label + '）', '', '- 基线条数 ' + sourceIds.size + '，覆盖率 ' + Math.round(coverage * 100) + '%', '- r_plan ' + Math.round(r_plan * 100) + '% / r_verify ' + Math.round(r_verify * 100) + '%' + (r_contract === null ? '' : ' / r_contract ' + Math.round(r_contract * 100) + '%'), '- 未覆盖 ' + uncovered.length + ' 条' + (uncovered.length ? '：' + uncovered.slice(0, 20).join('、') : ''), '- 豁免 ' + exemptions.length + ' 条' + (exemptions.length ? '：' + exemptions.join('、') : ''), '', '> 收口闸规则：未覆盖（除豁免）必须为 0，且 r_verify 必须 =100% 才放行。'].join('\n')
           try { fsm.mkdirSync(docsDir, { recursive: true }) } catch {}
+          let wroteM = false
           if (fsSvc && typeof fsSvc.writeText === 'function') {
-            await fsSvc.writeText(await fsSvc.resolve(jsonPath), JSON.stringify(payload, null, 2))
-            await fsSvc.writeText(await fsSvc.resolve(mdPath), md)
-            persisted.push(jsonPath, mdPath)
-          } else {
+            try {
+              await fsSvc.writeText(await fsSvc.resolve(jsonPath), JSON.stringify(payload, null, 2))
+              await fsSvc.writeText(await fsSvc.resolve(mdPath), md)
+              persisted.push(jsonPath, mdPath)
+              wroteM = true
+            } catch { wroteM = false }
+          }
+          if (!wroteM) {
             fsm.writeFileSync(jsonPath, JSON.stringify(payload, null, 2))
             fsm.writeFileSync(mdPath, md)
             persisted.push(jsonPath, mdPath)
