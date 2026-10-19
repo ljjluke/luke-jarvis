@@ -219,6 +219,7 @@ export async function syncCompanyState(fsSvc, action) {
 import { execSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { toPixOfficeSnapshot } from './office-bridge.js'
 const _require = createRequire(import.meta.url)
 /** 归一化 output.schema：根级/嵌套 required:[...] 数组 → 逐属性 required:true（value schema DSL）。
  * 递归处理嵌套对象节点；required 已按属性内联时原样返回。 */
@@ -4404,6 +4405,7 @@ export async function checkCoverageGate(fsSvc, projectDir, path) {
 
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
 export const inject = ['tools', 'webServer', 'agents']
+let officeSeq = 0
 
 // ── 用户工作区解析（修复：插件原用 process.cwd()=服务进程目录，不是用户工作区
 //    ——导致 jarvis_board/company-state/记忆写到 /root/.dsh/profiles/web/.jarvis/
@@ -4482,6 +4484,70 @@ export default {
                 return send(200, { items: [], error: String(e && e.message ? e.message : e) })
               }
             }
+          })
+        )
+      }
+    } catch {}
+
+    // ── 像素办公室（PixOffice）一体托管：静态页 + 业务快照接口 ──────────────────
+    // 数据流：jarvis_company 写 .jarvis/company-state.json → 本进程读文件 → 投影成
+    // PixOffice 快照 → 前端页面（SSE/POST 同源）→ 人物/任务/白板动起来。
+    try {
+      const webSvc2 = (ctx && ctx.webServer) || (typeof ctx.get === 'function' ? ctx.get('webServer') : undefined)
+      if (webSvc2 && typeof webSvc2.register === 'function') {
+        const path = _require('node:path')
+        const fsm = _require('node:fs')
+        const officeRoot = path.join(path.dirname(new URL(import.meta.url).pathname), '../../office')
+        const MIME = {
+          '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+          '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
+          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+          '.svg': 'image/svg+xml', '.gif': 'image/gif', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
+          '.map': 'application/json; charset=utf-8',
+        }
+        // 1) 快照接口：把 company-state.json 投影成 PixOffice 业务快照
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/luke-jarvis/company',
+            handler: async (req, res) => {
+              const send = (status, body) => {
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+              }
+              try {
+                const cwd = resolveWorkspace(moduleCtx) || '.'
+                const target = path.join(cwd, '.jarvis/company-state.json')
+                let state = null
+                try { state = JSON.parse(fsm.readFileSync(target, 'utf8')) } catch { state = null }
+                const seq = Number(state && state.__seq) > 0 ? Number(state.__seq) : (officeSeq = (officeSeq || 0) + 1)
+                const snap = toPixOfficeSnapshot(state || {}, { seq, workspaceId: 'jarvis-' + path.basename(cwd), workspaceName: (state && state.company && state.company.name) || 'Jarvis 数字员工公司' })
+                return send(200, { ok: true, active: Boolean(state), snapshot: snap })
+              } catch (e) {
+                return send(200, { ok: false, active: false, error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        // 2) 静态托管 /jarvis-office/*
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/jarvis-office',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '/')
+                let rel = decodeURIComponent(url.split('?')[0].replace(/^\/jarvis-office\/?/, ''))
+                if (!rel || rel.endsWith('/')) rel += 'office/index.html'
+                const abs = path.join(officeRoot, rel)
+                if (!abs.startsWith(officeRoot)) { res.writeHead(403); return res.end('forbidden') }
+                const data = fsm.readFileSync(abs)
+                const ext = path.extname(abs).toLowerCase()
+                res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': 'no-cache' })
+                return res.end(data)
+              } catch {
+                try { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found') } catch {}
+              }
+            },
           })
         )
       }

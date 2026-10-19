@@ -2,6 +2,19 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.6.0] - 2026-10-19
+
+### 新增：像素办公室一体化（PixOffice 内嵌）
+
+jarvis 现在**自带**像素办公室界面（不再是外部服务）：插件用 `webServer.register` 托管静态页 + 提供快照接口，`company-state.json` 一变，画面里的人/任务/事件就动。
+
+- **`office/`（内嵌静态资源）**：PixOffice 办公室场景（MIT 代码 + 素材，24MB），访问 `http://<dsh>/jarvis-office/`。
+- **`src/host/office-bridge.js`（纯函数投影器）**：`company-state.json` → PixOffice 业务快照。映射：`working/reporting→running`、`meeting→blocked`、`idle/on_probation→queued`、`terminated→failed`；角色关键词→六个人物（`office-lead`/`code-agent`/`file-agent`/`app-agent`/`review-agent`/`data-agent`）；`meetings/recruiting/ceo/headhunter`→事件流。中文角色名用 FNV-1a 哈希生成合法稳定 id。
+- **`GET /api/luke-jarvis/company`**：返回当前工作区投影后的快照（无 `company-state.json` 时返回空快照，不报错）。
+- **`GET /jarvis-office/*`**：托管办公室页面。
+
+数据流：`jarvis_company(action=...)` → `.jarvis/company-state.json` → 同进程投影 → 页面。**CEO 巡查/员工汇报/开除换人/猎头寻访/开会** 这些动作只要有写快照，画面上就能看到。
+
 ## [0.5.0] - 2026-10-19
 
 ### 新增：流程闸（`jarvisFlowGuard`，运行时机械拦截跳步）

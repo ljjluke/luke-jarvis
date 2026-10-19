@@ -2646,3 +2646,55 @@ test('jarvisFlowGuard：无需求规格/基线 → 拦建队；有需求但卡�
   fs.writeFileSync(path.join(dir3, '.jarvis/cards/工程师-岗位.md'), 'x')
   assert.strictEqual(jarvisFlowGuard({ name: 'agent_teams_create_task', agent: { session: { id: 'cap', header: { cwd: dir3 } } } }), undefined, '齐备应放行')
 })
+
+// ── v0.6.0：像素办公室投影器（company-state → PixOffice 快照）──
+
+test('toPixOfficeSnapshot：员工/任务/事件映射 + 中文角色 id 稳定可读', async () => {
+  const m = await import('../src/host/office-bridge.js')
+  const st = {
+    phase: '开发',
+    employees: [
+      { role: 'CEO', persona: 'Grove', status: 'reporting', lastReport: '正常', perfScore: 90 },
+      { role: '架构师', persona: 'Fowler', status: 'working', currentWork: '设计边界' },
+      { role: '测试工程师', persona: 'Bach', status: 'meeting' },
+      { role: '前端实现A', persona: 'X', status: 'terminated', note: '不达标' },
+    ],
+    meetings: [{ id: 'm1', topic: '需求对齐', attendees: ['CEO'], status: 'in_progress' }],
+    recruiting: [{ id: 'r1', position: '前端实现A', status: 'searching' }],
+    ceo: { currentAction: '巡查', location: 'hall' },
+    tasks: [{ id: 't1', subject: '设计边界', assignee: '架构师', status: 'in_progress' }],
+  }
+  const s = m.toPixOfficeSnapshot(st, { seq: 3 })
+  assert.strictEqual(s.schemaVersion, '1.0')
+  assert.strictEqual(s.seq, 3)
+  assert.strictEqual(s.employees.length, 4)
+  // 中文角色 id 必须是非空 ASCII（PixOffice 只允许 [A-Za-z0-9_.:-]）
+  for (const e of s.employees) {
+    assert.ok(/^[A-Za-z0-9_.:-]+$/.test(e.id), `id 必须 ASCII：${e.id}`)
+    assert.ok(e.id.length <= 100)
+  }
+  // 角色 → 人物映射
+  const byRole = Object.fromEntries(s.employees.map((e) => [e.role, e.sceneActorId]))
+  assert.strictEqual(byRole['CEO'], 'office-lead')
+  assert.strictEqual(byRole['架构师'], 'code-agent')
+  assert.strictEqual(byRole['测试工程师'], 'review-agent')
+  // 任务状态映射
+  assert.strictEqual(s.tasks[0].status, 'running')
+  assert.strictEqual(s.tasks[0].assigneeId, s.employees.find((e) => e.role === '架构师').id)
+  // 事件流：开会/猎头/汇报/开除/CEO
+  const kinds = s.events.map((e) => e.kind)
+  assert.ok(kinds.includes('meeting.started'), '含开会事件')
+  assert.ok(kinds.includes('recruiting.searching'), '含猎头事件')
+  assert.ok(kinds.includes('employee.terminated'), '含开除事件')
+  assert.ok(kinds.includes('ceo.action'), '含 CEO 动作')
+})
+
+test('toPixOfficeSnapshot：无任务表时用 currentWork 合成任务；空状态不崩', async () => {
+  const m = await import('../src/host/office-bridge.js')
+  const s1 = m.toPixOfficeSnapshot({ employees: [{ role: '架构师', status: 'working', currentWork: '写方案' }] }, { seq: 1 })
+  assert.strictEqual(s1.tasks.length, 1)
+  assert.strictEqual(s1.tasks[0].title, '写方案')
+  const s2 = m.toPixOfficeSnapshot(null, { seq: 1 })
+  assert.deepStrictEqual([s2.employees.length, s2.tasks.length], [0, 0])
+  assert.strictEqual(s2.schemaVersion, '1.0')
+})
