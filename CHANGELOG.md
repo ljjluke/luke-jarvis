@@ -2,6 +2,22 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.5.0] - 2026-10-19
+
+### 新增：流程闸（`jarvisFlowGuard`，运行时机械拦截跳步）
+
+**实证根因**（scan 会话，1166 轮 / 31 次压缩）：jarvis 技能正文在压缩中被丢弃，agent 只看到 28 个工具名 → 用 **1472 次 send_message + 1195 次 REA 抓包**直接当包工头；`jarvis_distill / jarvis_meeting / jarvis_perf / jarvis_flowguard / jarvis_project / jarvis_process` **全部 0 次调用**。文字协议拦不住，改为机械闸：
+
+- `agent_teams_create / create_task / reassign_task / approve` 前：
+  1. 工作区必须已有**需求规格**或**基线清单**（否则返回"先过需求闸"并拒绝）；
+  2. `.jarvis/cards/` 必须已有 **≥2 张角色卡**（带队 + 岗位；否则返回"先蒸馏"并拒绝）。
+- 仅对「jarvis 工作区 + 团队 captain」生效，非 jarvis 项目完全不受影响。
+- 与既有 `captainExecutionGuard`（顶层不得亲自执行）叠加：顶层既不能自己干，也不能跳过蒸馏直接建队。
+
+### 修复
+
+- **技能文件同步**：`~/.dsh/skills/jarvis/SKILL.md` 原为 9-24 旧副本（201KB，缺严格模式/建队铁律/覆盖优先），已同步为仓库最新版（208KB）。
+
 ## [0.4.2] - 2026-10-12
 
 ### 变更：基线抽取器提升为**领域无关**

@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2598,4 +2598,51 @@ test('jarvis_baseline：docs 抽文档章节；api 抽接口；db 抽表（领�
 
   const d4 = await def.handler({ projectDir: dir, kind: 'db', slug: 'db1', roots: '["sql"]' })
   assert.ok(d4.count >= 2, `db 应抽到表/视图（实际 ${d4.count}）`)
+})
+
+// ── v0.5.0：流程闸（未过需求闸/未蒸馏角色卡 → 拒绝建队派活；scan 实证 1166 轮跳过流程）──
+
+test('jarvisFlowGuard：非 jarvis 工作区/非团队工具 → 放行', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf-'))
+  fs.mkdirSync(path.join(dir, '.agent-teams', 't1'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
+  const ex = (name) => ({ name, agent: { session: { id: 'cap', header: { cwd: dir } } } })
+  assert.strictEqual(jarvisFlowGuard(ex('agent_teams_create_task')), undefined, '无 .jarvis 不拦')
+  fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+  assert.strictEqual(jarvisFlowGuard(ex('read')), undefined, '非团队工具不拦')
+})
+
+test('jarvisFlowGuard：无需求规格/基线 → 拦建队；有需求但卡片不足 → 拦；齐备 → 放行', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf2-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.agent-teams', 't1'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
+  const ex = (name) => ({ name, agent: { session: { id: 'cap', header: { cwd: dir } } } })
+
+  const r1 = jarvisFlowGuard(ex('agent_teams_create'))
+  assert.ok(typeof r1 === 'string' && r1.includes('需求闸'), '无需求规格应拦')
+
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'jf3-'))
+  fs.mkdirSync(path.join(dir2, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir2, '.agent-teams', 't1'), { recursive: true })
+  fs.writeFileSync(path.join(dir2, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
+  fs.writeFileSync(path.join(dir2, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  const r2 = jarvisFlowGuard({ name: 'agent_teams_create_task', agent: { session: { id: 'cap', header: { cwd: dir2 } } } })
+  assert.ok(typeof r2 === 'string' && r2.includes('蒸馏角色卡'), '无角色卡应拦')
+
+  fs.mkdirSync(path.join(dir2, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(dir2, '.jarvis/cards/CEO-带队.md'), 'x')
+  fs.writeFileSync(path.join(dir2, '.jarvis/cards/工程师-岗位.md'), 'x')
+  const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'jf4-'))
+  fs.mkdirSync(path.join(dir3, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir3, '.jarvis/cards'), { recursive: true })
+  fs.mkdirSync(path.join(dir3, '.agent-teams', 't1'), { recursive: true })
+  fs.writeFileSync(path.join(dir3, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
+  fs.writeFileSync(path.join(dir3, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  fs.writeFileSync(path.join(dir3, '.jarvis/cards/CEO-带队.md'), 'x')
+  fs.writeFileSync(path.join(dir3, '.jarvis/cards/工程师-岗位.md'), 'x')
+  assert.strictEqual(jarvisFlowGuard({ name: 'agent_teams_create_task', agent: { session: { id: 'cap', header: { cwd: dir3 } } } }), undefined, '齐备应放行')
 })

@@ -4275,6 +4275,71 @@ function _captainIds(cwd) {
   return ids
 }
 /** guard：返回字符串 = 拒绝该次工具调用；返回 undefined = 放行。 */
+// ── 流程闸：jarvis 团队会话在「未过 clarify/project 闸」前不得直接开工 ──────────────
+// 背景（scan 实证）：会话跑 1166 轮、31 次压缩后，jarvis 技能正文被压缩丢弃，
+// agent 只看到工具名 → 用 1472 次 send_message + 1195 次抓包直接当包工头，
+// 蒸馏/开会/flowguard/CEO 绩效 全部 0 次。文字协议拦不住，必须让它**机械失败**。
+//
+// 规则（领域无关、只对「jarvis 工作区 + 团队 captain」生效）：
+//   1) 首次用 agent_teams_create/create_task/reassign_task 前，必须已过 jarvis_flowguard(clarify)
+//      —— 即工作区 .jarvis/ 下已有需求规格或基线清单（flowguard 产出）。
+//   2) 建队/派活前必须已蒸馏角色卡：.jarvis/cards/ 至少 2 张（带队 + 岗位），否则拒绝建队。
+//   3) 开工（执行类工具）前必须已过 design 闸：.jarvis/docs/方案设计-*.md 存在。
+// 全部只读判断（读 .jarvis 目录），失败返回明确指引，不静默。
+const _flowCache = { at: 0, cwd: '', state: null }
+function _flowState(cwd) {
+  const now = Date.now()
+  if (_flowCache.cwd === cwd && now - _flowCache.at < 3000) return _flowCache.state
+  const st = { jarvis: false, hasReq: false, hasDesign: false, cards: 0, baseline: 0 }
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    if (fs.existsSync(path.join(cwd, '.jarvis'))) {
+      st.jarvis = true
+      const docs = path.join(cwd, '.jarvis/docs')
+      const list = (d) => { try { return fs.readdirSync(d) } catch { return [] } }
+      const docsList = list(docs)
+      st.hasReq = docsList.some((n) => /^需求规格/.test(n))
+      st.hasDesign = docsList.some((n) => /^方案设计/.test(n))
+      st.baseline = docsList.filter((n) => /^基线清单[-_]/.test(n)).length
+      st.cards = list(path.join(cwd, '.jarvis/cards')).filter((n) => /\.md$/i.test(n)).length
+    }
+  } catch {}
+  _flowCache.at = now
+  _flowCache.cwd = cwd
+  _flowCache.state = st
+  return st
+}
+/** 团队/派活类工具：未过 clarify 闸或未蒸馏角色卡 → 拒绝。 */
+const TEAM_TOOLS = new Set(['agent_teams_create', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve'])
+/** 执行类工具：未过 design 闸 → 拒绝（顶层本来已被 captainExecutionGuard 拦）。 */
+export function jarvisFlowGuard(exec) {
+  try {
+    const name = String((exec && exec.name) || '')
+    const isTeam = TEAM_TOOLS.has(name)
+    if (!isTeam) return undefined
+    const agent = exec && exec.agent
+    const session = agent && agent.session
+    const sessionId = session && session.id
+    const cwd = session && session.header && session.header.cwd
+    if (!sessionId || !cwd) return undefined
+    const st = _flowState(String(cwd))
+    if (!st.jarvis) return undefined // 非 jarvis 工作区不拦
+    // 只在「自己是某团队 captain」或「正在建队」时生效
+    const isCaptain = _captainIds(String(cwd)).has(String(sessionId))
+    if (!isCaptain && name !== 'agent_teams_create') return undefined
+    if (!st.hasReq && st.baseline === 0) {
+      return `【jarvis 流程闸】建队/派活前必须先过需求闸：当前工作区没有「需求规格」也没有「基线清单」。请先 ① 用 jarvis_clarify 打磨需求（真疑问才问用户）② 产出 .jarvis/docs/需求规格-*.md（改造类任务还要 jarvis_baseline 建基线）③ 再跑 jarvis_flowguard(step="clarify") 通过后才允许 ${name}。跳步=缺陷。`
+    }
+    if (st.cards < 2) {
+      return `【jarvis 流程闸】建队前必须已蒸馏角色卡：当前 .jarvis/cards/ 只有 ${st.cards} 张卡（至少要「带队/CEO 卡 + 岗位卡」2 张）。请先用 jarvis_distill_guide + jarvis_distill 现场蒸馏（真实权威、过双闸），再建队派活。禁止用通用角色名直接建队。`
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function captainExecutionGuard(exec) {
   try {
     const name = String((exec && exec.name) || '')
@@ -4457,6 +4522,7 @@ export default {
     try {
       if (toolsSvc && typeof toolsSvc.guard === 'function') {
         ctx.effect(() => toolsSvc.guard(captainExecutionGuard))
+        ctx.effect(() => toolsSvc.guard(jarvisFlowGuard))
       }
     } catch {}
 
