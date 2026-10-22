@@ -1758,6 +1758,7 @@ export const TOOLS = [
     parameters: {
       type: 'object',
       properties: {
+        taskId: { type: 'string', description: '（推荐）该 ponder 对应的团队任务 id——核验 PASS 后会落盘 .jarvis/docs/ponder-verify/，收口闸据此强制"每个成员任务都有 ponder 核验"' },
         runId: { type: 'string', description: '成员声称的 ponder run_id（如 run_mtveu8l8_vdkc）——不传则只核验当前状态文件的完整性/顺序，无法比对声称' },
         dataDir: { type: 'string', description: '该 run 的 step-guard 数据目录（PONDER_DATA_DIR，默认 ~/.dsh/data/ponder）——多成员并发时每人应隔离到自己的目录，核验要指向本人目录' },
         evidenceDir: { type: 'string', description: '阶段产出目录（如 <项目>/.jarvis/ponder-runs/<run_id>/）——传了就核验每阶段产出文件是否真落盘' },
@@ -1926,6 +1927,25 @@ export const TOOLS = [
       const ok = missing.length === 0 && orderViolations.length === 0 && agentShortfalls.length === 0
         && (!claimed || runIdMatch) && (evidenceDir ? evidenceMissing.length === 0 : true) && !fpIssue
 
+      // 核验留痕：PASS 且有 taskId → 写 .jarvis/docs/ponder-verify/<taskId>-<runId>.json
+      // 收口闸据此强制"每个成员任务都经过 ponder 真核验"（scan 实证：jarvis_ponder_check 从未被调用）
+      try {
+        const taskId = String(args.taskId ?? '').trim()
+        if (ok && taskId) {
+          const cwd = resolveWorkspace(moduleCtx) || '.'
+          const dir = path.join(cwd, '.jarvis/docs/ponder-verify')
+          fs.mkdirSync(dir, { recursive: true })
+          const rec = {
+            taskId,
+            runId: state.run_id,
+            verdict: 'PASS',
+            completedCount: completed.length,
+            agentShortfalls,
+            verifiedAt: new Date().toISOString(),
+          }
+          fs.writeFileSync(path.join(dir, `${taskId.replace(/[^\w.:-]/g, '_')}-${String(state.run_id).replace(/[^\w.:-]/g, '_')}.json`), JSON.stringify(rec, null, 2))
+        }
+      } catch {}
       return {
         verdict: ok ? 'PASS' : 'FAIL',
         runId: state.run_id,
@@ -3848,6 +3868,11 @@ export const TOOLS = [
               const covMissing = await checkCoverageGate(fsSvc, projectDir, path)
               missing.push(...covMissing)
             } catch {}
+            // 成员任务 ponder 核验硬闸（防"裸干交付"）
+            try {
+              const povMissing = await checkPonderVerify(fsSvc, projectDir, path)
+              missing.push(...povMissing)
+            } catch {}
           },
           next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',
         },
@@ -4325,15 +4350,28 @@ export function jarvisFlowGuard(exec) {
     const cwd = session && session.header && session.header.cwd
     if (!sessionId || !cwd) return undefined
     const st = _flowState(String(cwd))
-    if (!st.jarvis) return undefined // 非 jarvis 工作区不拦
-    // 只在「自己是某团队 captain」或「正在建队」时生效
+    // jarvis 模式 = 该会话调过 jarvis_* 工具，或工作区已有 .jarvis/（不依赖目录先建好——scan 教训：先建队后建库=闸形同不存在）
+    const inJarvis = st.jarvis || _jarvisSessions.has(String(sessionId))
+    if (!inJarvis) return undefined // 纯 agent-teams 用户不拦
     const isCaptain = _captainIds(String(cwd)).has(String(sessionId))
     if (!isCaptain && name !== 'agent_teams_create') return undefined
+    // ① 建队/派活前必须有需求规格或基线清单
     if (!st.hasReq && st.baseline === 0) {
       return `【jarvis 流程闸】建队/派活前必须先过需求闸：当前工作区没有「需求规格」也没有「基线清单」。请先 ① 用 jarvis_clarify 打磨需求（真疑问才问用户）② 产出 .jarvis/docs/需求规格-*.md（改造类任务还要 jarvis_baseline 建基线）③ 再跑 jarvis_flowguard(step="clarify") 通过后才允许 ${name}。跳步=缺陷。`
     }
+    // ② 建队前必须已蒸馏角色卡（scan 实证：6/6 会话 distill=0 却照样建队）
     if (st.cards < 2) {
-      return `【jarvis 流程闸】建队前必须已蒸馏角色卡：当前 .jarvis/cards/ 只有 ${st.cards} 张卡（至少要「带队/CEO 卡 + 岗位卡」2 张）。请先用 jarvis_distill_guide + jarvis_distill 现场蒸馏（真实权威、过双闸），再建队派活。禁止用通用角色名直接建队。`
+      return `【jarvis 流程闸】建队前必须已蒸馏角色卡：当前 .jarvis/cards/ 只有 ${st.cards} 张卡（至少要「带队/CEO 卡 + 岗位卡」2 张）。请先用 jarvis_distill_guide（提炼 HOW）+ jarvis_distill（六段式校验）现场蒸馏真实权威，再建队派活。禁止用通用角色名直接建队。`
+    }
+    // ③ 派活必须附成员开工须知（含 ponder 指引）——否则成员会裸干（scan 实证：成员会话 jarvis 工具 0 次）
+    if (name === 'agent_teams_create_task') {
+      const desc = String((exec && exec.arguments && exec.arguments.description) || '')
+      const subj = String((exec && exec.arguments && exec.arguments.subject) || '')
+      const COORD = /【协调】|需求分析|拆解|排期|会议|汇报|盯控|裁决|验收/
+      const HAS_BRIEF = /开工须知|jarvis_member_brief|ponder|step-guard|run_id|PONDER_DATA_DIR/
+      if (!COORD.test(subj) && !HAS_BRIEF.test(desc)) {
+        return `【jarvis 流程闸】派活必须附成员开工须知：任务「${subj.slice(0, 40)}」的描述里没有 ponder/开工须知指引。请先调 jarvis_member_brief(roleName=该成员) 生成须知，把 brief 原文附进 description，再建任务（否则成员不知道要跑 ponder 十阶段，只会裸干）。纯协调类任务可在 subject 标【协调】豁免。`
+      }
     }
     return undefined
   } catch {
@@ -4366,6 +4404,53 @@ export function captainExecutionGuard(exec) {
 
 // ── 基线/覆盖矩阵硬闸：改造/替换类任务防"覆盖面丢失"（webui 换皮丢页面教训）──
 const BASELINE_FILE_RE = /^基线清单[-_](.+)\.json$/
+/**
+ * 收口闸：团队成员任务必须有 ponder 真核验记录（.jarvis/docs/ponder-verify/<taskId>-*.json，verdict=PASS）。
+ * 背景（scan 实证）：6/6 会话 jarvis_distill=0、成员会话 jarvis 工具 0~1 次、jarvis_ponder_check 从未调用，
+ * 成员"裸干"交付。此闸把"每个任务都过 ponder 核验"变成机械要求。
+ */
+export async function checkPonderVerify(fsSvc, projectDir, path) {
+  const missing = []
+  if (!fsSvc || typeof fsSvc.list !== 'function') return missing
+  try {
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    let teams = []
+    try { teams = (await fsSvc.list(teamsDir)) || [] } catch { teams = [] }
+    const completedMemberTasks = []
+    for (const t of teams) {
+      try {
+        const txt = await fsSvc.readText(path.join(teamsDir, String(t), 'team.json'))
+        if (!txt) continue
+        const d = JSON.parse(txt)
+        for (const task of d.tasks || []) {
+          const st = String(task.status || '')
+          const who = String(task.assignee || '')
+          if (st !== 'completed') continue
+          if (!who || who === 'captain' || who === 'CEO') continue
+          completedMemberTasks.push(String(task.id || ''))
+        }
+      } catch {}
+    }
+    if (completedMemberTasks.length === 0) return missing
+    let verifyFiles = []
+    try { verifyFiles = (await fsSvc.list(path.join(projectDir, '.jarvis/docs/ponder-verify'))) || [] } catch { verifyFiles = [] }
+    const passed = new Set()
+    for (const f of verifyFiles) {
+      const n = String(f)
+      if (!n.endsWith('.json')) continue
+      try {
+        const rec = JSON.parse((await fsSvc.readText(path.join(projectDir, '.jarvis/docs/ponder-verify', n))) || '{}')
+        if (String(rec.verdict || '').toUpperCase() === 'PASS' && rec.taskId) passed.add(String(rec.taskId))
+      } catch {}
+    }
+    const unverified = completedMemberTasks.filter((id) => !passed.has(id))
+    if (unverified.length > 0) {
+      missing.push(`ponder 核验缺失：${unverified.length}/${completedMemberTasks.length} 个成员任务没有 ponder 核验记录（${unverified.slice(0, 5).join('、')}）——成员任务完成后必须用 jarvis_ponder_check(runId=…, dataDir=…, taskId=该任务) 核验 PASS，否则不许收口（scan 教训：成员裸干交付）`)
+    }
+  } catch {}
+  return missing
+}
+
 export async function checkCoverageGate(fsSvc, projectDir, path) {
   const missing = []
   if (!fsSvc || typeof fsSvc.list !== 'function') return missing
@@ -4406,6 +4491,8 @@ export async function checkCoverageGate(fsSvc, projectDir, path) {
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
 export const inject = ['tools', 'webServer', 'agents']
 let officeSeq = 0
+/** 记录"调用过 jarvis_* 工具的会话"——流程闸据此判定 jarvis 模式（不依赖 .jarvis 目录是否已建） */
+const _jarvisSessions = new Set()
 
 // ── 用户工作区解析（修复：插件原用 process.cwd()=服务进程目录，不是用户工作区
 //    ——导致 jarvis_board/company-state/记忆写到 /root/.dsh/profiles/web/.jarvis/
@@ -4515,7 +4602,20 @@ export default {
                 try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
               }
               try {
-                const cwd = resolveWorkspace(moduleCtx) || '.'
+                // 工作区解析：?workspace= 显式指定 > 最近一次工具调用的会话工作区 > 兜底
+                let cwd = ''
+                try {
+                  const q = String((req && req.url) || '')
+                  const m = q.match(/[?&]workspace=([^&]+)/)
+                  if (m) cwd = decodeURIComponent(m[1])
+                } catch {}
+                if (!cwd) {
+                  try {
+                    const ag = latestExec && latestExec.agent
+                    cwd = (ag && ag.session && ag.session.header && ag.session.header.cwd) || ''
+                  } catch {}
+                }
+                if (!cwd) cwd = _resolvedWorkspace || process.cwd()
                 const target = path.join(cwd, '.jarvis/company-state.json')
                 let state = null
                 try { state = JSON.parse(fsm.readFileSync(target, 'utf8')) } catch { state = null }
@@ -4574,6 +4674,13 @@ export default {
               execute: (args, exec) => {
                 // 把 exec（调用会话）传给 handler——修复工作区漂移（exec.agent.session.header.cwd=用户工作区）
                 try { moduleCtx = moduleCtx || (exec && exec.ctx); latestExec = latestExec || exec } catch {}
+                // 打标：该会话进入 jarvis 模式（流程闸后续据此强制蒸馏/须知）
+                try {
+                  if (String(rest.name || '').startsWith('jarvis_')) {
+                    const sid = exec && exec.agent && exec.agent.session && exec.agent.session.id
+                    if (sid) _jarvisSessions.add(String(sid))
+                  }
+                } catch {}
                 return handler(args, exec)
               },
             }),

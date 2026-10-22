@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2644,7 +2644,7 @@ test('jarvisFlowGuard：无需求规格/基线 → 拦建队；有需求但卡�
   fs.writeFileSync(path.join(dir3, '.jarvis/docs/需求规格-x.md'), '# 需求')
   fs.writeFileSync(path.join(dir3, '.jarvis/cards/CEO-带队.md'), 'x')
   fs.writeFileSync(path.join(dir3, '.jarvis/cards/工程师-岗位.md'), 'x')
-  assert.strictEqual(jarvisFlowGuard({ name: 'agent_teams_create_task', agent: { session: { id: 'cap', header: { cwd: dir3 } } } }), undefined, '齐备应放行')
+  assert.strictEqual(jarvisFlowGuard({ name: 'agent_teams_create', agent: { session: { id: 'cap', header: { cwd: dir3 } } } }), undefined, '齐备应放行建队')
 })
 
 // ── v0.6.0：像素办公室投影器（company-state → PixOffice 快照）──
@@ -2697,4 +2697,66 @@ test('toPixOfficeSnapshot：无任务表时用 currentWork 合成任务；空状
   const s2 = m.toPixOfficeSnapshot(null, { seq: 1 })
   assert.deepStrictEqual([s2.employees.length, s2.tasks.length], [0, 0])
   assert.strictEqual(s2.schemaVersion, '1.0')
+})
+
+// ── v0.7.0：蒸馏/ponder 强制（scan 实证：6/6 会话 distill=0、ponder_check 从未调用）──
+
+test('checkPonderVerify：成员已完成任务无 ponder 核验 → 拦；有 PASS 记录 → 放行', async () => {
+  const base = {
+    '/proj/.agent-teams/t1/team.json': JSON.stringify({
+      captainSessionId: 'cap',
+      tasks: [
+        { id: 't1', status: 'completed', assignee: '架构师' },
+        { id: 't2', status: 'completed', assignee: '测试员' },
+        { id: 't3', status: 'completed', assignee: 'captain' },
+      ],
+    }),
+  }
+  const fs1 = fakeDocsFs({ ...base })
+  const r1 = await checkPonderVerify(fs1, '/proj', PDIR)
+  assert.ok(r1.some((m) => m.includes('ponder 核验缺失')), '无核验记录应拦（captain 任务豁免）')
+
+  const fs2 = fakeDocsFs({
+    ...base,
+    '/proj/.jarvis/docs/ponder-verify/t1-run_a.json': JSON.stringify({ taskId: 't1', runId: 'run_a', verdict: 'PASS' }),
+    '/proj/.jarvis/docs/ponder-verify/t2-run_b.json': JSON.stringify({ taskId: 't2', runId: 'run_b', verdict: 'PASS' }),
+  })
+  assert.deepStrictEqual(await checkPonderVerify(fs2, '/proj', PDIR), [], '两个成员任务都有 PASS 记录应放行')
+
+  const fs3 = fakeDocsFs({
+    ...base,
+    '/proj/.jarvis/docs/ponder-verify/t1-run_a.json': JSON.stringify({ taskId: 't1', runId: 'run_a', verdict: 'PASS' }),
+  })
+  const r3 = await checkPonderVerify(fs3, '/proj', PDIR)
+  assert.ok(r3.some((m) => m.includes('t2')), '缺 t2 记录应拦并点名')
+})
+
+test('jarvisFlowGuard：jarvis 模式（调过 jarvis_*）+ 无卡片 → 建队被拒', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf5-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  // 无 cards → 建队应被拒
+  const ex = (name) => ({ name, agent: { session: { id: 'cap-x', header: { cwd: dir } } } })
+  const r = jarvisFlowGuard(ex('agent_teams_create'))
+  assert.ok(typeof r === 'string' && r.includes('蒸馏角色卡'), `应拦并提示蒸馏：${r}`)
+})
+
+test('jarvisFlowGuard：派活描述缺开工须知 → 拒绝（纯协调类豁免）', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf6-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
+  const mk = (subject, description) => ({ name: 'agent_teams_create_task', arguments: { subject, description }, agent: { session: { id: 'cap', header: { cwd: dir } } } })
+  const r1 = jarvisFlowGuard(mk('实现登录', '写完告诉我'))
+  assert.ok(typeof r1 === 'string' && r1.includes('开工须知'), '缺须知应拒')
+  const r2 = jarvisFlowGuard(mk('实现登录', '【开工须知】先跑 ponder 十阶段……'))
+  assert.strictEqual(r2, undefined, '带须知应放行')
+  const r3 = jarvisFlowGuard(mk('【协调】需求分析会议', '开会讨论'))
+  assert.strictEqual(r3, undefined, '协调类豁免')
 })

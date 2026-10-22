@@ -2,6 +2,19 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.7.0] - 2026-10-19
+
+### 新增：蒸馏/ponder 强制（scan 实证修复）
+
+**实证**（scan 全部主要会话量化核查）：`jarvis_distill` / `jarvis_distill_guide` **6/6 会话全部 0 次**，角色卡目录为空却照样建队；成员会话 jarvis 工具 0~1 次（裸干）；`jarvis_ponder_check` **从未被调用**。
+
+三处硬约束：
+
+- **流程闸判据升级**：不再要求"工作区已存在 `.jarvis/`"——改为 **jarvis 模式**判定（该会话调用过任意 `jarvis_*` 工具即进入 jarvis 模式）。堵住"先建队、后建库 → 闸形同不存在"的漏洞（gpt-test 新会话实测踩中）。
+- **建队前必须已蒸馏**：`.jarvis/cards/` < 2 张 → 拒绝 `agent_teams_create`，要求先 `jarvis_distill_guide` + `jarvis_distill`。
+- **派活必须附开工须知**：`agent_teams_create_task` 的 description 必须含 ponder/开工须知/run_id 等特征串（否则成员不知道要跑 ponder 十阶段）；纯协调类任务在 subject 标【协调】豁免。
+- **ponder 核验留痕 + 收口硬闸**：`jarvis_ponder_check` 新增 `taskId`，PASS 时写 `.jarvis/docs/ponder-verify/<taskId>-<runId>.json`；收口闸 `checkPonderVerify` 要求**每个已完成成员任务都有 PASS 核验记录**，否则 BLOCKED（captain/CEO 任务豁免）。
+
 ## [0.6.0] - 2026-10-19
 
 ### 新增：像素办公室一体化（PixOffice 内嵌）
