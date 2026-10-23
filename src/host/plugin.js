@@ -3884,6 +3884,8 @@ export const TOOLS = [
       const missing = [...cfg.pre]
       try { await cfg.check(missing) } catch {}
       const ok = missing.length === 0
+      // 落闸留痕：通过才记（后续建队/派活/收口会检查这些闸）
+      try { if (ok) recordGate(projectDir, step, true) } catch {}
       // 步骤完成留痕（done=true 且前置齐备 → 记录到 .jarvis/flow-progress.json，学 ponder step-guard after）
       let recorded = null
       if (args.done === true && ok) {
@@ -4301,6 +4303,41 @@ function _captainIds(cwd) {
   return ids
 }
 /** guard：返回字符串 = 拒绝该次工具调用；返回 undefined = 放行。 */
+// ── 闸门留痕（.jarvis/gates.json）：flowguard 通过才写，其他动作必须持闸 ──────────
+// 目的：让流程"不可被提示词绕过"——用户即使要求"跳过蒸馏/直接干"，机械闸也会拒绝。
+const _gateCache = { at: 0, cwd: '', gates: {} }
+function _readGates(cwd) {
+  const now = Date.now()
+  if (_gateCache.cwd === cwd && now - _gateCache.at < 2000) return _gateCache.gates
+  let gates = {}
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    gates = JSON.parse(fs.readFileSync(path.join(cwd, '.jarvis/gates.json'), 'utf8')) || {}
+  } catch { gates = {} }
+  _gateCache.at = now
+  _gateCache.cwd = cwd
+  _gateCache.gates = gates
+  return gates
+}
+/** flowguard 通过时落闸（step → {ok, at}）；失败不落闸（旧闸保留，避免抖动静默放行） */
+export function recordGate(cwd, step, ok) {
+  if (!cwd || !step || !ok) return false
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    const dir = path.join(cwd, '.jarvis')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, 'gates.json')
+    let gates = {}
+    try { gates = JSON.parse(fs.readFileSync(file, 'utf8')) || {} } catch { gates = {} }
+    gates[step] = { ok: true, at: new Date().toISOString() }
+    fs.writeFileSync(file, JSON.stringify(gates, null, 2))
+    _gateCache.at = 0
+    return true
+  } catch { return false }
+}
+
 // ── 流程闸：jarvis 团队会话在「未过 clarify/project 闸」前不得直接开工 ──────────────
 // 背景（scan 实证）：会话跑 1166 轮、31 次压缩后，jarvis 技能正文被压缩丢弃，
 // agent 只看到工具名 → 用 1472 次 send_message + 1195 次抓包直接当包工头，
@@ -4363,7 +4400,15 @@ export function jarvisFlowGuard(exec) {
     if (st.cards < 2) {
       return `【jarvis 流程闸】建队前必须已蒸馏角色卡：当前 .jarvis/cards/ 只有 ${st.cards} 张卡（至少要「带队/CEO 卡 + 岗位卡」2 张）。请先用 jarvis_distill_guide（提炼 HOW）+ jarvis_distill（六段式校验）现场蒸馏真实权威，再建队派活。禁止用通用角色名直接建队。`
     }
-    // ③ 派活必须附成员开工须知（含 ponder 指引）——否则成员会裸干（scan 实证：成员会话 jarvis 工具 0 次）
+    // ③ 建队/派活必须持 flowguard 闸（用户提示词硬要跳步也过不去）
+    const gates = _readGates(String(cwd))
+    if (name === 'agent_teams_create' && !(gates.clarify && gates.clarify.ok)) {
+      return `【jarvis 流程闸·不可绕过】建队前必须先跑 jarvis_flowguard(step="clarify") 通过（闸门记在 .jarvis/gates.json）。这是插件的硬流程：即使你（或用户）要求"跳过流程直接干"，也必须先过闸——需要换执行方式就不要用 jarvis 插件。`
+    }
+    if ((name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task') && !(gates.build && gates.build.ok)) {
+      return `【jarvis 流程闸·不可绕过】派活前必须先跑 jarvis_flowguard(step="build") 通过（需要方案设计 + 人才层齐备）。硬流程不可跳过：用户要求"直接派活"也不行；要换方式请勿使用 jarvis 插件。`
+    }
+    // ④ 派活必须附成员开工须知（含 ponder 指引）——否则成员会裸干（scan 实证：成员会话 jarvis 工具 0 次）
     if (name === 'agent_teams_create_task') {
       const desc = String((exec && exec.arguments && exec.arguments.description) || '')
       const subj = String((exec && exec.arguments && exec.arguments.subject) || '')

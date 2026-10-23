@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2644,7 +2644,8 @@ test('jarvisFlowGuard：无需求规格/基线 → 拦建队；有需求但卡�
   fs.writeFileSync(path.join(dir3, '.jarvis/docs/需求规格-x.md'), '# 需求')
   fs.writeFileSync(path.join(dir3, '.jarvis/cards/CEO-带队.md'), 'x')
   fs.writeFileSync(path.join(dir3, '.jarvis/cards/工程师-岗位.md'), 'x')
-  assert.strictEqual(jarvisFlowGuard({ name: 'agent_teams_create', agent: { session: { id: 'cap', header: { cwd: dir3 } } } }), undefined, '齐备应放行建队')
+  recordGate(dir3, 'clarify', true)
+  assert.strictEqual(jarvisFlowGuard({ name: 'agent_teams_create', agent: { session: { id: 'cap', header: { cwd: dir3 } } } }), undefined, '齐备且持闸应放行建队')
 })
 
 // ── v0.6.0：像素办公室投影器（company-state → PixOffice 快照）──
@@ -2752,6 +2753,8 @@ test('jarvisFlowGuard：派活描述缺开工须知 → 拒绝（纯协调类豁
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
   fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
   fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
+  recordGate(dir, 'clarify', true)
+  recordGate(dir, 'build', true)
   const mk = (subject, description) => ({ name: 'agent_teams_create_task', arguments: { subject, description }, agent: { session: { id: 'cap', header: { cwd: dir } } } })
   const r1 = jarvisFlowGuard(mk('实现登录', '写完告诉我'))
   assert.ok(typeof r1 === 'string' && r1.includes('开工须知'), '缺须知应拒')
@@ -2759,4 +2762,54 @@ test('jarvisFlowGuard：派活描述缺开工须知 → 拒绝（纯协调类豁
   assert.strictEqual(r2, undefined, '带须知应放行')
   const r3 = jarvisFlowGuard(mk('【协调】需求分析会议', '开会讨论'))
   assert.strictEqual(r3, undefined, '协调类豁免')
+})
+
+// ── v0.7.1：闸门不可绕过（flowguard 落闸 → 建队/派活必须持闸）──
+
+test('recordGate：通过时写入 .jarvis/gates.json', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-'))
+  assert.strictEqual(recordGate(dir, 'clarify', true), true)
+  const g = JSON.parse(fs.readFileSync(path.join(dir, '.jarvis/gates.json'), 'utf8'))
+  assert.strictEqual(g.clarify.ok, true)
+  assert.strictEqual(recordGate(dir, 'build', false), false, '失败不落闸')
+})
+
+test('jarvisFlowGuard：未过 clarify 闸 → 建队被拒（提示词也绕不过）', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate2-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
+  const ex = { name: 'agent_teams_create', agent: { session: { id: 'cap', header: { cwd: dir } } } }
+  const r = jarvisFlowGuard(ex)
+  assert.ok(typeof r === 'string' && r.includes('clarify'), '未持 clarify 闸应拒')
+  recordGate(dir, 'clarify', true)
+  // 缓存刷新：换一个等价目录验证
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'gate3-'))
+  fs.mkdirSync(path.join(dir2, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir2, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(dir2, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  fs.writeFileSync(path.join(dir2, '.jarvis/cards/a.md'), 'x')
+  fs.writeFileSync(path.join(dir2, '.jarvis/cards/b.md'), 'x')
+  recordGate(dir2, 'clarify', true)
+  assert.strictEqual(jarvisFlowGuard({ name: 'agent_teams_create', agent: { session: { id: 'cap', header: { cwd: dir2 } } } }), undefined, '持闸后放行')
+})
+
+test('jarvisFlowGuard：未过 build 闸 → 派活被拒', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate4-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
+  recordGate(dir, 'clarify', true)
+  const args = { subject: '实现X', description: '【开工须知】先跑 ponder' }
+  const r = jarvisFlowGuard({ name: 'agent_teams_create_task', arguments: args, agent: { session: { id: 'cap', header: { cwd: dir } } } })
+  assert.ok(typeof r === 'string' && r.includes('build'), '未持 build 闸应拒')
 })

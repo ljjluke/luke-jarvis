@@ -2,6 +2,15 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.7.1] - 2026-10-19
+
+### 新增：流程不可绕过（用户提示词也改不了）
+
+- **闸门留痕**：`jarvis_flowguard(step=…)` 通过时写 `.jarvis/gates.json`（`recordGate`）；失败不落闸（不静默放行）。
+- **建队必须持 `clarify` 闸**：未过 → 拒绝 `agent_teams_create`，提示「即使用户要求跳过流程也必须先过闸；需要换执行方式就不要用 jarvis 插件」。
+- **派活必须持 `build` 闸**：未过 → 拒绝 `agent_teams_create_task` / `reassign_task`。
+- 这样"蒸馏 → 开会 → 方案 → 建队 → 派活 → ponder 核验 → 收口"形成**机械闭环**：缺任何一环都过不去，与提示词无关。
+
 ## [0.7.0] - 2026-10-19
 
 ### 新增：蒸馏/ponder 强制（scan 实证修复）
