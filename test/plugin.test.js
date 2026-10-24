@@ -2754,6 +2754,8 @@ test('jarvisFlowGuard：派活描述缺开工须知 → 拒绝（纯协调类豁
   fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
   fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
   recordGate(dir, 'clarify', true)
+  recordGate(dir, 'decompose', true)
+  recordGate(dir, 'design', true)
   recordGate(dir, 'build', true)
   const mk = (subject, description) => ({ name: 'agent_teams_create_task', arguments: { subject, description }, agent: { session: { id: 'cap', header: { cwd: dir } } } })
   const r1 = jarvisFlowGuard(mk('实现登录', '写完告诉我'))
@@ -2812,4 +2814,26 @@ test('jarvisFlowGuard：未过 build 闸 → 派活被拒', async () => {
   const args = { subject: '实现X', description: '【开工须知】先跑 ponder' }
   const r = jarvisFlowGuard({ name: 'agent_teams_create_task', arguments: args, agent: { session: { id: 'cap', header: { cwd: dir } } } })
   assert.ok(typeof r === 'string' && r.includes('build'), '未持 build 闸应拒')
+})
+
+// ── v0.7.2：补两个可跳过洞（clarify 恒通过 / decompose+design 无链检查）──
+
+test('jarvisFlowGuard：build 闸存在但缺 decompose/design 链 → 派活被拒', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chain-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(200) + '\n验收：x')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
+  recordGate(dir, 'clarify', true)
+  recordGate(dir, 'build', true) // 只落 clarify+build，缺 decompose/design
+  const r = jarvisFlowGuard({
+    name: 'agent_teams_create_task',
+    arguments: { subject: '实现X', description: '【开工须知】先跑 ponder 十阶段' },
+    agent: { session: { id: 'cap', header: { cwd: dir } } },
+  })
+  assert.ok(typeof r === 'string' && r.includes('decompose') && r.includes('design'), `缺链应拒并点名：${r}`)
 })

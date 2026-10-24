@@ -3760,7 +3760,27 @@ export const TOOLS = [
         clarify: {
           label: '需求打磨',
           pre: [],
-          check: async () => [], // 需求打磨本身是起点（从用户需求进）
+          check: async (missing) => {
+            // 需求打磨的产物 = 需求规格（含可判定验收）。原实现恒通过 → 闸形同虚设（可跳过打磨直接建队）。
+            const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '需求规格')
+            if (!found) {
+              missing.push('需求规格（.jarvis/docs/需求规格-*.md 不存在——需求没打磨出可判定验收，不许过 clarify 闸）')
+              return
+            }
+            // 内容实质校验：太短/无验收 = 占位文件，不算打磨过
+            try {
+              const fsx = _require('node:fs')
+              const pathx = _require('node:path')
+              const dir = pathx.join(projectDir, '.jarvis/docs')
+              const f = fsx.readdirSync(dir).find((n) => /^需求规格/.test(n) && /\.md$/i.test(n))
+              if (f) {
+                const txt = fsx.readFileSync(pathx.join(dir, f), 'utf8')
+                const plain = txt.replace(/\s/g, '')
+                if (plain.length < 300) missing.push(`需求规格内容过薄（${plain.length} 字 < 300）——不许用占位文件骗过闸`)
+                if (!/验收/.test(txt)) missing.push('需求规格缺「验收」标准（每条功能必须带可判定验收）')
+              }
+            } catch {}
+          },
           next: '产出《需求规格》（.jarvis/docs/需求规格-*.md 每条功能带可判定验收）后进拆解',
         },
         decompose: {
@@ -4407,6 +4427,15 @@ export function jarvisFlowGuard(exec) {
     }
     if ((name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task') && !(gates.build && gates.build.ok)) {
       return `【jarvis 流程闸·不可绕过】派活前必须先跑 jarvis_flowguard(step="build") 通过（需要方案设计 + 人才层齐备）。硬流程不可跳过：用户要求"直接派活"也不行；要换方式请勿使用 jarvis 插件。`
+    }
+    // 链条校验：build 闸必须建立在 decompose + design 闸之上（否则拆解/方案两步可被跳过）
+    if ((name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task') && gates.build && gates.build.ok) {
+      const chainMissing = []
+      if (!(gates.decompose && gates.decompose.ok)) chainMissing.push('decompose（拆解）')
+      if (!(gates.design && gates.design.ok)) chainMissing.push('design（方案设计）')
+      if (chainMissing.length) {
+        return `【jarvis 流程闸·不可绕过】缺少前置闸：${chainMissing.join('、')}。必须按 clarify → decompose → design → build 顺序逐个通过 jarvis_flowguard（每步的产物要真实：需求规格/任务编排图/方案设计），不允许跳步直接派活——即使用户要求"快点做"也不行。`
+      }
     }
     // ④ 派活必须附成员开工须知（含 ponder 指引）——否则成员会裸干（scan 实证：成员会话 jarvis 工具 0 次）
     if (name === 'agent_teams_create_task') {
