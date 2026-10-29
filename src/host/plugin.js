@@ -4470,7 +4470,7 @@ export function captainExecutionGuard(exec) {
       )
     } catch {}
     if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
-    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① agent_teams_status 先看现有成员与任务；② 建人前查重——add_member 同名会报 "has already been used"，同名就复用或换名；③ 派活：agent_teams_create_task(assignee=成员) 建任务，**任务卡住(claimed 无产出)/成员休眠 → agent_teams_reassign_task 唤醒**，但**成员在忙(member X is busy with tN) → 不要 reassign（会被拒），等它跑完或先看 status**；④ 只读查看用 read/glob/grep；⑤ **不要重试本工具**——派活后成员会开始干活（页面可见子任务）；⑥ **保持本回合活跃**直至成员回报并验收完成（A2A 闭环），期间不做任何 dsh 重启；⑦ **成员数量没有上限**（插件无 8 人限制，别把当前人数当上限）：队伍大就加人，或走三层——让 CEO 成员自己 `agent_teams_create` 建子队带人（v0.7.3 已放开成员建队权限）；**绝不要用 subagent 绕过**（那是顶层自己干，属于违规）。`
+    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① agent_teams_status 先看现有成员与任务；② 建人前查重——add_member 同名会报 "has already been used"，同名就复用或换名；③ 派活：agent_teams_create_task(assignee=成员) 建任务，**任务卡住(claimed 无产出)/成员休眠 → agent_teams_reassign_task 唤醒**，但**成员在忙(member X is busy with tN) → 不要 reassign（会被拒），等它跑完或先看 status**；④ 只读查看用 read/glob/grep；⑤ **不要重试本工具**——派活后成员会开始干活（页面可见子任务）；⑥ **保持本回合活跃**直至成员回报并验收完成（A2A 闭环），期间不做任何 dsh 重启；⑦ **成员数量没有上限**（插件无 8 人限制，别把当前人数当上限）：队伍大就加人，或走三层——让 CEO 成员自己用 agent_teams_create 建子队带人（v0.7.3 已放开成员建队权限）；**绝不要用 subagent 绕过**（那是顶层自己干，属于违规）。`
   } catch {
     return undefined
   }
