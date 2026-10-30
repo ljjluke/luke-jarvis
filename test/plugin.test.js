@@ -2837,3 +2837,16 @@ test('jarvisFlowGuard：build 闸存在但缺 decompose/design 链 → 派活被
   })
   assert.ok(typeof r === 'string' && r.includes('decompose') && r.includes('design'), `缺链应拒并点名：${r}`)
 })
+
+// ── v0.7.4：企业文化（领域专家式深度思考）必须进入每个员工 ──
+
+test('jarvis_member_brief：须知必含「企业文化·领域专家深度思考」', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.handler({ roleName: '测试工程师' })
+  const brief = String(r.brief || '')
+  assert.ok(brief.includes('企业文化'), '含企业文化段')
+  assert.ok(brief.includes('最顶尖的专家会怎么想'), '含领域专家视角')
+  assert.ok(brief.includes('深度优先，不铺广度'), '含深度优先原则')
+  assert.ok(brief.includes('追问到根因'), '含根因要求')
+  assert.ok(brief.includes('宁可 60 分诚实'), '含诚实边界')
+})
