@@ -2,6 +2,16 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.8.1] - 2026-10-31
+
+### 修复：工作记忆不再丢失（扫描实证 12 天工作未落盘）
+
+**实证**：scan 主会话 `session-25f8aa57` 跑到 10-31，但 `.jarvis/project.md` 停在 **10-19**、`board.json` 停在 **10-15** → **12 天工作只在上下文里**，换会话/压缩即"记忆没了"。同期该会话新建 148 个任务、只写 2 个文件、jarvis_* 仅 23 次。
+
+- **① 记忆保鲜闸 `checkMemoryFresh`**：建队/派活/交活前检查 `.jarvis/project.md`/`board.json` 新鲜度，**超过 6 小时未更新直接拒绝**，要求先写回续接五件套；无 project.md 时（建队场景）强制先 `jarvis_store(save, itemType="project")`。
+- **③ 会话快照 `jarvis_snapshot`**：把公司状态 + 团队未完成任务 + 记忆新鲜度写入 `.jarvis/sessions/<会话id>-<时间>.json`，长会话/阶段完成/收口前可随时留档，并回报"记忆已 N 小时未更新"。
+- **② 抢救补录**：从 142MB 会话日志解析 86,300 行，生成 `.jarvis/docs/记忆补录-20261019至1031.md`（148 个任务、未决/风险项、关键决策、写入文件、jarvis 调用统计）——待用户确认后合并进 project.md。
+
 ## [0.8.0] - 2026-10-31
 
 ### 架构修复：jarvis 工作方式从「skill 灌入」升级为「system prompt 每请求固定注入」

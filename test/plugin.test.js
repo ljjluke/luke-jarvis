@@ -2610,6 +2610,7 @@ test('jarvisFlowGuard：非 jarvis 工作区/非团队工具 → 放行', async 
   const ex = (name) => ({ name, agent: { session: { id: 'cap', header: { cwd: dir } } } })
   assert.strictEqual(jarvisFlowGuard(ex('agent_teams_create_task')), undefined, '无 .jarvis 不拦')
   fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   assert.strictEqual(jarvisFlowGuard(ex('read')), undefined, '非团队工具不拦')
 })
 
@@ -2617,6 +2618,7 @@ test('jarvisFlowGuard：无需求规格/基线 → 拦建队；有需求但卡�
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf2-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.agent-teams', 't1'), { recursive: true })
   fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
   const ex = (name) => ({ name, agent: { session: { id: 'cap', header: { cwd: dir } } } })
@@ -2627,6 +2629,7 @@ test('jarvisFlowGuard：无需求规格/基线 → 拦建队；有需求但卡�
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'jf3-'))
   fs.mkdirSync(path.join(dir2, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir2, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir2, '.agent-teams', 't1'), { recursive: true })
   fs.writeFileSync(path.join(dir2, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
   fs.writeFileSync(path.join(dir2, '.jarvis/docs/需求规格-x.md'), '# 需求')
@@ -2634,11 +2637,14 @@ test('jarvisFlowGuard：无需求规格/基线 → 拦建队；有需求但卡�
   assert.ok(typeof r2 === 'string' && r2.includes('蒸馏角色卡'), '无角色卡应拦')
 
   fs.mkdirSync(path.join(dir2, '.jarvis/cards'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir2, '.jarvis/project.md'), '# 项目') } catch {}
   fs.writeFileSync(path.join(dir2, '.jarvis/cards/CEO-带队.md'), 'x')
   fs.writeFileSync(path.join(dir2, '.jarvis/cards/工程师-岗位.md'), 'x')
   const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'jf4-'))
   fs.mkdirSync(path.join(dir3, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir3, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir3, '.jarvis/cards'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir3, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir3, '.agent-teams', 't1'), { recursive: true })
   fs.writeFileSync(path.join(dir3, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
   fs.writeFileSync(path.join(dir3, '.jarvis/docs/需求规格-x.md'), '# 需求')
@@ -2736,6 +2742,7 @@ test('jarvisFlowGuard：jarvis 模式（调过 jarvis_*）+ 无卡片 → 建队
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf5-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
   // 无 cards → 建队应被拒
   const ex = (name) => ({ name, agent: { session: { id: 'cap-x', header: { cwd: dir } } } })
@@ -2747,7 +2754,9 @@ test('jarvisFlowGuard：派活描述缺开工须知 → 拒绝（纯协调类豁
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf6-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
   fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
@@ -2781,7 +2790,9 @@ test('jarvisFlowGuard：未过 clarify 闸 → 建队被拒（提示词也绕不
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate2-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
   fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
   fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
@@ -2792,7 +2803,9 @@ test('jarvisFlowGuard：未过 clarify 闸 → 建队被拒（提示词也绕不
   // 缓存刷新：换一个等价目录验证
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'gate3-'))
   fs.mkdirSync(path.join(dir2, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir2, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir2, '.jarvis/cards'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir2, '.jarvis/project.md'), '# 项目') } catch {}
   fs.writeFileSync(path.join(dir2, '.jarvis/docs/需求规格-x.md'), '# 需求')
   fs.writeFileSync(path.join(dir2, '.jarvis/cards/a.md'), 'x')
   fs.writeFileSync(path.join(dir2, '.jarvis/cards/b.md'), 'x')
@@ -2804,7 +2817,9 @@ test('jarvisFlowGuard：未过 build 闸 → 派活被拒', async () => {
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate4-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
   fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求')
@@ -2822,7 +2837,9 @@ test('jarvisFlowGuard：build 闸存在但缺 decompose/design 链 → 派活被
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chain-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
   fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap' }))
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(200) + '\n验收：x')
@@ -2857,6 +2874,7 @@ test('jarvisFlowGuard：成员 update_task→completed 无 ponder 核验 → 拒
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptg-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
   fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({
     captainSessionId: 'cap',
@@ -2869,6 +2887,7 @@ test('jarvisFlowGuard：成员 update_task→completed 无 ponder 核验 → 拒
 
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ptg2-'))
   fs.mkdirSync(path.join(dir2, '.jarvis/docs/ponder-verify'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir2, '.jarvis/project.md'), '# 项目') } catch {}
   fs.mkdirSync(path.join(dir2, '.agent-teams/t1'), { recursive: true })
   fs.writeFileSync(path.join(dir2, '.agent-teams/t1/team.json'), JSON.stringify({
     captainSessionId: 'cap', tasks: [{ id: 't9', status: 'in_progress', assignee: '架构师' }],
@@ -2900,4 +2919,42 @@ test('apply：注册 luke-jarvis:protocol 到 systemPrompt（每请求固定注�
   assert.ok(txt.includes('jarvis_flowguard'), '含闸门步骤')
   assert.ok(txt.includes('ponder-verify'), '含 ponder 核验要求')
   assert.ok(txt.includes('绝不亲自实现'), '含顶层不亲自执行')
+})
+
+// ── v0.8.1：记忆保鲜闸 + 会话快照 ──
+
+test('checkMemoryFresh：记忆过期 → 返回警示；新鲜 → 放行', async () => {
+  const os = await import('node:os')
+  const { checkMemoryFresh } = await import('../src/host/plugin.js')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-'))
+  fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
+  fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目')
+  const okFresh = checkMemoryFresh(dir, { force: true })
+  assert.ok(okFresh === undefined, '刚写过的记忆应放行')
+
+  // 把 mtime 改到 10 小时前
+  const old = Date.now() / 1000 - 10 * 3600
+  fs.utimesSync(path.join(dir, '.jarvis/project.md'), old, old)
+  const stale = checkMemoryFresh(dir, { force: true })
+  assert.ok(typeof stale === 'string' && stale.includes('记忆闸'), `过期应拦：${stale}`)
+})
+
+test('jarvis_snapshot：写入会话快照并报告未完成任务数', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'snap-'))
+  fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+  try { fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目') } catch {}
+  fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目')
+  fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({
+    name: 't1', tasks: [{ id: 'a', status: 'in_progress', assignee: 'x', subject: 's1' }, { id: 'b', status: 'completed', assignee: 'y', subject: 's2' }],
+  }))
+  const def = TOOLS.find((t) => t.name === 'jarvis_snapshot')
+  const r = await def.handler({ projectDir: dir, note: '阶段X' }, { agent: { session: { id: 'sess-1' } } })
+  assert.ok(r.written && fs.existsSync(r.written), '快照文件应落盘')
+  assert.strictEqual(r.openTasks, 1, '只统计未完成任务')
+  const snap = JSON.parse(fs.readFileSync(r.written, 'utf8'))
+  assert.strictEqual(snap.sessionId, 'sess-1')
+  assert.strictEqual(snap.openTasks.length, 1)
 })

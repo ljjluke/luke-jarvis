@@ -3143,6 +3143,75 @@ export const TOOLS = [
   },
 
   {
+    name: 'jarvis_snapshot',
+    description:
+      '会话快照（防"工作记忆丢失"——scan 教训：project.md 停在 10-19，会话跑到 10-31，12 天工作全在上下文里，一压缩/换会话就没了）。把当前公司状态 + 团队未完成任务 + 记忆文件新鲜度写进 <项目>/.jarvis/sessions/<会话id>-<时间>.json，作为可追溯的工作快照。建议在每个阶段完成、收口前、长会话中等关键节点调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        note: { type: 'string', description: '本次快照备注（如"阶段X完成"）' },
+        projectDir: { type: 'string', description: '项目目录（缺省=当前会话工作区）' },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          written: { type: 'string' },
+          memoryAgeHours: { type: 'number' },
+          openTasks: { type: 'number' },
+          verdict: { type: 'string' },
+        },
+        required: ['written', 'verdict'],
+      },
+      render: (r) => `会话快照：${r.written}\n记忆已 ${r.memoryAgeHours} 小时未更新 · 未完成任务 ${r.openTasks} 条\n${r.verdict}`,
+    },
+    handler: async (args, exec) => {
+      const path = _require('node:path')
+      const fs = _require('node:fs')
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+      const sid = (() => { try { return String(exec?.agent?.session?.id || 'unknown') } catch { return 'unknown' } })()
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const dir = path.join(projectDir, '.jarvis/sessions')
+      fs.mkdirSync(dir, { recursive: true })
+      const out = path.join(dir, `${sid}-${stamp}.json`)
+      const readJson = (rel) => { try { return JSON.parse(fs.readFileSync(path.join(projectDir, rel), 'utf8')) } catch { return null } }
+      const company = readJson('.jarvis/company-state.json')
+      const mem = _memoryState(projectDir)
+      let openTasks = []
+      try {
+        const teamsDir = path.join(projectDir, '.agent-teams')
+        for (const t of fs.readdirSync(teamsDir)) {
+          try {
+            const d = JSON.parse(fs.readFileSync(path.join(teamsDir, t, 'team.json'), 'utf8'))
+            for (const task of d.tasks || []) {
+              if (['completed', 'cancelled'].includes(String(task.status))) continue
+              openTasks.push({ team: d.name || t, id: task.id, status: task.status, assignee: task.assignee, subject: String(task.subject || '').slice(0, 100) })
+            }
+          } catch {}
+        }
+      } catch {}
+      const payload = {
+        sessionId: sid,
+        savedAt: new Date().toISOString(),
+        note: String(args?.note || ''),
+        memory: mem,
+        company: company || null,
+        openTasks,
+        openTaskCount: openTasks.length,
+      }
+      fs.writeFileSync(out, JSON.stringify(payload, null, 2))
+      return {
+        written: out,
+        memoryAgeHours: Math.round((mem.ageMs / 3600000) * 10) / 10,
+        openTasks: openTasks.length,
+        verdict: mem.ageMs > 6 * 3600000
+          ? '⚠️ 快照已存，但工作记忆（project.md/board.json）已超过 6 小时未更新——请尽快把进度写回 project.md，否则换会话仍会丢。'
+          : '✅ 快照已存，记忆新鲜度正常。',
+      }
+    },
+  },
+  {
     name: 'jarvis_baseline',
     description:
       '基线清单生成器（**领域无关**：任何"改造/替换/移植/重构/换皮"类任务的第一步，防"覆盖面丢失"——真实教训：webui 换一套 UI 后大量页面/子页面功能丢失、样式崩，根因是没把"旧系统有哪些单元"变成可枚举清单，验收只抽查了几页；同样的风险存在于任何领域：流程步骤、文档章节、接口、字段、设备、权限点……）。把基线变成**可枚举、可逐条勾对**的清单。kind 决定抽取器（领域无关的通用抽取，不是领域模板）：web-ui=页面目录+路由/菜单；files=按 roots 枚举文件；docs=文档章节标题；text=文本条目(编号/列表，用于流程/SOP/需求清单)；api=OpenAPI paths+常见框架路由声明；db=SQL 表/视图；custom=直接传 items。**基线必须来自真实可枚举来源（读代码/配置/文档原始内容），不许凭印象列举**（凭印象=必漏）。产出 <项目>/.jarvis/docs/基线清单-<slug>.json + .md；下一步用 jarvis_coverage(persist=true, slug=同名) 建逐条覆盖矩阵，收口闸强制覆盖率。',
@@ -4358,6 +4427,40 @@ export const JARVIS_CULTURE = `【企业文化 · 不可协商（优先级高于
 7. 交付可判定：结论要能被别人验证——写清怎么验、验什么、通过标准是什么。
 违反以上任一条 = 不合格交付（打回重做）。`
 
+// ── 记忆保鲜闸（①）：project.md 落后于工作进度 → 拒绝关键动作 ──────────
+// 教训（scan 实证）：project.md 停在 10-19，会话跑到 10-31 —— 12 天工作全在上下文里，一压缩/换会话就"记忆没了"。
+const MEMORY_MAX_AGE_MS = 6 * 60 * 60 * 1000 // 6 小时
+function _memoryState(cwd) {
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    const candidates = ['.jarvis/project.md', '.jarvis/board.json']
+    let newest = 0
+    for (const rel of candidates) {
+      try { newest = Math.max(newest, fs.statSync(path.join(cwd, rel)).mtimeMs) } catch {}
+    }
+    return { exists: newest > 0, ageMs: newest > 0 ? Date.now() - newest : Number.MAX_SAFE_INTEGER, updatedAt: newest > 0 ? new Date(newest).toISOString() : '' }
+  } catch {
+    return { exists: false, ageMs: Number.MAX_SAFE_INTEGER, updatedAt: '' }
+  }
+}
+/** 关键动作前要求记忆新鲜（project.md/board.json 在 6 小时内更新过） */
+export function checkMemoryFresh(cwd, opts = {}) {
+  const st = _flowState(String(cwd))
+  if (!st.jarvis) return undefined // 非 jarvis 工作区不拦
+  const m = _memoryState(String(cwd))
+  if (!m.exists) {
+    return opts.force
+      ? '【jarvis 记忆闸】本工作区没有 .jarvis/project.md —— 先 jarvis_store(save, itemType="project") 建立项目记忆（续接五件套：当前进度/下一步/未决项/团队清单/关键决策与依据），再继续。'
+      : undefined
+  }
+  if (m.ageMs > MEMORY_MAX_AGE_MS) {
+    const hours = Math.round(m.ageMs / 3600000)
+    return `【jarvis 记忆闸】工作记忆已 ${hours} 小时未更新（最后 ${m.updatedAt}）——继续之前必须先把当前进度写回 .jarvis/project.md（续接五件套：当前进度/下一步/未决项/团队清单/关键决策与依据），否则换会话或上下文压缩后这段工作就丢了（scan 教训：12 天工作没落盘）。`
+  }
+  return undefined
+}
+
 // ── 闸门留痕（.jarvis/gates.json）：flowguard 通过才写，其他动作必须持闸 ──────────
 // 目的：让流程"不可被提示词绕过"——用户即使要求"跳过蒸馏/直接干"，机械闸也会拒绝。
 const _gateCache = { at: 0, cwd: '', gates: {} }
@@ -4446,6 +4549,11 @@ export function jarvisFlowGuard(exec) {
     const inJarvis = st.jarvis || _jarvisSessions.has(String(sessionId))
     if (!inJarvis) return undefined // 纯 agent-teams 用户不拦
     const isCaptain = _captainIds(String(cwd)).has(String(sessionId))
+    // ① 记忆保鲜：建队/派活/交活前，project.md 必须在 6 小时内更新过
+    if (name === 'agent_teams_create' || name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task' || name === 'agent_teams_update_task') {
+      const memIssue = checkMemoryFresh(String(cwd), { force: name === 'agent_teams_create' })
+      if (memIssue) return memIssue
+    }
     // 成员交活（update_task → completed）无论 captain 还是 member 都必须先有 ponder 核验
     if (name === 'agent_teams_update_task') {
       const a = (exec && exec.arguments) || {}
