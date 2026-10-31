@@ -2850,3 +2850,30 @@ test('jarvis_member_brief：须知必含「企业文化·领域专家深度思�
   assert.ok(brief.includes('追问到根因'), '含根因要求')
   assert.ok(brief.includes('宁可 60 分诚实'), '含诚实边界')
 })
+
+// ── v0.7.5：成员交活必须过 ponder 核验（scan 实证：成员 3002 次调用 jarvis_* 为 0）──
+
+test('jarvisFlowGuard：成员 update_task→completed 无 ponder 核验 → 拒绝；有 PASS 记录 → 放行', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptg-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({
+    captainSessionId: 'cap',
+    tasks: [{ id: 't9', status: 'in_progress', assignee: '架构师' }],
+  }))
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(200) + '\n验收：x')
+  const mk = () => ({ name: 'agent_teams_update_task', arguments: { task_id: 't9', status: 'completed', attempt_id: 'a1' }, agent: { session: { id: 'member-1', header: { cwd: dir } } } })
+  const r = jarvisFlowGuard(mk())
+  assert.ok(typeof r === 'string' && r.includes('ponder'), `无核验应拒：${r}`)
+
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ptg2-'))
+  fs.mkdirSync(path.join(dir2, '.jarvis/docs/ponder-verify'), { recursive: true })
+  fs.mkdirSync(path.join(dir2, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(dir2, '.agent-teams/t1/team.json'), JSON.stringify({
+    captainSessionId: 'cap', tasks: [{ id: 't9', status: 'in_progress', assignee: '架构师' }],
+  }))
+  fs.writeFileSync(path.join(dir2, '.jarvis/docs/ponder-verify/t9-run_x.json'), JSON.stringify({ taskId: 't9', verdict: 'PASS' }))
+  const ok = jarvisFlowGuard({ name: 'agent_teams_update_task', arguments: { task_id: 't9', status: 'completed' }, agent: { session: { id: 'member-1', header: { cwd: dir2 } } } })
+  assert.strictEqual(ok, undefined, '有 PASS 记录应放行')
+})

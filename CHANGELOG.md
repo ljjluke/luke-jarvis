@@ -2,6 +2,20 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.7.5] - 2026-10-31
+
+### 修复：成员"裸干交付"的最后漏洞
+
+**scan 实证**：活跃成员会话 `730ce4fd` 共 3002 次工具调用，其中 **`jarvis_*` 0 次**（bash 2768 次）；`.jarvis/gates.json` 只有 `clarify`；`ponder-verify/` 目录不存在（从未核验）。
+
+根因：流程闸只拦 `create/create_task/reassign`，**没拦 `send_message`（下指令）和 `update_task`（交活）** → captain 用消息派活、成员 bash 干完直接 `completed`，ponder 全程不需要。
+
+修复：
+
+- **`agent_teams_update_task` 纳入闸门**；
+- **成员交活闸前置到 captain/member 判断之前**（成员也受管）：任务标 `completed` 前必须有该任务的 `ponder-verify` PASS 记录，否则拒绝并给出 4 步操作指引（跑 step-guard 十阶段 → verify → `jarvis_ponder_check(taskId=…)` → 再 completed）；
+- captain/CEO 的协调类任务豁免。
+
 ## [0.7.4] - 2026-10-24
 
 ### 新增：数字员工「企业文化」（不可协商，注入每个员工）

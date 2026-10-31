@@ -4409,7 +4409,7 @@ function _flowState(cwd) {
   return st
 }
 /** 团队/派活类工具：未过 clarify 闸或未蒸馏角色卡 → 拒绝。 */
-const TEAM_TOOLS = new Set(['agent_teams_create', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve'])
+const TEAM_TOOLS = new Set(['agent_teams_create', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_update_task'])
 /** 执行类工具：未过 design 闸 → 拒绝（顶层本来已被 captainExecutionGuard 拦）。 */
 export function jarvisFlowGuard(exec) {
   try {
@@ -4426,6 +4426,47 @@ export function jarvisFlowGuard(exec) {
     const inJarvis = st.jarvis || _jarvisSessions.has(String(sessionId))
     if (!inJarvis) return undefined // 纯 agent-teams 用户不拦
     const isCaptain = _captainIds(String(cwd)).has(String(sessionId))
+    // 成员交活（update_task → completed）无论 captain 还是 member 都必须先有 ponder 核验
+    if (name === 'agent_teams_update_task') {
+      const a = (exec && exec.arguments) || {}
+      const st2 = String(a.status || '')
+      const taskId = String(a.task_id || a.taskId || '')
+      if (st2 === 'completed' && taskId) {
+        let assignee = ''
+        try {
+          const fsx = _require('node:fs')
+          const pathx = _require('node:path')
+          const teamsDir = pathx.join(String(cwd), '.agent-teams')
+          for (const t of fsx.readdirSync(teamsDir)) {
+            try {
+              const d = JSON.parse(fsx.readFileSync(pathx.join(teamsDir, t, 'team.json'), 'utf8'))
+              const task = (d.tasks || []).find((x) => String(x.id) === taskId)
+              if (task) { assignee = String(task.assignee || ''); break }
+            } catch {}
+          }
+        } catch {}
+        const coord = assignee === 'captain' || assignee === 'CEO' || assignee === ''
+        if (!coord) {
+          let verified = false
+          try {
+            const fsx = _require('node:fs')
+            const pathx = _require('node:path')
+            const dir = pathx.join(String(cwd), '.jarvis/docs/ponder-verify')
+            const prefix = taskId.replace(/[^\w.:-]/g, '_')
+            for (const f of fsx.readdirSync(dir)) {
+              if (!f.endsWith('.json') || !f.startsWith(prefix)) continue
+              const rec = JSON.parse(fsx.readFileSync(pathx.join(dir, f), 'utf8'))
+              if (String(rec.verdict || '').toUpperCase() === 'PASS') { verified = true; break }
+            }
+          } catch {}
+          if (!verified) {
+            return `【jarvis 流程闸·ponder 强制】任务 ${taskId} 不能直接标 completed——没有 ponder 核验记录。必须：① 按开工须知跑 ponder 十阶段（export PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ → node step-guard.cjs init/before/after 逐阶段）② step-guard verify 通过 ③ jarvis_ponder_check(runId=<run_id>, dataDir=<目录>, evidenceDir=<产出目录>, taskId="${taskId}") 拿 PASS ④ 再 update_task(completed)。裸干交付=不合格。`
+          }
+        }
+        return undefined
+      }
+      return undefined
+    }
     if (!isCaptain && name !== 'agent_teams_create') return undefined
     // ① 建队/派活前必须有需求规格或基线清单
     if (!st.hasReq && st.baseline === 0) {
