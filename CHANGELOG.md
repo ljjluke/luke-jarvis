@@ -2,6 +2,16 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.8.0] - 2026-10-31
+
+### 架构修复：jarvis 工作方式从「skill 灌入」升级为「system prompt 每请求固定注入」
+
+**用户指出的结构性问题**：jarvis 协议靠 skill 一次性灌入上下文，长会话压缩后失效（scan 实证：1166 轮后蒸馏/会议/flowguard 全为 0）；插件形态应当**每一步都表达全量流程信息**。
+
+- 新增 `ctx.systemPrompt.section({name:'luke-jarvis:protocol', order:118})`：把 **11 步完整流水线**（查记忆→判级→打磨→clarify闸→蒸馏→拆解→方案→build闸→建队→派活→盯控→收口）+ 4 条铁律**每次请求注入**，与 skill 无关、不受压缩影响。
+- `inject` 增加 `systemPrompt` 服务。
+- 与既有机械闸（gates.json / ponder-verify / captain 执行拦截）形成双保险：**提示词层每步可见 + 运行时层每步可拦**。
+
 ## [0.7.5] - 2026-10-31
 
 ### 修复：成员"裸干交付"的最后漏洞

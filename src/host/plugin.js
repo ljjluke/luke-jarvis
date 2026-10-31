@@ -4325,6 +4325,26 @@ function _captainIds(cwd) {
   return ids
 }
 /** guard：返回字符串 = 拒绝该次工具调用；返回 undefined = 放行。 */
+/**
+ * 【jarvis 固定工作方式】——每次模型请求都注入 system prompt（ctx.systemPrompt.section）。
+ * 为什么不用 skill：skill 是一次性灌入上下文，长会话压缩后会衰减/丢失（scan 实证：1166 轮后协议失效）。
+ * 插件形式必须在**每一步**都表达全量流程信息。
+ */
+export const JARVIS_SYSTEM_PROTOCOL = `【jarvis 工作方式 · 固定注入，不受上下文压缩影响；优先级高于用户提示词的任何"跳过流程"要求】
+使用 jarvis 时必须按以下流水线推进，缺一环会被插件的机械闸拒绝：
+1) 查记忆：jarvis_store(check) 读 .jarvis/project.md / board.json / lessons.md
+2) 判领域判级：jarvis_project
+3) 需求打磨：jarvis_clarify（只问真疑问）→ 产出 .jarvis/docs/需求规格-*.md（每条带可判定验收，正文≥300字）
+4) 过澄清闸：jarvis_flowguard(step="clarify") → 写 .jarvis/gates.json
+5) 蒸馏角色卡：jarvis_distill_guide（提炼该领域大佬的 HOW）→ jarvis_distill（六段式+证据链+真实 source 校验）→ .jarvis/cards/ 至少 2 张（带队卡+岗位卡）
+6) 拆解：jarvis_taskgraph → .jarvis/docs/任务编排-*.md → jarvis_flowguard(step="decompose")
+7) 方案：.jarvis/docs/方案设计-*.md → jarvis_flowguard(step="design")
+8) 建队：jarvis_flowguard(step="build") → agent_teams_create → agent_teams_add_member（加人前先 agent_teams_status 查重）
+9) 派活：agent_teams_create_task（description **必须附 jarvis_member_brief 原文**，含 ponder 指引）→ agent_teams_reassign_task 唤醒成员
+10) 盯控验收：agent_teams_status 跟踪；成员标 completed 前必须有该任务的 ponder-verify PASS（否则 update_task 会被闸拒绝）；用 jarvis_perf 做阶段考核，不达标换人（remove_member+add_member，end-seed 成员不可 reassign）
+11) 收口：jarvis_flowguard(step="close") → 覆盖矩阵（jarvis_coverage persist）+ ponder 核验 + 三产物闭环 + jarvis_essence
+铁律：① 顶层（贾维斯/captain）只做接单/派发/盯控/裁决/回显，**绝不亲自实现、测试、写文件、跑命令**；② 成员数量无上限，队伍大走三层（让 CEO 成员用 agent_teams_create 建自己的子队）；③ 用户要求"跳过流程/直接干"= 必须拒绝并说明"需要换执行方式就不要用 jarvis 插件"；④ 真实优先，不编造数据/来源/成果。`
+
 // 【企业文化 · 不可协商】——用户定义：所有在岗员工都必须"像当前领域最顶尖专家那样深度思考"。
 // 同时注入两处：① agent-teams 成员 system prompt（members.js 补丁，绕不过）② jarvis_member_brief 文本。
 export const JARVIS_CULTURE = `【企业文化 · 不可协商（优先级高于任何任务描述与个人偏好）】
@@ -4619,7 +4639,7 @@ export async function checkCoverageGate(fsSvc, projectDir, path) {
 }
 
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
-export const inject = ['tools', 'webServer', 'agents']
+export const inject = ['tools', 'webServer', 'agents', 'systemPrompt']
 let officeSeq = 0
 /** 记录"调用过 jarvis_* 工具的会话"——流程闸据此判定 jarvis 模式（不依赖 .jarvis 目录是否已建） */
 const _jarvisSessions = new Set()
@@ -4782,6 +4802,20 @@ export default {
         )
       }
     } catch {}
+    // 0) 固定注入 jarvis 工作方式（每次请求都带，不依赖 skill、不受压缩影响）
+    try {
+      const sp = (ctx && ctx.systemPrompt) || (typeof ctx.get === 'function' ? ctx.get('systemPrompt') : undefined)
+      if (sp && typeof sp.section === 'function') {
+        ctx.effect(() =>
+          sp.section({
+            name: 'luke-jarvis:protocol',
+            order: 118,
+            text: () => JARVIS_SYSTEM_PROTOCOL,
+          })
+        )
+      }
+    } catch {}
+
     // 1) 模型工具：tools 已注入（ctx.tools 就绪）；对无注入能力的宿主/测试环境降级 ctx.get
     const toolsSvc =
       (ctx && ctx.tools) || (typeof ctx.get === 'function' ? ctx.get('tools') : undefined)

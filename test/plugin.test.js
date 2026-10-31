@@ -2877,3 +2877,27 @@ test('jarvisFlowGuard：成员 update_task→completed 无 ponder 核验 → 拒
   const ok = jarvisFlowGuard({ name: 'agent_teams_update_task', arguments: { task_id: 't9', status: 'completed' }, agent: { session: { id: 'member-1', header: { cwd: dir2 } } } })
   assert.strictEqual(ok, undefined, '有 PASS 记录应放行')
 })
+
+// ── v0.8.0：jarvis 工作方式改为 system prompt 固定注入（不依赖 skill，不被压缩衰减）──
+
+test('apply：注册 luke-jarvis:protocol 到 systemPrompt（每请求固定注入）', () => {
+  const sections = []
+  const registered = []
+  const ctx = {
+    tools: { register: (d) => { registered.push(d.name); return () => {} } },
+    systemPrompt: { section: (s) => { sections.push(s); return () => {} } },
+    webServer: { register: () => () => {} },
+    effect: (fn) => { try { fn() } catch {} },
+    get: () => undefined,
+  }
+  plugin.apply(ctx)
+  assert.ok(registered.length > 10, '工具应注册')
+  const p = sections.find((s) => s.name === 'luke-jarvis:protocol')
+  assert.ok(p, '必须注册 luke-jarvis:protocol 段')
+  const txt = typeof p.text === 'function' ? p.text({}) : p.text
+  assert.ok(txt.includes('固定注入'), '含固定注入声明')
+  assert.ok(txt.includes('jarvis_distill'), '含蒸馏步骤')
+  assert.ok(txt.includes('jarvis_flowguard'), '含闸门步骤')
+  assert.ok(txt.includes('ponder-verify'), '含 ponder 核验要求')
+  assert.ok(txt.includes('绝不亲自实现'), '含顶层不亲自执行')
+})
