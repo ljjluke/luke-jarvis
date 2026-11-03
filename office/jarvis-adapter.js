@@ -43,8 +43,10 @@ function renderEmployees(list) {
   for (const e of list) {
     const row = el('div', 'emp')
     row.setAttribute('data-role', String(e.role || ''))
+    row.setAttribute('data-employee-id', String(e.id || '')) // 数据来源指纹（防「命中的是上游 demo 花名册」）
     row.appendChild(el('span', 'role', String(e.role || e.id || '未命名')))
-    if (e.persona) row.appendChild(el('span', 'persona', String(e.persona)))
+    if (e.name) row.appendChild(el('span', 'persona', String(e.name)))
+    else if (e.persona) row.appendChild(el('span', 'persona', String(e.persona)))
     row.appendChild(el('span', 'st', String(e.status || e.online === false ? (e.status || 'offline') : (e.status || 'working'))))
     box.appendChild(row)
   }

@@ -143,6 +143,17 @@ if [ -x "$CHROME" ] && [ "$ADA_CODE" = "200" ]; then
   TASK_N="$(grep -o 'jarvis-task-count">[0-9]*' "$DOM" | grep -o '[0-9]*$' | head -1)"
   say "⑤-3 DOM 断言：角色名命中 $ROLE_HITS/4（需 ≥3）；面板 employees=$EMP_N tasks=$TASK_N"
   if [ "$ROLE_HITS" -ge 3 ]; then ok "⑤-3 DOM 含 ≥3 个本公司角色名"; else red "⑤-3 DOM 角色名命中 $ROLE_HITS < 3（画面里不是本公司的人）"; fi
+  # ⑤-3b 数据来源指纹（防「DOM 命中的是上游 demo 自带花名册」）：断言 company-state 里某个本公司专属
+  # employee.id 出现在 DOM 中——demo 不可能包含这个随机 id，因此能证明面板内容确来自本公司快照。
+  # 指纹取「快照接口返回的本公司员工 id」（company-state 里是 'ceo' 这类短名，接口投影后是 emp-xxx-<随机> 唯一 id）
+  PROV="$(printf '%s' "$API_BODY" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{try{const d=JSON.parse(s);const e=(d.snapshot||d).employees||[];console.log(String(e[0]&&e[0].id||""))}catch(err){}})' 2>/dev/null)"
+  if [ -n "${PROV:-}" ] && grep -q "$PROV" "$DOM"; then
+    ok "⑤-3b 数据来源指纹：本公司专属 employee.id（$PROV）出现在 DOM → 面板内容确来自本公司快照"
+  elif [ -n "${PROV:-}" ]; then
+    red "⑤-3b 本公司 employee.id（$PROV）未出现在 DOM —— 面板可能渲染的不是本公司数据"
+  else
+    say "ℹ️  ⑤-3b 跳过：company-state 里没有 employees[0].id 可做指纹"
+  fi
   SHOT2="$OUT_DIR/pixoffice-company-$DATE.png"
   "$CHROME" --headless=new --no-sandbox --disable-gpu --window-size=1440,900 \
     --virtual-time-budget=8000 --screenshot="$SHOT2" "$ADAPTER_URL" >/dev/null 2>&1 || true
