@@ -4450,6 +4450,15 @@ const STAGE_LABELS = {
 const STAGE_GATE = { // 该阶段必须持哪个闸才算过
   clarify: 'clarify', decompose: 'decompose', design: 'design', build: 'build', execute: null, close: null,
 }
+// ── D5：活跃团队判据（防「本项目被别的/历史团队的未完成任务钉死在 execute」）──────────────────
+// 缺陷实证（t1 交付报告风险段）：openTasks 原遍历 `.agent-teams` 下所有 team.json → 真实工作区
+// 12 个未完成任务里只有 4 个属本项目（其余属 dsh-neon-theme/dsh-web-hardening/tech-neo-theme 与历史团队），
+// 于是本项目永远到不了 close（jarvis_release 在 execute 阶段被拒）。
+// 判据：① 归档目录（名字含 archive/old/history）一律不计；② team.json mtime 超过 72h = 历史团队，其未完成任务不计。
+// 误判方向（重要）：宁可多算不可少算——算成活跃只是阶段多停在 execute（与现状一致）；
+// 算成历史会让未完成任务凭空消失 → 阶段提前进 close（假收口）。故只排除「明确归档」或「明确超时」的团队。
+const ACTIVE_TEAM_MAX_AGE_MS = 72 * 60 * 60 * 1000
+const ARCHIVED_TEAM_RE = /archive|^old|^_old|history/i
 /** 计算当前阶段（纯读文件，无副作用） */
 export function computeStage(cwd) {
   const fs = _require('node:fs')
@@ -4460,18 +4469,27 @@ export function computeStage(cwd) {
   const hasDoc = (re) => { try { return fs.readdirSync(path.join(base, '.jarvis/docs')).some((n) => re.test(n)) } catch { return false } }
   let cards = 0
   try { cards = fs.readdirSync(path.join(base, '.jarvis/cards')).filter((n) => n.endsWith('.md')).length } catch {}
+  const td = path.join(base, '.agent-teams')
   let teams = 0
-  try { teams = fs.readdirSync(path.join(base, '.agent-teams')).length } catch {}
   let openTasks = 0
+  const now = Date.now()
   try {
-    const td = path.join(base, '.agent-teams')
     for (const t of fs.readdirSync(td)) {
+      if (ARCHIVED_TEAM_RE.test(String(t))) continue // 归档目录不是活跃团队
+      let teamFile = ''
       try {
-        const d = JSON.parse(fs.readFileSync(path.join(td, t, 'team.json'), 'utf8'))
+        teamFile = path.join(td, String(t), 'team.json')
+        if (!fs.statSync(teamFile).isFile()) continue
+      } catch { continue } // 无 team.json（retired-members.json 等杂项）不计
+      teams += 1
+      try {
+        // 72h 未更新 = 历史团队：它的未完成任务不再阻塞本项目推进
+        if (now - fs.statSync(teamFile).mtimeMs > ACTIVE_TEAM_MAX_AGE_MS) continue
+        const d = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
         openTasks += (d.tasks || []).filter((x) => !['completed', 'cancelled'].includes(String(x.status))).length
-      } catch {}
+      } catch { /* 坏 JSON/无权限 → 该团队不计未完成，不崩 */ }
     }
-  } catch {}
+  } catch { /* 无 .agent-teams → teams=0/openTasks=0 */ }
   const reqDoc = hasDoc(/^需求规格/)
   const taskmap = hasDoc(/^任务编排/)
   const designDoc = hasDoc(/^方案设计/)

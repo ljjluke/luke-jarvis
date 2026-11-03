@@ -3180,3 +3180,71 @@ test('apply：与既有两闸并列注册第三个 guard（阶段网关真挂上
   assert.strictEqual(guards[1], jarvisStageGate, '第 2 个=阶段网关（顺序决定先给"走错阶段"的指引）')
   assert.strictEqual(guards[2], jarvisFlowGuard, '第 3 个=流程闸（具体前置条件）')
 })
+
+// ── D5：活跃团队判据（防其它项目/历史团队的未完成任务把本项目钉死在 execute）──
+// 缺陷实证（t1 交付报告）：真实工作区 12 个未完成任务里只有 4 个属本项目，其余属其他项目与历史团队
+// → openTasks 恒 >0 → 本项目永远到不了 close（execute 阶段 jarvis_release 被拒）。
+
+/** 造一个团队目录（可选把 team.json mtime 做旧，模拟历史团队） */
+function teamFixture(dir, name, tasks, ageHours = 0) {
+  const td = path.join(dir, '.agent-teams', name)
+  fs.mkdirSync(td, { recursive: true })
+  const tf = path.join(td, 'team.json')
+  fs.writeFileSync(tf, JSON.stringify({ name, tasks }))
+  if (ageHours > 0) {
+    const t = Date.now() / 1000 - ageHours * 3600
+    fs.utimesSync(tf, t, t)
+  }
+  return tf
+}
+/** 造一个已过 build 闸的工作区（可再叠加团队） */
+function builtWorkspace() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'd5-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目')
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160) + '\n验收：x')
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
+  for (const step of ['clarify', 'decompose', 'design', 'build']) recordGate(dir, step, true)
+  return dir
+}
+
+test('D5 活跃团队：超过 72h 的历史团队有未完成任务 → 不计、不阻塞本项目进 close', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 't-cur', [{ id: 'a', status: 'completed', assignee: 'm' }], 0) // 本项目任务已清零
+  teamFixture(dir, 't-old', [{ id: 'b', status: 'in_progress', assignee: 'x' }, { id: 'c', status: 'claimed', assignee: 'y' }], 100) // 历史团队残留
+  fs.mkdirSync(path.join(dir, '.jarvis/docs/ponder-verify'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/ponder-verify/ok.json'), JSON.stringify({ verdict: 'PASS' }))
+  const st = computeStage(dir)
+  assert.strictEqual(st.artifacts.openTasks, 0, `历史团队未完成任务不应计入：实际 ${st.artifacts.openTasks}`)
+  assert.notStrictEqual(st.stage, 'execute', `本项目不应被历史团队钉在 execute（实际 ${st.stage}）`)
+})
+
+test('D5 活跃团队：当前团队的未完成任务计数正确，阶段留在 execute', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 't-cur', [
+    { id: 'a', status: 'in_progress', assignee: 'm1' },
+    { id: 'b', status: 'claimed', assignee: 'm2' },
+    { id: 'c', status: 'completed', assignee: 'm3' },
+  ], 0)
+  const st = computeStage(dir)
+  assert.strictEqual(st.artifacts.openTasks, 2, `只数未终态任务（in_progress+claimed）：实际 ${st.artifacts.openTasks}`)
+  assert.strictEqual(st.stage, 'execute', '有未完成任务应停 execute')
+  assert.ok(st.missing.some((m) => m.includes('未完成任务 2 个')), `缺口须写明数量：${st.missing.join('；')}`)
+})
+
+test('D5 活跃团队：archive 目录 / 无 team.json / 坏 JSON → 不崩且不计（teams 也不虚高）', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 'archive-2026-10', [{ id: 'a', status: 'in_progress' }], 0) // 归档名 → 不计
+  teamFixture(dir, 'bad-json', [], 0)
+  fs.writeFileSync(path.join(dir, '.agent-teams/bad-json/team.json'), '{坏 JSON')
+  fs.mkdirSync(path.join(dir, '.agent-teams/no-team-json'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.agent-teams/retired-members.json'), '[]') // 杂项文件
+  let st
+  assert.doesNotThrow(() => { st = computeStage(dir) }, '无 team.json/坏 JSON 不应崩')
+  assert.strictEqual(st.artifacts.openTasks, 0, '坏 JSON 团队不计未完成')
+  assert.strictEqual(st.artifacts.teams, 1, `只把有 team.json 的非归档目录算团队（实际 ${st.artifacts.teams}）`)
+})
