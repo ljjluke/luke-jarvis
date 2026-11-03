@@ -116,6 +116,22 @@ else
   red "④ 找不到 chromium：$CHROME（可用 CHROME=<path> 覆盖）"
 fi
 
+# ⑤（已知缺口，不计失败）页面 bundle 是否真的消费快照接口
+# 实测事实：office/index.html 加载的是 PixOffice 上游 demo bundle（website-*.js），
+# office/pixoffice-config.js 的 __PIXOFFICE_CONFIG__ 是空对象；仓内 grep 'api/luke-jarvis' = 0 命中。
+# 也就是说：快照接口有数据 ≠ 画面画的是这些数据（截图只能证明「页面能渲染」，不能证明「画的是我们的人/任务」）。
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# 只看「实际会被浏览器加载的东西」：服务页 office/office/index.html + office/assets/*.js
+# （office/README.md 里也写了 'api/luke-jarvis'，但文档不算消费端——别被它骗成「已接上」）
+LINK_HITS="$( { grep -l 'api/luke-jarvis' "$REPO_DIR/office/office/index.html" "$REPO_DIR/office/assets"/*.js 2>/dev/null || true; } | wc -l | tr -d ' ')"
+if [ "$LINK_HITS" -gt 0 ]; then
+  ok "⑤ 页面侧引用快照接口（命中 $LINK_HITS 个文件）——数据可上画面"
+else
+  say "⚠️  ⑤ 页面 bundle 未引用 'api/luke-jarvis'（命中 0）：截图来自 PixOffice demo，快照数据尚未接到画面上。"
+  say "     这是**已知缺口**（需 office/ 侧加 adapter 或注入 __PIXOFFICE_CONFIG__，不属本任务独占范围）；"
+  say "     不计失败，但不得据此宣称「画面里是本公司员工/任务」。"
+fi
+
 say ""
 if [ "$fail" -eq 0 ]; then
   say "✅ 结论：PixOffice 可用（页面/接口/落盘/截图全过；/jarvis-ui 若为 404 属「未重装生效」的已知边界）"
