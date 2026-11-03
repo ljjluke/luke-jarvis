@@ -2,6 +2,22 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.9.1] - 2026-11-03
+
+### 完全体 P2：阶段网关（工具调用前按阶段机械放行/拒绝）+ 真实缺陷修复 D5-D8
+
+**P2 阶段网关（commit e372161）**：新增 `jarvisStageGate(exec)`，按 `computeStage(cwd)` 当前阶段用 deny-list 拒绝越阶段流程类工具（`jarvis_*`/`agent_teams_*`），拒绝文案固定三要素「阶段 N/6+名称｜当前缺口｜下一步」；链式校验内嵌（复用 `computeStage` 返回的 gates，派活缺 clarify→decompose→design→build 任一环点名缺哪环，先于 deny 判定故与 guard 注册顺序无关）；`apply()` 按 captain→stage→flowguard 顺序注册；`hasGlob` 兼容 DSH FileSystem（`list` 优先 → `resolve+listDir` 取 `entry.name`，能力缺失/异常 fail-open）。测试 228→252。
+
+**D5 阶段可达性**：`computeStage` 的 openTasks 改为只统计「活跃团队」——归档目录（`archive`/`old`/`history`）不计，`team.json` mtime 超 72h 的历史团队不计其未完成任务；`teams` 只计含 `team.json` 的非归档目录。误判方向=宁可多算不可少算（防假收口）。修「本项目被其它项目/历史团队的未完成任务钉死在 execute、`jarvis_release` 被拒」的缺陷。
+
+**D6 deny 补集**：`agent_teams_amend_task`/`agent_teams_claim_task`/`agent_teams_remove_member` 并入 clarify/decompose/design 的 STAGE_DENY；build 阶段拒 `amend_task`/`claim_task`（换人 add/remove 仍允许）；execute 阶段放行 `claim_task`/`update_task`/`amend_task`。**边界诚实标注**：这只是显式补几项，完整闭合（未表态即测试红）按 project.md D6 裁决排进 P3 的 meta 穷举。
+
+**D7 ponder 落盘**：`jarvis_ponder_check` 的 PASS 记录落盘改为 `ponderVerifyProjectDir(args, exec)`：`args.projectDir` > 执行会话 `cwd` > 进程兜底（原实现用进程级单例 `resolveWorkspace(moduleCtx)`，实证漂移到 profile 目录导致交活闸读不到记录）；输出新增 `recordPath`/`recordProjectDir`，handler 改接 `exec`。
+
+**D8 打包/依赖**：`package.json` 补 `peerDependencies: {"@deepseek-ai/dsh-tools": ">=0.2.0-rc.1"}` + `peerDependenciesMeta` optional（宿主提供）；`files` 增加 `CHANGELOG.md`/`LICENSE`/`office`；新增 `LICENSE`（BSD-3-Clause，与 `license` 字段一致）；`test/bagua-gate.test.cjs` 去掉硬编码 `/tmp/bagua4.json`，改为 node:test 用例 + 临时夹具（缺 `node:test` 时显式 skip 而非 fail）。版本 0.9.0 → 0.9.1。
+
+**回滚**：每个缺陷一个 commit —— D5 `d2e00ff`、D6 `1092f6e`、D7 `5c47173`、D8（本条）`git revert <sha>` 即可单独回退；P2 阶段网关 `git revert e372161`。
+
 ## [0.9.0] - 2026-11-02
 
 ### 架构补充 P1：阶段状态机（阶段由插件计算，不是模型自述）
