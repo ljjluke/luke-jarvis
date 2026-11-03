@@ -145,6 +145,9 @@ pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
 
 装好插件并重启 dsh web 后，公司画面就是 **PixOffice 像素办公室**（员工工位/会议室/任务看板/黑板，数据来自 `.jarvis/company-state.json`）：
 
+- **状态根唯一（T13）**：**一个工作区只有一个 `.jarvis` 状态根**；插件仓库自身不存 `.jarvis`（历史残留已归档到 `.jarvis-archive/`，见其中 README）。`jarvis_flowguard` 会拒绝向「插件仓库自身」写闸（返回 `STATE_ROOT_CONFLICT`），避免产生第二个状态根 → 假 PASS。
+- **归属作用域（T13）**：审计（开工须知/自领/卡死/ponder 核验/岗位卡）只统计**本项目归属团队** = `.jarvis/active-team.json` 标记内团队 ∪ 与当前 captainSessionId 相同的团队（单一 `resolveOwnedTeams()` 实现；别家团队/终态任务不参与）。归属标记带 `expiresAt`（默认 7 天），过期自动回退 72h 启发式并标 `source=mtime-fallback`；标记写入与闸结论**解耦**（build/execute 即使被自家缺口拦住也会写标记）。
+- **协调豁免统一（T13）**：`COORD_TASK_RE` 单一常量，`agent_teams_create_task` 闸与 `auditTeamBriefs` 共用——纯协调任务（subject 含【协调】/会议/汇报/验收等）不要求开工须知。
 - **入口**：`http://<你的 dsh 地址>/jarvis-ui`（302 → **`/jarvis-office/jarvis.html`**：本公司数据适配页）；上游 demo 页仍在 `/jarvis-office/`（对照/素材来源）
 - **场景层 relay（T11）**：`/api/pixoffice/{events,messages,ui,reply}` 由插件提供——`events` 是 SSE，首帧即公司快照（`type=snapshot`，`employees[].sceneActorId` 绑定上游 6 个演员，`seq` 单调、同 seq 同内容幂等、同 seq 内容变→409），后续每 4s 检测 company-state 变化推增量帧；`messages` 按上游白名单校验命令（越界明确 400，不静默吞）。场景页 `office/jarvis-scene.html` 通过 `office/jarvis-scene-config.js` 注入 `__PIXOFFICE_CONFIG__.relayUrl=''`（同源）——**原 demo 页的 `pixoffice-config.js` 零改动**。
 - ⚠️ **T11 硬边界**：relay 协议与页面接线已用 `bash scripts/check-pixoffice-scene.sh` 验证（本仓库代码本地挂载采 SSE 帧：含 `emp-ceo-4as972`、绑定合法、无 error 帧；DOM 面板 4/4 不回退；场景页/原 demo 页均 200）。**但「3D 画面里真换成本公司员工」需重装 profile + 重启 dsh 后目视确认**——运行副本仍旧代码，relay 路由在现网尚不存在，不得宣称已上线。
@@ -204,7 +207,7 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ## 🧪 质量保证
 
-- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:285 -->`
+- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:294 -->`
 - verify_host_pipeline **48 用例 0 VIOLATION**
 - selfcheck **11 项发布前自检**
 - 部署双形态验证（仓库 + 实体部署）全链路跑通
