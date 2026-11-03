@@ -3248,3 +3248,33 @@ test('D5 活跃团队：archive 目录 / 无 team.json / 坏 JSON → 不崩且�
   assert.strictEqual(st.artifacts.openTasks, 0, '坏 JSON 团队不计未完成')
   assert.strictEqual(st.artifacts.teams, 1, `只把有 team.json 的非归档目录算团队（实际 ${st.artifacts.teams}）`)
 })
+
+// ── D6：deny 补集显式收窄（新流程工具不许在错误阶段用）──
+// 实测 agent-teams 稳定名单 14 个，原 STAGE_DENY 只表态 6 个；amend_task 能改验收契约、claim_task 能认领
+// → 若不并入，clarify/design 阶段就能改验收/认领，阶段隔离形同虚设。
+
+test('D6 deny 补集：amend_task/claim_task/remove_member 在 clarify/decompose/design 被拒', () => {
+  for (const stage of ['clarify', 'decompose', 'design']) {
+    const dir = stageGateFixture(stage)
+    for (const tool of ['agent_teams_amend_task', 'agent_teams_claim_task', 'agent_teams_remove_member']) {
+      const r = gateCall(tool, dir, {})
+      assert.ok(typeof r === 'string', `${stage} 阶段 ${tool} 必须被拒：${r}`)
+      assert.ok(r.includes(`阶段 ${computeStage(dir).index}/6`), `${stage} 文案须含阶段编号：${r}`)
+    }
+  }
+})
+
+test('D6 deny 补集：build 阶段 amend_task/claim_task 被拒（改验收契约/认领属执行期）', () => {
+  const dir = stageGateFixture('build')
+  assert.ok(typeof gateCall('agent_teams_amend_task', dir, {}) === 'string', 'build 阶段不许改验收契约')
+  assert.ok(typeof gateCall('agent_teams_claim_task', dir, {}) === 'string', 'build 阶段不许认领任务')
+  assert.strictEqual(gateCall('agent_teams_create', dir), undefined, 'build 阶段仍允许建队')
+  assert.strictEqual(gateCall('agent_teams_add_member', dir), undefined, 'build 阶段仍允许加人')
+})
+
+test('D6 deny 补集：execute 阶段 claim_task/update_task/amend_task 放行（交活与返工需要）', () => {
+  const dir = stageGateFixture('execute')
+  assert.strictEqual(gateCall('agent_teams_claim_task', dir, { task_id: 'task-1' }), undefined, 'execute 必须放行 claim_task')
+  assert.strictEqual(gateCall('agent_teams_update_task', dir, { task_id: 'task-1', status: 'in_progress' }), undefined, 'execute 必须放行 update_task')
+  assert.strictEqual(gateCall('agent_teams_amend_task', dir, { task_id: 'task-1' }), undefined, 'execute 必须放行 amend_task（返工改契约）')
+})

@@ -4543,12 +4543,19 @@ export function renderStage(cwd) {
 //   • 先判「是否 jarvis 工作区」+「有没有 cwd」——判不出来就放行（与 captainExecutionGuard/jarvisFlowGuard 同款保护），
 //     否则全局 guard（dsh-tools：plain-context guard 全局生效）会把纯 agent-teams 用户全误伤；
 //   • 否定文案必含三要素：阶段 N/6+名称、当前缺口、下一步（R2 验收点，也是模型唯一的纠错输入）。
+// D6：deny 补集显式收窄——把「新流程工具」并入 clarify/decompose/design/build。
+// 实测 @nanmicoder/dsh-agent-teams 的 TEAM_TOOL_NAMES 有 14 个（create/approve/edit_plan/add_member/
+// remove_member/create_task/reassign_task/claim_task/update_task/amend_task/send_message/status/resume/delete），
+// 本表原来只表态 6 个 → amend_task（可改 objective/acceptance/verify、等价于放宽验收）、claim_task（认领任务）
+// 在 clarify/design 阶段也能调，阶段隔离形同虚设。
+// 边界（诚实标注）：这只是「显式补几项」，不是穷举——完整闭合按 project.md D6 裁决排进 P3 的 meta 穷举
+// （遍历流程类工具名，未表态即测试红）。未知工具仍默认放行（deny-list 的固有取舍）。
 const STAGE_DENY = {
-  clarify: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
-  decompose: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_coverage', 'jarvis_release'],
-  design: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
-  build: ['jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
-  execute: ['jarvis_baseline', 'jarvis_taskgraph', 'jarvis_release'], // 执行期不回头改基线/重拆/改版本账本
+  clarify: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  decompose: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_coverage', 'jarvis_release'],
+  design: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  build: ['agent_teams_claim_task', 'agent_teams_amend_task', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'], // 建队期不许改验收契约/认领（换人 add/remove 仍允许）
+  execute: ['jarvis_baseline', 'jarvis_taskgraph', 'jarvis_release'], // 执行期不回头改基线/重拆/改版本账本；claim/update/amend 放行（交活与返工需要）
   close: ['agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_add_member'],
 }
 /** 派活类工具：除「本阶段允许」外，还必须持完整链（R3：build 必须建立在 clarify→decompose→design 之上） */
