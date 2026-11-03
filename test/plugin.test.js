@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -3713,4 +3713,59 @@ test('T10 F4b hasGlob 语义：无服务→true；目录不存在→false；其�
   assert.strictEqual(await hasGlob(real, missingDir, '需求规格'), false, '目录不存在→false（没产物必须拦）')
   const boomFs = { resolve: async () => ({ path: '/x' }), listDir: async () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }) } }
   assert.strictEqual(await hasGlob(boomFs, '/x', '需求规格'), true, '其他异常→true（不确定=放行）')
+})
+
+// ── t10 评审补强（八卦镜发现）：marker 消费方 honor 失败 / 空标记不写 / 嵌套 team.json / 无 list 后端 ──
+
+test('T10+ marker 消费方：建队前（无 team.json）不写空标记、不报成功；建队后 execute 闸补写并含本团队名', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-mk2-'))
+  // 建队前：build 闸通过 → 无 team.json → 不写 active-team.json、输出不得宣称已写
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160) + '\n验收：x')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头-人才寻访.md'), '# 猎头')
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO-带队.md'), '# CEO')
+  let r = await runFlowguard('build', proj)
+  assert.strictEqual(r.ok, true, `build 应通过：${JSON.stringify(r.missing)}`)
+  assert.ok(!r.activeTeamMarker, `建队前不得报「已写标记」：${r.activeTeamMarker}`)
+  assert.ok(!fs.existsSync(path.join(proj, '.jarvis/active-team.json')), '建队前不得写空标记文件')
+  // 建队后：execute 闸通过 → 补写标记且含本团队名
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', captainSessionId: 'cap', tasks: [{ id: 'a', subject: '实现X', description: '【开工须知】先跑 ponder 十阶段', status: 'in_progress', assignee: 'm1' }] }))
+  r = await runFlowguard('execute', proj)
+  assert.ok(r.activeTeamMarker, `execute 通过后应补写标记：${JSON.stringify(r)}`)
+  const mk = JSON.parse(fs.readFileSync(path.join(proj, '.jarvis/active-team.json'), 'utf8'))
+  assert.deepStrictEqual(mk.teams, ['t1'], `标记须含本团队名：${JSON.stringify(mk.teams)}`)
+})
+
+test('T10+ 嵌套 team.json：成员任务缺「开工须知」必须被 build 闸拦下（不再因平铺匹配漏检）', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-nested-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160) + '\n验收：x')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头-人才寻访.md'), '# 猎头')
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO-带队.md'), '# CEO')
+  // 真实嵌套布局 + 任务缺开工须知
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', tasks: [{ id: 'a', subject: '实现X', description: '直接干', status: 'in_progress' }] }))
+  const r = await runFlowguard('build', proj)
+  assert.strictEqual(r.ok, false, `成员任务缺开工须知必须 BLOCKED：${JSON.stringify(r.missing)}`)
+  assert.ok(r.missing.some((m) => m.includes('开工须知')), `缺口须点名开工须知：${JSON.stringify(r.missing)}`)
+})
+
+test('T10+ 无 list 能力的 FileSystem（只有 resolve+listDir）：审计闸真生效（不再静默放行）', async () => {
+  applyRealFs() // 真实适配器没有 list
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-nolist-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/普通角色.md'), '# 普通')
+  const fsSvc = getFsService(null)
+  const missing = await checkTalentPreconditions(fsSvc, proj, path)
+  assert.ok(missing.some((m) => m.includes('猎头')), `无 list 后端也必须检出缺猎头卡：${JSON.stringify(missing)}`)
+  assert.ok(missing.some((m) => m.includes('带队')), `无 list 后端也必须检出缺带队卡：${JSON.stringify(missing)}`)
 })

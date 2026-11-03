@@ -252,6 +252,63 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from './office-bridge.js'
 const _require = createRequire(import.meta.url)
 /**
+ * F4b-p1：统一「列目录名」——支持 list(dir) 与 DSH FileSystem 的 resolve(dir)+listDir(target) 两种形态。
+ * 返回 string[]（空数组=目录存在但为空）；返回 null=查不了（服务缺失/后端异常）→ 调用方按各自语义降级。
+ * 为什么必须统一：六个审计函数原来都以 typeof fsSvc.list === 'function' 为前置，真实 FileSystem 没有 list
+ * → 它们在 GUI 环境恒走「良性默认」分支（开工须知/人才层/自领/卡死/ponder核验/覆盖六闸形同不存在）。
+ */
+async function listNames(fsSvc, dir) {
+  if (!fsSvc) return null
+  try {
+    if (typeof fsSvc.list === 'function') {
+      const n = await fsSvc.list(dir)
+      return Array.isArray(n) ? n.map(String) : []
+    }
+    if (typeof fsSvc.resolve === 'function' && typeof fsSvc.listDir === 'function') {
+      let target
+      try { target = await fsSvc.resolve(dir) } catch { return null }
+      if (!target) return []
+      const entries = await fsSvc.listDir(target)
+      return (Array.isArray(entries) ? entries : []).map((e) => String(e && e.name !== undefined ? e.name : e))
+    }
+    return null
+  } catch { return null }
+}
+/**
+ * F4b-p2：安全读文本——真实 FileSystem 的 readText 需要 FsTarget（先 resolve），
+ * 旧代码直接传字符串路径 → 抛错被 catch 吞 → 审计函数「什么都没查」却返回良性结果（同 fail-open 家族缺陷）。
+ * 兼容 mock（readText 直接吃字符串）：先试 resolve 后的 target，失败再回退原字符串。
+ */
+async function readTextSafe(fsSvc, absPath) {
+  if (!fsSvc || typeof fsSvc.readText !== 'function') return null
+  let first = absPath
+  if (typeof fsSvc.resolve === 'function') {
+    try { const t = await fsSvc.resolve(absPath); if (t) first = t } catch { /* 保留字符串再试 */ }
+  }
+  try {
+    const text = await fsSvc.readText(first)
+    if (text) return text
+  } catch { /* 再试原字符串（mock 形态） */ }
+  if (first !== absPath) {
+    try {
+      const text = await fsSvc.readText(absPath)
+      if (text) return text
+    } catch { /* 放弃 */ }
+  }
+  return null
+}
+/** 判断 .agent-teams 下是否有 team.json（真实布局 .agent-teams/<团队>/team.json，不是平铺；平铺兼容） */
+async function hasTeamJson(fsSvc, teamsDir) {
+  const names = await listNames(fsSvc, teamsDir)
+  if (names === null) return null // 查不了 → 调用方按 fail-open 处理
+  if (names.includes('team.json')) return true
+  for (const name of names) {
+    const inner = await listNames(fsSvc, teamsDir + '/' + name)
+    if (inner && inner.includes('team.json')) return true
+  }
+  return false
+}
+/**
  * F4b：统一取 fs 服务。**模块级工具 handler 拿不到 apply 的形参 ctx**（裸 `ctx` 会 ReferenceError 被 catch 吞掉 →
  * fsSvc 恒 null → hasGlob fail-open → 闸变空壳）。优先级：exec.ctx.fs > moduleCtx.fs > moduleCtx.get('fs')。
  * 取不到返回 null（由 hasGlob/各审计函数按各自语义降级，绝不静默抛错）。
@@ -3963,7 +4020,7 @@ export const TOOLS = [
             const talentMissing = await checkTalentPreconditions(fsSvc, projectDir, path)
             missing.push(...talentMissing)
             // 派活必带开工须知：audit 团队任务
-            const teamFound = await hasGlob(fsSvc, path.join(projectDir, '.agent-teams'), 'team.json')
+            const teamFound = await hasTeamJson(fsSvc, path.join(projectDir, '.agent-teams'))
             if (teamFound) {
               const briefOk = await auditTeamBriefs(fsSvc, projectDir, path)
               if (!briefOk) missing.push('有团队成员任务缺「开工须知」（派活后跑 jarvis_member_brief audit——成员没须知=不会跑 ponder）')
@@ -4051,11 +4108,19 @@ export const TOOLS = [
       // D5-v2：build 闸通过 = 建队完成 → 把「本项目团队」写进 .jarvis/active-team.json（归属判据，
       // computeStage 据此只统计本项目团队的未完成任务；见 readActiveTeamMarker 注释里的判据关系与误判边界）。
       let activeTeamMarker = ''
-      if (ok && step === 'build') {
+      let activeTeamError = ''
+      // F5：marker 消费方必须 honor {ok:false}（{ok:false} 是 truthy，旧写法会把它报成「已写入」）；
+      // 另：build 闸通过时团队往往还没建（协议顺序），故 build 与 execute 两处都尝试补写，
+      // teams 为空时不写空标记（避免「有标记但 teams=[]」被误读成已归属）。
+      if (ok && (step === 'build' || step === 'execute')) {
         try {
           const mk = writeActiveTeamMarker(projectDir, sessionId)
-          if (mk) activeTeamMarker = path.join(projectDir, '.jarvis/active-team.json')
-        } catch { /* 写标记失败不改变闸结论（computeStage 会回退 72h 启发式） */ }
+          if (mk && mk.ok && Array.isArray(mk.teams) && mk.teams.length > 0) {
+            activeTeamMarker = path.join(projectDir, '.jarvis/active-team.json')
+          } else if (mk && !mk.ok) {
+            activeTeamError = String(mk.reason || '未知原因')
+          }
+        } catch (e) { activeTeamError = String((e && e.message) || e) }
       }
       // 步骤完成留痕（done=true 且前置齐备 → 记录到 .jarvis/flow-progress.json，学 ponder step-guard after）
       let recorded = null
@@ -4084,6 +4149,7 @@ export const TOOLS = [
       }
       if (recorded) out.recorded = recorded
       if (activeTeamMarker) out.activeTeamMarker = activeTeamMarker
+      if (activeTeamError) out.activeTeamError = activeTeamError
       return out
     },
   },
@@ -4251,14 +4317,16 @@ async function countMeetingProgress(existingText, maxRounds) {
 }
 
 async function auditTeamBriefs(fsSvc, projectDir, path) {
-  if (!fsSvc || typeof fsSvc.list !== 'function') return true
+  if (!fsSvc) return true
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
-    const teamNames = await fsSvc.list(teamsDir).catch(() => [])
+    const teamNamesRaw = await listNames(fsSvc, teamsDir)
+    if (teamNamesRaw === null) return true // 查不了 → 放行
+    const teamNames = teamNamesRaw
     let anyMissing = false
     for (const team of Array.isArray(teamNames) ? teamNames : []) {
       try {
-        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
         if (!txt) continue
         const d = JSON.parse(txt)
         const PONDER_MARK = /ponder|开工须知|step-guard|十阶段|run_id|PONDER_DATA_DIR|先跑 ponder/
@@ -4279,23 +4347,24 @@ const LEADER_CARD_RE = /CEO|总经理|厂长|店长|院长|校长|带队|leader/
 const HEADHUNTER_CARD_RE = /猎头|headhunter|人才寻访|recruiter/i
 export async function checkTalentPreconditions(fsSvc, projectDir, path) {
   const missing = []
-  if (!fsSvc || typeof fsSvc.list !== 'function') return missing
+  if (!fsSvc) return missing
   try {
     const cardsDir = path.join(projectDir, '.jarvis/cards')
-    let cardNames = []
-    try { cardNames = (await fsSvc.list(cardsDir)) || [] } catch { cardNames = [] }
-    const names = cardNames.map((n) => String(n))
+    const cardNamesRaw = await listNames(fsSvc, cardsDir)
+    if (cardNamesRaw === null) return missing
+    const names = cardNamesRaw.map((n) => String(n))
     const hasHeadhunter = names.some((n) => HEADHUNTER_CARD_RE.test(n))
     if (!hasHeadhunter) missing.push('猎头卡（.jarvis/cards/ 缺 猎头/headhunter 卡——建队必须先蒸馏该领域猎头）')
     const hasLeader = names.some((n) => LEADER_CARD_RE.test(n))
     if (!hasLeader) missing.push('带队/CEO卡（.jarvis/cards/ 缺 CEO/总经理/厂长/店长 等带队卡——建队必须先蒸馏带队者）')
     // 已有团队 → 每个成员岗位要有对应角色卡
     const teamsDir = path.join(projectDir, '.agent-teams')
-    let teamNames = []
-    try { teamNames = (await fsSvc.list(teamsDir)) || [] } catch { teamNames = [] }
+    const teamNamesRaw2 = await listNames(fsSvc, teamsDir)
+    if (teamNamesRaw2 === null) return missing
+    const teamNames = teamNamesRaw2
     for (const team of teamNames) {
       try {
-        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
         if (!txt) continue
         const d = JSON.parse(txt)
         for (const m of d.members || []) {
@@ -4321,14 +4390,15 @@ export async function checkTalentPreconditions(fsSvc, projectDir, path) {
 const COORD_TASK_RE = /【协调】|协调|需求分析|拆解|排期|会议|汇报|盯控|裁决|验收|评审/
 export async function auditCaptainOwnedTasks(fsSvc, projectDir, path) {
   const ids = []
-  if (!fsSvc || typeof fsSvc.list !== 'function') return ids
+  if (!fsSvc) return ids
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
-    let teamNames = []
-    try { teamNames = (await fsSvc.list(teamsDir)) || [] } catch { teamNames = [] }
+    const teamNamesRaw = await listNames(fsSvc, teamsDir)
+    if (teamNamesRaw === null) return ids
+    const teamNames = teamNamesRaw
     for (const team of teamNames) {
       try {
-        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
         if (!txt) continue
         const d = JSON.parse(txt)
         for (const t of d.tasks || []) {
@@ -4349,14 +4419,15 @@ export async function auditCaptainOwnedTasks(fsSvc, projectDir, path) {
 // 规则：未完成任务里 status==='claimed'（领了没交）或 attempt>=4 且产出为空 = 疑似卡死 → 必须 reassign 唤醒成员/换人。
 export async function auditStaleTasks(fsSvc, projectDir, path) {
   const stale = []
-  if (!fsSvc || typeof fsSvc.list !== 'function') return stale
+  if (!fsSvc) return stale
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
-    let teamNames = []
-    try { teamNames = (await fsSvc.list(teamsDir)) || [] } catch { teamNames = [] }
+    const teamNamesRaw = await listNames(fsSvc, teamsDir)
+    if (teamNamesRaw === null) return stale
+    const teamNames = teamNamesRaw
     for (const team of teamNames) {
       try {
-        const txt = await fsSvc.readText(path.join(teamsDir, String(team), 'team.json'))
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
         if (!txt) continue
         const d = JSON.parse(txt)
         for (const t of d.tasks || []) {
@@ -4616,6 +4687,11 @@ export function writeActiveTeamMarker(cwd, captainSessionId) {
   const teams = mine.length ? mine : all
   const source = mine.length ? 'captain-session' : 'fallback-all'
   const marker = { ok: true, teams, updatedAt: new Date().toISOString(), source, sessionId: sid }
+  if (teams.length === 0) {
+    // 建队前尚无 team.json（flowguard(build) 在 create 之前跑）：**不写空标记**——
+    // 否则 active-team.json 存在但 teams=[] 会被读端当作「有标记但无归属」，比没有标记更难排查。
+    return { ...marker, written: false, reason: '建队前尚无 team.json（下次 flowguard(build/execute) 通过时会补写）' }
+  }
   const dir = path.join(base, '.jarvis')
   try {
     fs.mkdirSync(dir, { recursive: true })
@@ -5045,15 +5121,16 @@ const BASELINE_FILE_RE = /^基线清单[-_](.+)\.json$/
  */
 export async function checkPonderVerify(fsSvc, projectDir, path) {
   const missing = []
-  if (!fsSvc || typeof fsSvc.list !== 'function') return missing
+  if (!fsSvc) return missing
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
-    let teams = []
-    try { teams = (await fsSvc.list(teamsDir)) || [] } catch { teams = [] }
+    const teamsRaw = await listNames(fsSvc, teamsDir)
+    if (teamsRaw === null) return missing
+    const teams = teamsRaw
     const completedMemberTasks = []
     for (const t of teams) {
       try {
-        const txt = await fsSvc.readText(path.join(teamsDir, String(t), 'team.json'))
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(t), 'team.json'))
         if (!txt) continue
         const d = JSON.parse(txt)
         for (const task of d.tasks || []) {
@@ -5073,7 +5150,7 @@ export async function checkPonderVerify(fsSvc, projectDir, path) {
       const n = String(f)
       if (!n.endsWith('.json')) continue
       try {
-        const rec = JSON.parse((await fsSvc.readText(path.join(projectDir, '.jarvis/docs/ponder-verify', n))) || '{}')
+        const rec = JSON.parse((await readTextSafe(fsSvc, path.join(projectDir, '.jarvis/docs/ponder-verify', n))) || '{}')
         if (String(rec.verdict || '').toUpperCase() === 'PASS' && rec.taskId) passed.add(String(rec.taskId))
       } catch {}
     }
@@ -5087,11 +5164,12 @@ export async function checkPonderVerify(fsSvc, projectDir, path) {
 
 export async function checkCoverageGate(fsSvc, projectDir, path) {
   const missing = []
-  if (!fsSvc || typeof fsSvc.list !== 'function') return missing
+  if (!fsSvc) return missing
   try {
     const docsDir = path.join(projectDir, '.jarvis/docs')
-    let names = []
-    try { names = (await fsSvc.list(docsDir)) || [] } catch { names = [] }
+    const docsRaw = await listNames(fsSvc, docsDir)
+    if (docsRaw === null) return missing
+    const names = docsRaw
     const bases = names.map(String).filter((n) => BASELINE_FILE_RE.test(n))
     if (bases.length === 0) return missing // 没建基线 = 非改造类任务，不拦
     for (const b of bases) {
@@ -5102,7 +5180,7 @@ export async function checkCoverageGate(fsSvc, projectDir, path) {
         continue
       }
       try {
-        const txt = await fsSvc.readText(await fsSvc.resolve(path.join(docsDir, matrixName)))
+        const txt = await readTextSafe(fsSvc, path.join(docsDir, matrixName))
         const d = JSON.parse(txt || '{}')
         const uncovered = Array.isArray(d.uncovered) ? d.uncovered.map(String) : []
         const exempt = Array.isArray(d.exemptions) ? d.exemptions.map(String) : []
