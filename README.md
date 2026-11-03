@@ -145,7 +145,8 @@ pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
 
 装好插件并重启 dsh web 后，公司画面就是 **PixOffice 像素办公室**（员工工位/会议室/任务看板/黑板，数据来自 `.jarvis/company-state.json`）：
 
-- **入口**：`http://<你的 dsh 地址>/jarvis-ui`（302 → `/jarvis-office/`，两者等价；`/jarvis-office/` 是页面真实地址）
+- **入口**：`http://<你的 dsh 地址>/jarvis-ui`（302 → **`/jarvis-office/jarvis.html`**：本公司数据适配页）；上游 demo 页仍在 `/jarvis-office/`（对照/素材来源）
+- **适配页（T9）**：`office/jarvis.html` + `office/jarvis-adapter.js` —— 左侧是**本公司实时数据面板**（角色/任务/阶段/会议招募，数据源 `GET /api/luke-jarvis/company`，每 4s 轮询，DOM 可机械校验、暴露 `window.__JARVIS_UI__`），右侧 iframe 是 PixOffice 场景渲染。⚠️ **诚实边界**：场景层仍是上游 demo 渲染，**未绑定本公司数据**（上游只认 `/api/pixoffice/{events,messages,ui,reply}` 协议，本插件未实现）；「画面里是本公司的人/任务」以左侧面板为准，不以场景动画为准。`bash scripts/check-pixoffice.sh` 会断言 DOM 含 ≥3 个本公司角色名并截图 `artifacts/pixoffice-company-<date>.png`。
 - **数据怎么进去**：CEO/成员每做关键动作（派活/汇报/开会/评估/开除/招募确认）调 `jarvis_company(mode=update|action)` → 写 `.jarvis/company-state.json` → 页面轮询 `/api/luke-jarvis/company` 投影渲染。
 - **落盘兜底（T8 修复）**：`jarvis_company` 以前只认宿主 `fs` 服务，服务不可用就**静默不落盘**（画面空白）；现在 fs 服务失败会自动用 `node:fs` 原子写（`mkdir` + `.tmp` + `rename`）落到 `<项目>/.jarvis/company-state.json`，返回值如实标明 `written` / `storageMode`（`fs-service` 或 `node-fs-fallback`）。
 - **自检**：`bash scripts/check-pixoffice.sh` —— 依次检查 页面/快照接口 HTTP 码、employees 非空且含 CEO、company-state 的 phase/员工数/任务数，并用 chromium 截图到 `artifacts/pixoffice-<date>.png`（默认 `BASE=http://127.0.0.1:3080`、`PROJECT_DIR=/opt/work/first`，可用环境变量覆盖）。

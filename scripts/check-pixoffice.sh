@@ -116,7 +116,47 @@ else
   red "④ 找不到 chromium：$CHROME（可用 CHROME=<path> 覆盖）"
 fi
 
-# ⑤（已知缺口，不计失败）页面 bundle 是否真的消费快照接口
+# ⑤ 本公司数据适配页（T9）：/jarvis-office/jarvis.html 必须真实消费快照接口，且渲染出本公司角色
+#   判据：① HTTP 200；② 页面/脚本中 'api/luke-jarvis' 命中 ≥1；③ chromium --dump-dom 后 DOM 文本
+#   含角色名（CEO/企业架构师/质量-探索式测试/办公体系专家 至少 3 个）；④ 截图 artifacts/pixoffice-company-<date>.png
+ADAPTER_URL="$BASE/jarvis-office/jarvis.html"
+ADA_CODE="$(curl -s -o /dev/null -w '%{http_code}' "$ADAPTER_URL" || echo 000)"
+if [ "$ADA_CODE" = "200" ]; then
+  ok "⑤-1 适配页 200：$ADAPTER_URL"
+else
+  red "⑤-1 适配页非 200（$ADA_CODE）：$ADAPTER_URL —— 运行副本 office/ 里没有 jarvis.html？需重装 profile（或做本地验证时把 office/jarvis.html 与 jarvis-adapter.js 复制进运行副本 office/，静态文件按请求读盘、无需重启）"
+fi
+ADA_REF="$( { curl -s "$ADAPTER_URL"; curl -s "$BASE/jarvis-office/jarvis-adapter.js"; } | grep -c 'api/luke-jarvis' || true)"
+if [ "$ADA_REF" -ge 1 ]; then
+  ok "⑤-2 页面/脚本真实引用快照接口（命中 $ADA_REF）"
+else
+  red "⑤-2 适配页未引用 api/luke-jarvis（命中 0）——数据没接上画面"
+fi
+if [ -x "$CHROME" ] && [ "$ADA_CODE" = "200" ]; then
+  DOM="$(mktemp)"
+  "$CHROME" --headless=new --no-sandbox --disable-gpu --virtual-time-budget=8000 --dump-dom "$ADAPTER_URL" >"$DOM" 2>/dev/null || true
+  ROLE_HITS=0
+  for r in CEO 企业架构师 质量-探索式测试 办公体系专家; do
+    if grep -q "$r" "$DOM"; then ROLE_HITS=$((ROLE_HITS + 1)); fi
+  done
+  EMP_N="$(grep -o 'jarvis-emp-count">[0-9]*' "$DOM" | grep -o '[0-9]*$' | head -1)"
+  TASK_N="$(grep -o 'jarvis-task-count">[0-9]*' "$DOM" | grep -o '[0-9]*$' | head -1)"
+  say "⑤-3 DOM 断言：角色名命中 $ROLE_HITS/4（需 ≥3）；面板 employees=$EMP_N tasks=$TASK_N"
+  if [ "$ROLE_HITS" -ge 3 ]; then ok "⑤-3 DOM 含 ≥3 个本公司角色名"; else red "⑤-3 DOM 角色名命中 $ROLE_HITS < 3（画面里不是本公司的人）"; fi
+  SHOT2="$OUT_DIR/pixoffice-company-$DATE.png"
+  "$CHROME" --headless=new --no-sandbox --disable-gpu --window-size=1440,900 \
+    --virtual-time-budget=8000 --screenshot="$SHOT2" "$ADAPTER_URL" >/dev/null 2>&1 || true
+  if [ -f "$SHOT2" ] && [ "$(stat -c '%s' "$SHOT2")" -gt 10000 ]; then
+    ok "⑤-4 本公司页面截图：$SHOT2（$(stat -c '%s' "$SHOT2") 字节）"
+  else
+    red "⑤-4 本公司页面截图失败（$SHOT2）"
+  fi
+  rm -f "$DOM"
+else
+  red "⑤-3/④ 跳过或失败：适配页未 200 或 chromium 不可用"
+fi
+
+# ⑥（已知边界，不计失败）上游 PixOffice demo 页本身是否消费快照接口
 # 实测事实：office/index.html 加载的是 PixOffice 上游 demo bundle（website-*.js），
 # office/pixoffice-config.js 的 __PIXOFFICE_CONFIG__ 是空对象；仓内 grep 'api/luke-jarvis' = 0 命中。
 # 也就是说：快照接口有数据 ≠ 画面画的是这些数据（截图只能证明「页面能渲染」，不能证明「画的是我们的人/任务」）。
@@ -125,16 +165,16 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # （office/README.md 里也写了 'api/luke-jarvis'，但文档不算消费端——别被它骗成「已接上」）
 LINK_HITS="$( { grep -l 'api/luke-jarvis' "$REPO_DIR/office/office/index.html" "$REPO_DIR/office/assets"/*.js 2>/dev/null || true; } | wc -l | tr -d ' ')"
 if [ "$LINK_HITS" -gt 0 ]; then
-  ok "⑤ 页面侧引用快照接口（命中 $LINK_HITS 个文件）——数据可上画面"
+  ok "⑥ 上游 demo 页引用快照接口（命中 $LINK_HITS 个文件）"
 else
-  say "⚠️  ⑤ 页面 bundle 未引用 'api/luke-jarvis'（命中 0）：截图来自 PixOffice demo，快照数据尚未接到画面上。"
-  say "     这是**已知缺口**（需 office/ 侧加 adapter 或注入 __PIXOFFICE_CONFIG__，不属本任务独占范围）；"
-  say "     不计失败，但不得据此宣称「画面里是本公司员工/任务」。"
+  say "ℹ️  ⑥ 上游 demo 页未引用 api/luke-jarvis（命中 0）——按设计保持不动（对照页）。"
+  say "     本公司数据请用 ⑤ 的适配页 /jarvis-office/jarvis.html（DOM 已断言 ≥3 个本公司角色）。"
+  say "     不得据 demo 页截图宣称「画面里是本公司员工/任务」。"
 fi
 
 say ""
 if [ "$fail" -eq 0 ]; then
-  say "✅ 结论：PixOffice 可用（页面/接口/落盘/截图全过；/jarvis-ui 若为 404 属「未重装生效」的已知边界）"
+  say "✅ 结论：PixOffice 可用——接口/落盘/上游 demo 页/本公司适配页(jarvis.html) 四层全过，DOM 已断言 ≥3 个本公司角色；/jarvis-ui 404 属「需重装+重启才生效」的已知边界。"
   exit 0
 else
   say "⛔ 结论：有检查项失败（见上 ❌）；依次排查 页面 → 接口 → company-state → 截图"
