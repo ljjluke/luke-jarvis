@@ -3469,3 +3469,85 @@ test('R1/②：close 闸已过但任务被重开（openTasks>0）→ 阶段回�
   assert.ok(!st.done.includes('close'), `过期收口闸不得授予「完成」：${st.done.join(',')}`)
   assert.ok(st.missing.some((m) => m.includes('未完成任务')), `缺口须写明未完成任务：${st.missing.join('；')}`)
 })
+
+// ── t8：PixOffice 官方 UI——jarvis_company 落盘修复 + /jarvis-ui 入口 ──
+
+/** 调 jarvis_company handler（exec 提供会话 cwd；fs 服务由 apply 注入的 ctx 决定） */
+async function callCompany(args, execCwd) {
+  const def = TOOLS.find((t) => t.name === 'jarvis_company')
+  return def.handler(args, { agent: { session: { id: 'ui-sess', header: { cwd: execCwd } } } })
+}
+
+test('T8 jarvis_company：无 fs 服务 → node:fs 兜底落盘（含 employees/tasks，storageMode=node-fs-fallback）', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-nofs-'))
+  const r = await callCompany({
+    mode: 'update',
+    employees: JSON.stringify([{ id: 'ceo', role: 'CEO', persona: 'CEO 人格', status: 'working' }]),
+    phase: '开发',
+  }, dir)
+  assert.strictEqual(r.written, true, `无 fs 服务也必须落盘：${r.verdict}`)
+  assert.strictEqual(r.storageMode, 'node-fs-fallback', '落盘通道须如实标明为 node:fs 兜底')
+  const file = path.join(dir, '.jarvis/company-state.json')
+  assert.ok(fs.existsSync(file), `快照文件应存在：${file}`)
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.ok(Array.isArray(saved.employees) && saved.employees.length === 1 && saved.employees[0].role === 'CEO', '内容须含 employees(CEO)')
+  assert.ok(Array.isArray(saved.tasks), '内容须含 tasks 表（UI 任务看板数据源）')
+  assert.strictEqual(saved.phase, '开发')
+  assert.ok(/已落盘（node:fs 兜底）/.test(r.verdict), `verdict 须如实说明落盘通道：${r.verdict}`)
+})
+
+test('T8 jarvis_company：fs 服务写失败/抛错 → 仍 node:fs 兜底落盘（不再静默不落盘）', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-fsfail-'))
+  const boomFs = { resolve: async (p) => ({ p }), readText: async () => '', writeText: async () => { throw new Error('fs service boom') }, list: async () => [] }
+  // 用 apply 注入「会抛错的 fs 服务」——模拟宿主 fs 服务不可用的真实场景
+  const ctx = {
+    get: (k) => (k === 'fs' ? boomFs : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} }, webServer: { register: () => () => {} }, systemPrompt: { section: () => () => {} },
+  }
+  plugin.apply(ctx)
+  const r = await callCompany({ mode: 'update', employees: JSON.stringify([{ role: 'CEO', status: 'working' }]) }, dir)
+  assert.strictEqual(r.written, true, `fs 服务抛错时仍须兜底落盘：${r.verdict}`)
+  assert.strictEqual(r.storageMode, 'node-fs-fallback')
+  const saved = JSON.parse(fs.readFileSync(path.join(dir, '.jarvis/company-state.json'), 'utf8'))
+  assert.ok(saved.employees.some((e) => e.role === 'CEO'), '兜底写入内容须完整')
+})
+
+test('T8 jarvis_company：fs 服务正常 → 走 fs 服务（storageMode=fs-service，绝对路径 storage）', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't8-fsok-'))
+  const writes = []
+  const okFs = { resolve: async (p) => ({ p }), readText: async () => '', writeText: async (t, text) => { writes.push(String(text)) }, list: async () => [] }
+  const ctx = {
+    get: (k) => (k === 'fs' ? okFs : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} }, webServer: { register: () => () => {} }, systemPrompt: { section: () => () => {} },
+  }
+  plugin.apply(ctx)
+  const r = await callCompany({ mode: 'update', employees: JSON.stringify([{ role: 'CEO' }]) }, dir)
+  assert.strictEqual(r.storageMode, 'fs-service', '有可用 fs 服务时优先走服务')
+  assert.strictEqual(writes.length, 1, 'fs 服务应收到一次写入')
+  assert.ok(r.storage.startsWith(dir), `storage 须是本次调用项目目录下的绝对路径：${r.storage}`)
+})
+
+test('T8 /jarvis-ui：apply 注册 exact 路由 → 302 到 /jarvis-office/（在静态 prefix 路由之前）', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  plugin.apply(ctx)
+  const ui = routes.find((r) => r.path === '/jarvis-ui')
+  assert.ok(ui, `应注册 /jarvis-ui 路由；实际注册：${routes.map((r) => r.kind + ':' + r.path).join(', ')}`)
+  assert.strictEqual(ui.kind, 'exact', '/jarvis-ui 必须是 exact 路由（否则被 prefix 吃掉）')
+  const idxUi = routes.findIndex((r) => r.path === '/jarvis-ui')
+  const idxStatic = routes.findIndex((r) => r.kind === 'prefix' && r.path === '/jarvis-office')
+  assert.ok(idxUi < idxStatic, `/jarvis-ui 必须注册在静态路由之前（ui=${idxUi} static=${idxStatic}）`)
+  // 真实调用一次：断言 302 + Location
+  const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
+  await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
+  assert.strictEqual(res.code, 302, `应 302 跳转：${res.code}`)
+  assert.strictEqual(res.headers.location, '/jarvis-office/', 'Location 必须指向 /jarvis-office/')
+})

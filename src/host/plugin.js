@@ -91,36 +91,64 @@ export function nextBoardId(items) {
   return 'B' + (max + 1)
 }
 
-/** 公司状态文件路径（与 jarvis_company 同一文件，3D UI 数据源） */
-function companyStateFile() {
-  const cwd = resolveWorkspace(moduleCtx, latestExec) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
+/** 公司状态文件路径（与 jarvis_company 同一文件，3D UI 数据源）。
+ * projectDir 显式传入优先（T8：修「依赖进程级单例 → 写到 profile 目录」的落盘漂移）。 */
+function companyStateFile(projectDir) {
+  const explicit = String(projectDir || '').trim()
+  const cwd = explicit || resolveWorkspace(moduleCtx, latestExec) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
   return (cwd ? cwd + '/' : '') + '.jarvis/company-state.json'
 }
 
-/** 读公司状态（无文件 → 空骨架） */
-async function readCompanyState(fsSvc) {
+/** 读公司状态（无文件 → 空骨架）。T8：fs 服务读失败/不可用 → node:fs 兜底读同一路径。 */
+async function readCompanyState(fsSvc, projectDir) {
   const empty = { company: {}, employees: [], meetings: [], recruiting: [], ceo: {}, headhunter: {}, tasks: [], updatedAt: '' }
-  if (!fsSvc || typeof fsSvc.readText !== 'function') return empty
+  const file = companyStateFile(projectDir)
+  if (fsSvc && typeof fsSvc.readText === 'function') {
+    try {
+      const target = await fsSvc.resolve(file)
+      if (target) {
+        const text = await fsSvc.readText(target)
+        if (text) {
+          const data = JSON.parse(text)
+          if (data && typeof data === 'object') return { ...empty, ...data }
+        }
+      }
+    } catch { /* 落 fallback */ }
+  }
   try {
-    const target = await fsSvc.resolve(companyStateFile())
-    if (!target) return empty
-    const text = await fsSvc.readText(target)
-    if (!text) return empty
-    const data = JSON.parse(text)
+    const fs = _require('node:fs')
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'))
     return data && typeof data === 'object' ? { ...empty, ...data } : empty
   } catch { return empty }
 }
 
-/** 写公司状态 */
-async function writeCompanyState(fsSvc, state) {
-  if (!fsSvc || typeof fsSvc.writeText !== 'function') return false
+/** 写公司状态。T8 修复（UI 数据源必须能落盘）：
+ * ① 先走宿主 fs 服务（writeText）；② 服务不可用/写失败/抛错 → node:fs 兜底原子写（mkdir + .tmp + rename）到
+ * <projectDir>/.jarvis/company-state.json；③ 两路都失败才算 failed。返回 {ok, mode} 供调用方如实回报。
+ * 为什么之前会「无 fs 未落盘」：旧实现只认 fsSvc，且 handler 用相对路径 '.jarvis/company-state.json'
+ * （resolve 依赖进程 cwd），于是 GUI 侧办公室永远没有员工/任务数据。 */
+async function writeCompanyState(fsSvc, state, projectDir) {
+  const file = companyStateFile(projectDir)
+  state.updatedAt = new Date().toISOString()
+  const text = JSON.stringify(state, null, 2)
+  if (fsSvc && typeof fsSvc.writeText === 'function') {
+    try {
+      const target = await fsSvc.resolve(file)
+      if (target) {
+        await fsSvc.writeText(target, text)
+        return { ok: true, mode: 'fs-service' }
+      }
+    } catch { /* 落 node:fs 兜底 */ }
+  }
   try {
-    const target = await fsSvc.resolve(companyStateFile())
-    if (!target) return false
-    state.updatedAt = new Date().toISOString()
-    await fsSvc.writeText(target, JSON.stringify(state, null, 2))
-    return true
-  } catch { return false }
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const tmp = file + '.tmp-' + process.pid + '-' + Date.now()
+    fs.writeFileSync(tmp, text)
+    fs.renameSync(tmp, file)
+    return { ok: true, mode: 'node-fs-fallback' }
+  } catch { return { ok: false, mode: 'failed' } }
 }
 
 /**
@@ -135,9 +163,10 @@ async function writeCompanyState(fsSvc, state) {
  *   action.recruiting_interviewing {position} → 匹配 recruiting 标 interviewing（猎头开始面试）
  */
 export async function syncCompanyState(fsSvc, action) {
-  if (!fsSvc || typeof fsSvc.readText !== 'function' || typeof fsSvc.writeText !== 'function') return false
+  // T8：不再强依赖 fs 服务——读/写都有 node:fs 兜底（见 readCompanyState/writeCompanyState 注释）
   try {
-    const state = await readCompanyState(fsSvc)
+    const projectDir = String((action && action.projectDir) || '')
+    const state = await readCompanyState(fsSvc, projectDir)
     const a = action || {}
     // 会议：标会议状态 + 参会员工联动（进会议室=离开工位；散会=回工位继续干）
     if (a.type === 'meeting_started' && a.meeting) {
@@ -212,7 +241,8 @@ export async function syncCompanyState(fsSvc, action) {
     } else {
       return false // 未知动作不改
     }
-    return await writeCompanyState(fsSvc, state)
+    const w = await writeCompanyState(fsSvc, state, String((action && action.projectDir) || ''))
+    return Boolean(w && w.ok)
   } catch { return false }
 }
 
@@ -3069,6 +3099,7 @@ export const TOOLS = [
         position: { type: 'string', description: '招募岗位（recruiting_started 用）' },
         targetPersona: { type: 'string', description: '招募目标人物（recruiting_started 用）' },
         replacesEmp: { type: 'string', description: '补谁（recruiting_started 用）' },
+        projectDir: { type: 'string', description: '（T8）快照落盘项目目录（缺省=调用会话 cwd；再缺省=进程兜底）' },
       },
     },
     output: {
@@ -3078,7 +3109,9 @@ export const TOOLS = [
         properties: {
           snapshot: { type: 'object', additionalProperties: true, description: '当前公司状态快照（UI 渲染数据源）' },
           updated: { type: 'boolean', description: '本次是否更新了快照' },
-          storage: { type: 'string', description: '快照文件位置' },
+          written: { type: 'boolean', description: '（T8）本次是否真的写盘（fs 服务或 node:fs 兜底成功）' },
+          storage: { type: 'string', description: '快照文件绝对路径' },
+          storageMode: { type: 'string', description: '（T8）落盘通道：fs-service / node-fs-fallback / failed / auto / none' },
           verdict: { type: 'string' },
         },
         required: ['snapshot', 'verdict'],
@@ -3086,28 +3119,24 @@ export const TOOLS = [
       render: (r) =>
         `【公司状态】${r.verdict}\n快照文件：${r.storage || '.jarvis/company-state.json'}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const mode = String(args.mode ?? 'snapshot').trim()
+      // T8：模块级工具 handler 拿不到 apply 的形参 ctx（旧写法 `ctx && ctx.get` 会 ReferenceError → fsSvc 恒 null，
+      // 这正是「无 fs 未落盘」的根因之一）；改用 apply 写入的模块级 moduleCtx。
       const fsSvc = (() => {
-        try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+        try { return (moduleCtx && moduleCtx.get && moduleCtx.get('fs')) || null } catch { return null }
       })()
-      const stateFile = '.jarvis/company-state.json'
-      // 读当前快照（有 fs 从磁盘读，无 fs 返回空骨架）
-      let state = { company: {}, employees: [], meetings: [], recruiting: [], ceo: {}, headhunter: {}, tasks: [], updatedAt: '' }
-      if (fsSvc && typeof fsSvc.readText === 'function') {
-        try {
-          const target = await fsSvc.resolve(stateFile)
-          if (target) {
-            const text = await fsSvc.readText(target)
-            if (text) {
-              const data = JSON.parse(text)
-              if (data && typeof data === 'object') state = { ...state, ...data }
-            }
-          }
-        } catch { /* 首次无文件 */ }
-      }
+      const path = _require('node:path')
+      // T8：落盘目录取「本次调用的事实」——args.projectDir > 调用会话 cwd > 进程兜底；
+      // 并用**绝对路径**（旧实现用相对 '.jarvis/company-state.json'，依赖进程 cwd → GUI 侧永远读不到数据）。
+      const projectDir = String(args.projectDir ?? '').trim()
+        || String((exec && exec.agent && exec.agent.session && exec.agent.session.header && exec.agent.session.header.cwd) || '').trim()
+        || resolveWorkspace(moduleCtx) || '.'
+      const stateFile = path.join(projectDir, '.jarvis/company-state.json')
+      // 读当前快照（fs 服务优先，失败/不可用 → node:fs 兜底，见 readCompanyState）
+      let state = await readCompanyState(fsSvc, projectDir)
       if (mode === 'snapshot') {
-        return { snapshot: state, verdict: `公司快照：${state.employees?.length || 0} 员工 / ${state.meetings?.length || 0} 会议 / ${state.recruiting?.length || 0} 招募中（UI 轮询渲染用）`, storage: stateFile }
+        return { snapshot: state, written: false, storage: stateFile, verdict: `公司快照：${state.employees?.length || 0} 员工 / ${state.meetings?.length || 0} 会议 / ${state.recruiting?.length || 0} 招募中（UI 轮询渲染用）` }
       }
       if (mode === 'clear') {
         state = { company: {}, employees: [], meetings: [], recruiting: [], ceo: {}, headhunter: {}, tasks: [], updatedAt: '' }
@@ -3132,23 +3161,25 @@ export const TOOLS = [
         if (args.actionType === 'meeting_started' && !args.meeting) return { snapshot: state, updated: false, storage: stateFile, verdict: 'meeting_started 缺 meeting(含 attendees)——未改动' }
         if (args.actionType === 'meeting_done' && !args.meetingId) return { snapshot: state, updated: false, storage: stateFile, verdict: 'meeting_done 缺 meetingId——未改动' }
         if (args.actionType === 'employee_evaluated' && (!args.role || args.score === undefined)) return { snapshot: state, updated: false, storage: stateFile, verdict: 'employee_evaluated 缺 role/score——未改动' }
+        act.projectDir = projectDir
         const ok = await syncCompanyState(fsSvc, act)
-        if (!ok) return { snapshot: state, updated: false, storage: stateFile, verdict: `action ${args.actionType} 同步失败（无 fs 或动作未生效）` }
-        return { snapshot: state, updated: true, storage: stateFile, verdict: `action ${args.actionType} 已同步（状态局部更新，不覆盖他表）` }
+        if (!ok) return { snapshot: state, updated: false, written: false, storage: stateFile, storageMode: 'failed', verdict: `action ${args.actionType} 同步失败（fs 服务与 node:fs 兜底均未写入）` }
+        return { snapshot: state, updated: true, written: true, storage: stateFile, storageMode: 'auto', verdict: `action ${args.actionType} 已同步（状态局部更新，不覆盖他表）` }
       }
-      // 写回磁盘
-      let persisted = false
-      if (fsSvc && typeof fsSvc.writeText === 'function') {
-        try {
-          const target = await fsSvc.resolve(stateFile)
-          if (target) {
-            await fsSvc.writeText(target, JSON.stringify(state, null, 2))
-            persisted = true
-          }
-        } catch {}
-      }
+      // 写回磁盘：fs 服务 → node:fs 原子兜底（T8：不再「无 fs 就静默不落盘」）
+      const w = await writeCompanyState(fsSvc, state, projectDir)
+      const persisted = Boolean(w && w.ok)
+      const storageMode = String((w && w.mode) || 'failed')
       const summary = `员工 ${state.employees?.length || 0}（${(state.employees || []).filter((e) => e.status === 'working').length} 工作中 / ${(state.employees || []).filter((e) => e.status === 'terminated').length} 已离任）· 会议 ${state.meetings?.length || 0} · 招募中 ${state.recruiting?.length || 0}`
-      return { snapshot: state, updated: mode !== 'snapshot' && persisted, storage: stateFile, verdict: `公司状态${persisted ? '已落盘' : '（无 fs 未落盘）'}：${summary}` }
+      const modeText = storageMode === 'fs-service' ? 'fs 服务' : storageMode === 'node-fs-fallback' ? 'node:fs 兜底' : '两路均失败'
+      return {
+        snapshot: state,
+        updated: mode !== 'snapshot' && persisted,
+        written: mode !== 'snapshot' && persisted,
+        storage: stateFile,
+        storageMode,
+        verdict: `公司状态${persisted ? `已落盘（${modeText}）` : '未落盘（fs 服务与 node:fs 兜底均失败）'}：${summary}`,
+      }
     },
   },
 
@@ -5157,6 +5188,21 @@ export default {
           '.svg': 'image/svg+xml', '.gif': 'image/gif', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
           '.map': 'application/json; charset=utf-8',
         }
+        // 0) 官方 UI 入口（T8）：GET /jarvis-ui → 302 跳 /jarvis-office/。
+        //    必须是 exact route 且注册在 prefix 静态路由之前（否则前缀路由会先吃掉匹配）。
+        //    用户只记一个短入口；/jarvis-office/ 仍是页面的真实地址（等价）。
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/jarvis-ui',
+            handler: async (req, res) => {
+              try {
+                res.writeHead(302, { location: '/jarvis-office/', 'cache-control': 'no-store' })
+                res.end('→ /jarvis-office/')
+              } catch {}
+            },
+          })
+        )
         // 1) 快照接口：把 company-state.json 投影成 PixOffice 业务快照
         ctx.effect(() =>
           webSvc2.register({
