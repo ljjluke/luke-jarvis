@@ -3549,5 +3549,43 @@ test('T8 /jarvis-ui：apply 注册 exact 路由 → 302 到 /jarvis-office/（�
   const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
   assert.strictEqual(res.code, 302, `应 302 跳转：${res.code}`)
-  assert.strictEqual(res.headers.location, '/jarvis-office/', 'Location 必须指向 /jarvis-office/')
+  assert.strictEqual(res.headers.location, '/jarvis-office/jarvis.html', 'Location 必须指向本公司数据适配页（T9 起）')
+})
+
+// ── t9：PixOffice 数据接上画面（适配页 + 机械可判定断言）──
+
+test('T9 适配页：office/jarvis.html 真实引用快照接口 + DOM 面板钩子齐备（非注释）', () => {
+  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const html = fs.readFileSync(path.join(repo, '../office/jarvis.html'), 'utf8')
+  const js = fs.readFileSync(path.join(repo, '../office/jarvis-adapter.js'), 'utf8')
+  const API = 'api/luke-jarvis'
+  const refs = html.split(API).length - 1 + (js.split(API).length - 1)
+  assert.ok(refs >= 1, `必须真实引用快照接口（api/luke-jarvis），实际命中 ${refs}`)
+  for (const hook of ['jarvis-panel', 'jarvis-employees', 'jarvis-tasks', 'jarvis-phase']) {
+    assert.ok(html.includes(hook), `DOM 面板钩子缺失：${hook}`)
+  }
+  // 适配页必须从快照渲染角色/任务（否则 DOM 断言无来源）
+  assert.ok(/renderEmployees/.test(js) && /renderTasks/.test(js), '适配脚本应渲染 employees/tasks')
+  assert.ok(/__JARVIS_UI__/.test(js), '应暴露 window.__JARVIS_UI__ 供机械校验')
+  // 诚实边界：不得在页面里宣称「场景由本公司数据驱动」
+  assert.ok(/未绑定本公司数据/.test(html), '页面必须标注「场景层未绑定本公司数据」的边界')
+  // 原 demo 页保持不变（仍可直接访问）
+  assert.ok(fs.existsSync(path.join(repo, '../office/office/index.html')), '原 PixOffice demo 页必须保留')
+})
+
+test('T9 适配页：/jarvis-ui 302 指向 jarvis.html（而不是仍指向 demo 目录）', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  plugin.apply(ctx)
+  const ui = routes.find((r) => r.path === '/jarvis-ui')
+  const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
+  await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
+  assert.strictEqual(res.code, 302)
+  assert.strictEqual(res.headers.location, '/jarvis-office/jarvis.html')
 })

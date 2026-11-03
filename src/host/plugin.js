@@ -5188,17 +5188,18 @@ export default {
           '.svg': 'image/svg+xml', '.gif': 'image/gif', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
           '.map': 'application/json; charset=utf-8',
         }
-        // 0) 官方 UI 入口（T8）：GET /jarvis-ui → 302 跳 /jarvis-office/。
+        // 0) 官方 UI 入口（T8/T9）：GET /jarvis-ui → 302 跳 /jarvis-office/jarvis.html。
+        //    T9 起指向「本公司数据适配页」（左侧实时数据面板 + PixOffice 场景 iframe）；
+        //    上游 demo 页 /jarvis-office/office/index.html 保持不动（仍可直接访问，用于对照）。
         //    必须是 exact route 且注册在 prefix 静态路由之前（否则前缀路由会先吃掉匹配）。
-        //    用户只记一个短入口；/jarvis-office/ 仍是页面的真实地址（等价）。
         ctx.effect(() =>
           webSvc2.register({
             kind: 'exact',
             path: '/jarvis-ui',
             handler: async (req, res) => {
               try {
-                res.writeHead(302, { location: '/jarvis-office/', 'cache-control': 'no-store' })
-                res.end('→ /jarvis-office/')
+                res.writeHead(302, { location: '/jarvis-office/jarvis.html', 'cache-control': 'no-store' })
+                res.end('→ /jarvis-office/jarvis.html')
               } catch {}
             },
           })
