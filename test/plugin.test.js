@@ -3438,3 +3438,34 @@ test('R1/②：close.ok 读收口闸——未过时不闭环但 release 已放�
   assert.strictEqual(st2.done.length, 6, `六阶段全部通过：${st2.done.join(',')}`)
   assert.strictEqual(st2.missing.length, 0, '收口完成应无缺口')
 })
+
+// ── t6 评审补强：D5-v2 标记写入早于建队（会话并入）+ close.ok 任务侧护栏 ──
+
+test('D5-v2 归属标记：建队在标记写入之后 → 同 captainSessionId 的新团队自动并入（防少算假收口）', () => {
+  const dir = builtWorkspace()
+  // 标记是在 flowguard(build) 通过时写的，此刻本项目团队还不存在（协议顺序：build 闸 → create → add_member）
+  fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+  // 标记写于 flowguard(build) 通过那一刻：当时只有别的项目团队（stale），本项目团队尚未创建
+  fs.writeFileSync(path.join(dir, '.jarvis/active-team.json'), JSON.stringify({ teams: ['stale-other'], updatedAt: new Date().toISOString(), source: 'fallback-all', sessionId: 'cap' }))
+  teamFixture(dir, 'stale-other', [{ id: 'x', status: 'in_progress' }], 0)
+  fs.writeFileSync(path.join(dir, '.agent-teams/stale-other/team.json'), JSON.stringify({ name: 'stale-other', captainSessionId: 'cap-other', tasks: [{ id: 'x', status: 'in_progress' }] }))
+  teamFixture(dir, 'other', [{ id: 'x', status: 'in_progress' }], 0)
+  fs.writeFileSync(path.join(dir, '.agent-teams/other/team.json'), JSON.stringify({ name: 'other', captainSessionId: 'cap-other', tasks: [{ id: 'x', status: 'in_progress' }] }))
+  teamFixture(dir, 'mine-new', [{ id: 'a', status: 'in_progress' }, { id: 'b', status: 'pending' }], 0)
+  fs.writeFileSync(path.join(dir, '.agent-teams/mine-new/team.json'), JSON.stringify({ name: 'mine-new', captainSessionId: 'cap', tasks: [{ id: 'a', status: 'in_progress' }, { id: 'b', status: 'pending' }] }))
+  const st = computeStage(dir)
+  assert.strictEqual(st.artifacts.openTasks, 3, `标记内团队(stale-other=1) + 同会话新团队(mine-new=2) 都必须计入（否则新建团队任务永不计=假收口）：实际 ${st.artifacts.openTasks}`)
+  assert.strictEqual(st.stage, 'execute', '有未完成任务 → 不得进 close')
+})
+
+test('R1/②：close 闸已过但任务被重开（openTasks>0）→ 阶段回到 execute，done 不含 close（闸过期不授予完成）', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 't-cur', [{ id: 'a', status: 'in_progress' }], 0) // 任务被重新打开
+  fs.mkdirSync(path.join(dir, '.jarvis/docs/ponder-verify'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/ponder-verify/ok.json'), JSON.stringify({ verdict: 'PASS' }))
+  recordGate(dir, 'close', true) // 历史上跑过一次收口闸（现在已过期）
+  const st = computeStage(dir)
+  assert.strictEqual(st.stage, 'execute', `有未完成任务必须回 execute：${st.stage}`)
+  assert.ok(!st.done.includes('close'), `过期收口闸不得授予「完成」：${st.done.join(',')}`)
+  assert.ok(st.missing.some((m) => m.includes('未完成任务')), `缺口须写明未完成任务：${st.missing.join('；')}`)
+})

@@ -4561,12 +4561,17 @@ export function computeStage(cwd) {
       } catch { continue } // 无 team.json（retired-members.json 等杂项）不计
       teams += 1
       try {
+        const d = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
         if (activeSet) {
-          if (!activeSet.has(String(t))) continue // 不在归属标记内 = 别人的/历史团队 → 不计
+          const inMarker = activeSet.has(String(t))
+          // 建队发生在 flowguard(step="build") 通过之后 → 标记快照里不可能有「本项目刚建的团队」。
+          // 因此归属 = 标记内团队 ∪ 与标记同一 captainSessionId 的团队（同会话新建/续建/子队自动并入，无需刷新标记）。
+          // 这一步是防「少算→假收口」的关键：只按快照名单会被新团队漏掉（少算=未完成任务凭空消失）。
+          const sameSession = Boolean(marker.sessionId) && String((d && d.captainSessionId) || '') === marker.sessionId
+          if (!inMarker && !sameSession) continue // 既不在标记、也不是本会话团队 = 别人的/历史团队 → 不计
         } else if (now - fs.statSync(teamFile).mtimeMs > ACTIVE_TEAM_MAX_AGE_MS) {
           continue // 回退路径：72h 未更新 = 历史团队
         }
-        const d = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
         openTasks += (d.tasks || []).filter((x) => !['completed', 'cancelled'].includes(String(x.status))).length
       } catch { /* 坏 JSON/无权限 → 该团队不计未完成，不崩 */ }
     }
@@ -4585,7 +4590,9 @@ export function computeStage(cwd) {
     { id: 'execute', ok: openTasks === 0 && teams > 0, missing: [...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个`]), ...(verify > 0 ? [] : ['ponder 核验记录（成员交活前必须 jarvis_ponder_check(taskId=…) 拿 PASS）'])], next: '派活(带开工须知) → 盯控(agent_teams_status) → 每个成员任务 dismount 前过 ponder 核验' },
     // R1/②：close.ok 不再恒 false——由「收口闸」真实判定（gateOk('close')），过了才算收口完成。
     // 否则过了 flowguard(step="close") 阶段也永远停在 6/6「收口未完成」，`done` 永不包含 close（T3 报告 §三 边界 5）。
-    { id: 'close', ok: gateOk('close'), missing: [...(gateOk('close') ? [] : ['jarvis_flowguard(step="close")（覆盖矩阵+ponder核验+三产物闭环）'])], next: 'jarvis_coverage(persist) → jarvis_essence → jarvis_flowguard(step="close") → jarvis_snapshot' },
+    // 纵深防御：再加 openTasks===0（闸是「历史上跑过一次」，任务可能被重新打开；闸过期不能授予「完成」）。
+    // 诚实边界：close.ok 只表示「闸已过 + 当前无未完成任务」，不等于收口质量——质量由 flowguard(step="close") 的 9 条检查决定。
+    { id: 'close', ok: gateOk('close') && openTasks === 0, missing: [...(gateOk('close') ? [] : ['jarvis_flowguard(step="close")（覆盖矩阵+ponder核验+三产物闭环）']), ...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个（收口闸过期或被重开任务，需重跑 flowguard(step="close")）`])], next: 'jarvis_coverage(persist) → jarvis_essence → jarvis_flowguard(step="close") → jarvis_snapshot' },
   ]
   const firstOpen = states.findIndex((x) => !x.ok)
   const allOk = firstOpen === -1
