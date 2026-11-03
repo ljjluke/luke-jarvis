@@ -101,7 +101,8 @@ export function toPixOfficeSnapshot(state, opts = {}) {
       sceneActorId: pickActor(role),
       name: String(e.persona || e.name || role).slice(0, 40),
       role: role.slice(0, 60),
-      online: status !== 'terminated' && status !== 'idle' ? true : status === 'idle',
+      // 修正三目永真（旧式两个分支对 idle 都返回 true → idle 员工在画面上永远在线）
+      online: status !== 'terminated' && status !== 'idle',
     })
   })
 

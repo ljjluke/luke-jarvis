@@ -333,6 +333,22 @@ export const PIXOFFICE_COMMANDS = Object.freeze([
  * @param {object} state company-state（employees/tasks/meetings/recruiting/ceo/headhunter）
  * @param {object} opts  {seq, workspaceId, workspaceName}
  */
+export const PIXOFFICE_EVENT_KINDS = Object.freeze(['note', 'task.assigned', 'task.started', 'task.blocked', 'task.completed'])
+const PIXOFFICE_EVENT_KIND_SET = new Set(PIXOFFICE_EVENT_KINDS)
+
+/**
+ * 上游 events.kind 是**枚举**（note/task.assigned/task.started/task.blocked/task.completed），
+ * 超出枚举整帧会被 zod 拒绝（不是逐条容错）。office-bridge 投影出的 meeting.xxx / recruiting.xxx / employee.xxx / ceo.xxx
+ * 都是 ours 的语义，落到上游只能压成 note（summary 保留原文，信息不丢）。
+ */
+export function normalizeEventKind(kind) {
+  const k = String(kind || '')
+  if (PIXOFFICE_EVENT_KIND_SET.has(k)) return k
+  if (k === 'task.assigned' || k === 'task.started') return k
+  return 'note'
+}
+
+/** 由 company-state 生成「场景快照帧」：**信封必须对齐上游** {type:'office.sync', snapshot: {...}} */
 export function buildPixOfficeFrame(state, opts = {}) {
   const seq = Number(opts.seq)
   const safeSeq = Number.isInteger(seq) && seq > 0 ? seq : 1
@@ -341,14 +357,17 @@ export function buildPixOfficeFrame(state, opts = {}) {
     workspaceId: String(opts.workspaceId || 'jarvis-workspace'),
     workspaceName: String(opts.workspaceName || 'jarvis'),
   })
-  return {
+  const normalized = {
     ...snap,
-    type: 'snapshot',
     seq: safeSeq,
     employees: (Array.isArray(snap.employees) ? snap.employees : []).slice(0, PIXOFFICE_LIMITS.employees),
     tasks: (Array.isArray(snap.tasks) ? snap.tasks : []).slice(0, PIXOFFICE_LIMITS.tasks),
-    events: (Array.isArray(snap.events) ? snap.events : []).slice(0, PIXOFFICE_LIMITS.events),
+    events: (Array.isArray(snap.events) ? snap.events : [])
+      .slice(0, PIXOFFICE_LIMITS.events)
+      .map((e) => ({ ...e, kind: normalizeEventKind(e && e.kind), summary: String((e && e.summary) || '').slice(0, 300) || '（无摘要）' })),
   }
+  // 上游 receive 用 zod 联合体分派：office.sync / office.sync.start / office.sync.complete，其余落到 safeParse 失败
+  return { type: 'office.sync', seq: safeSeq, snapshot: normalized }
 }
 
 /**
@@ -357,8 +376,13 @@ export function buildPixOfficeFrame(state, opts = {}) {
  */
 export function validatePixOfficeFrame(frame) {
   const errors = []
-  const f = frame && typeof frame === 'object' ? frame : {}
-  const seq = Number(f.seq)
+  const outer = frame && typeof frame === 'object' ? frame : {}
+  // 兼容两种入参：完整信封 {type:'office.sync', snapshot} 与裸快照（历史用例）
+  const f = outer.snapshot && typeof outer.snapshot === 'object' ? outer.snapshot : outer
+  if (outer.type !== 'office.sync') {
+    errors.push({ code: 'ENVELOPE_INVALID', message: `帧信封必须是 {type:'office.sync', snapshot}（上游 zod 联合体只认 office.sync/office.sync.start/office.sync.complete；实际 type=${outer.type || '(空)'}）` })
+  }
+  const seq = Number(f.seq || outer.seq)
   if (!Number.isInteger(seq) || seq <= 0) errors.push({ code: 'SEQ_REQUIRED', message: 'seq 必填且为正整数（上游据此判重/拒绝乱序）' })
   if (!f.workspace || !f.workspace.id) errors.push({ code: 'WORKSPACE_REQUIRED', message: 'workspace.id 必填且同一工作区不可变' })
   const employees = Array.isArray(f.employees) ? f.employees : []
@@ -373,6 +397,12 @@ export function validatePixOfficeFrame(frame) {
   if (tasks.length > PIXOFFICE_LIMITS.tasks) errors.push({ code: 'TASKS_LIMIT', message: `tasks 超上限 ${PIXOFFICE_LIMITS.tasks}` })
   const events = Array.isArray(f.events) ? f.events : []
   if (events.length > PIXOFFICE_LIMITS.events) errors.push({ code: 'EVENTS_LIMIT', message: `events 超上限 ${PIXOFFICE_LIMITS.events}` })
+  for (const e of events) {
+    const kind = String((e && e.kind) || '')
+    if (!PIXOFFICE_EVENT_KIND_SET.has(kind)) errors.push({ code: 'EVENT_KIND_INVALID', message: `event kind=${kind || '(空)'} 不在上游枚举（会被整帧拒绝）` })
+    const summary = String((e && e.summary) || '')
+    if (!summary || summary.length > 300) errors.push({ code: 'EVENT_SUMMARY_INVALID', message: `event summary 长度须 1..300（实际 ${summary.length}）` })
+  }
   return { ok: errors.length === 0, errors }
 }
 
@@ -5060,11 +5090,16 @@ export function recordGate(cwd, step, ok) {
     const manualNote = prev && (typeof prev.note === 'string' ? prev.note : '')
     const entry = { ok: true, at: now, stamped: true }
     if (manualNote) {
+      const history = Array.isArray(prev.noteHistory) ? [...prev.noteHistory] : []
+      // 幂等归档：同一条 note 只归档一次（旧实现每次机械写都再追加一条 → noteHistory 无界膨胀、审计痕迹失真）
+      const already = history.some((h) => h && h.note === manualNote)
+      if (!already) {
+        history.push({ note: manualNote, at: prev.at || null, archivedAt: now, archivedBy: 'recordGate', reason: '机械闸写入前归档人工 note（不许静默覆盖）' })
+      }
       entry.note = manualNote
-      entry.noteHistory = [
-        ...(Array.isArray(prev.noteHistory) ? prev.noteHistory : []),
-        { note: manualNote, at: prev.at || null, archivedAt: now, archivedBy: 'recordGate', reason: '机械闸写入前归档人工 note（不许静默覆盖）' },
-      ]
+      entry.noteHistory = history
+      if (prev.by) entry.by = prev.by // 人工署名不丢
+      if (prev.manual) entry.manual = prev.manual
     }
     gates[step] = entry
     fs.writeFileSync(file, JSON.stringify(gates, null, 2))
@@ -5401,7 +5436,12 @@ export default {
           try {
             const q = String((req && req.url) || '')
             const m = q.match(/[?&]workspace=([^&]+)/)
-            if (m) return decodeURIComponent(m[1])
+            if (m) {
+              const v = decodeURIComponent(m[1])
+              // 上游页面把 workspace 当**布尔开关**发（?workspace=1）；只有「看起来像路径」的值才当目录，
+              // 否则会把 workspace.id 派生成 jarvis-1 且读到空员工表（实测：employees=0）。
+              if (v && (v.startsWith('/') || v.includes('/'))) return v
+            }
           } catch { /* 忽略 */ }
           return resolveWorkspace(moduleCtx) || process.cwd()
         }
@@ -5428,6 +5468,11 @@ export default {
                 res.writeHead(200, headers)
                 if (typeof res.flushHeaders === 'function') res.flushHeaders()
               } catch { return }
+              // seq 必须**跨连接单调**：上游页面把 offices+seq 持久化（localStorage），重连后按 seq>=local 才应用；
+              // 旧实现每条连接从 1 数 → 重连后前 N 帧被上游当过期静默丢弃（画面冻结、无错误提示）。
+              const relaySeqState = (globalThis.__JARVIS_RELAY_SEQ__ = globalThis.__JARVIS_RELAY_SEQ__ || new Map())
+              let workspaceIdForSeq = ''
+              const lastEventId = Number((req && req.headers && req.headers['last-event-id']) || 0)
               let seq = 1
               let prev = null
               let closed = false
@@ -5438,14 +5483,22 @@ export default {
                   try { res.write(sseFrameString({ type: 'error', seq: frame.seq, code: verdict.errors[0].code, errors: verdict.errors })) } catch {}
                   return false
                 }
-                try { res.write(sseFrameString(frame)) } catch { return false }
+                try {
+                  // id: 让浏览器在重连时回传 Last-Event-ID（配合上面的跨连接 seq，实现断线续传）
+                  res.write('id: ' + String(frame.seq) + '\n')
+                  res.write(sseFrameString(frame))
+                  relaySeqState.set(workspaceIdForSeq, frame.seq)
+                } catch { return false }
                 return true
               }
               const tick = async () => {
                 if (closed) return
                 try {
                   const { cwd, state } = await relayReadState(req)
-                  const frame = buildPixOfficeFrame(state, { seq, workspaceId: 'jarvis-' + relayPath.basename(cwd), workspaceName: 'Jarvis 数字员工公司' })
+                  workspaceIdForSeq = 'jarvis-' + relayPath.basename(cwd)
+                  const floor = Math.max(Number(relaySeqState.get(workspaceIdForSeq) || 0), lastEventId)
+                  if (seq <= floor) seq = floor + 1 // 跨连接续传：从工作区已发到的 seq 之后继续
+                  const frame = buildPixOfficeFrame(state, { seq, workspaceId: workspaceIdForSeq, workspaceName: 'Jarvis 数字员工公司' })
                   const decision = relaySeqDecision(prev, frame)
                   if (!prev) {
                     if (write(frame)) { prev = { seq: frame.seq, hash: frameHash(frame) }; seq += 1 }

@@ -74,29 +74,63 @@ try {
 } finally {
   clearTimeout(timer)
   ac.abort()
-  server.close()
 }
 
-const snap = frames.find((f) => f && f.type === 'snapshot')
+// 上游信封是 {type:'office.sync', snapshot:{...}}（zod 联合体只认 office.sync/*）
+const envelope = frames.find((f) => f && f.type === 'office.sync' && f.snapshot)
+const snap = envelope ? envelope.snapshot : null
 const errFrames = frames.filter((f) => f && f.type === 'error')
 const parseErrs = frames.filter((f) => f && f.__parse_error)
 const empIds = (snap && Array.isArray(snap.employees) ? snap.employees : []).map((e) => String(e.id))
+const eventKinds = (snap && Array.isArray(snap.events) ? snap.events : []).map((e) => String(e.kind))
 const actorOk = (snap && Array.isArray(snap.employees) ? snap.employees : []).every((e) => ['office-lead', 'review-agent', 'data-agent', 'file-agent', 'app-agent', 'code-agent'].includes(String(e.sceneActorId)))
 
 console.log(`ℹ️  采样帧数=${frames.length}（snapshot=${snap ? 1 : 0} error=${errFrames.length} parse_error=${parseErrs.length}）`)
 if (snap) {
-  console.log(`ℹ️  快照片段：seq=${snap.seq} workspace=${snap.workspace && snap.workspace.id} employees=${empIds.length} [${empIds.slice(0, 4).join(', ')}]`)
+  console.log(`ℹ️  信封 type=${envelope.type} seq=${envelope.seq}｜快照 workspace=${snap.workspace && snap.workspace.id} employees=${empIds.length} [${empIds.slice(0, 4).join(', ')}]`)
+  console.log(`ℹ️  事件 kind：${eventKinds.length ? [...new Set(eventKinds)].join(', ') : '(none)'}`)
   console.log(`ℹ️  sceneActorId 绑定：${(snap.employees || []).map((e) => e.sceneActorId).join(', ')}`)
   console.log('ℹ️  原始帧片段：' + JSON.stringify(snap).slice(0, 320) + ' …')
 }
 let bad = 0
-if (!snap) { console.error('❌ 未收到合法 snapshot 帧'); bad += 1 }
+if (!snap) { console.error("❌ 未收到合法 office.sync 帧（envelope+snapshot）"); bad += 1 }
+if (snap && !['note', 'task.assigned', 'task.started', 'task.blocked', 'task.completed'].every((k) => eventKinds.every((x) => ['note', 'task.assigned', 'task.started', 'task.blocked', 'task.completed'].includes(x)))) { /* noop */ }
+if (snap && eventKinds.some((k) => !['note', 'task.assigned', 'task.started', 'task.blocked', 'task.completed'].includes(k))) { console.error(`❌ 事件 kind 超出上游枚举：${eventKinds.join(',')}`); bad += 1 }
+if (snap && (snap.employees || []).length !== 4) { console.error(`⚠️  快照员工数=${(snap.employees || []).length}（本工作区应有 4 人；0 人说明 company-state 没读到）`) }
 if (snap && !empIds.includes(WANT_EMP_ID)) { console.error(`❌ 帧内缺本公司 employee id ${WANT_EMP_ID}：${empIds.join(',')}`); bad += 1 }
 if (snap && !actorOk) { console.error('❌ 存在 sceneActorId 不在上游演员表（会被 INVALID_BINDING 丢弃）'); bad += 1 }
 if (errFrames.length) { console.error(`❌ 收到 error 帧：${JSON.stringify(errFrames[0]).slice(0, 200)}`); bad += 1 }
 if (parseErrs.length) { console.error('❌ 存在不可解析的数据帧'); bad += 1 }
+// ── 额外：把另外 3 条 relay 路由真打一遍（旧探针只执行了 events，messages/ui/reply 的闭包变量从未被执行）──
+async function probeRoutes() {
+  let localBad = 0
+  try {
+    const okRes = await fetch(`${base}/api/pixoffice/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command: 'map.edit', payload: { mapId: 'm1' } }) })
+    const okBody = await okRes.json()
+    if (okRes.status === 200 && okBody.ok) console.log('ℹ️  messages(白名单内) → 200 ok')
+    else { console.error(`❌ messages(白名单内) 期望 200，实际 ${okRes.status} ${JSON.stringify(okBody)}`); localBad += 1 }
+    const badRes = await fetch(`${base}/api/pixoffice/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command: 'actor.create', payload: {} }) })
+    const badBody = await badRes.json()
+    if (badRes.status === 400 && badBody.code === 'COMMAND_NOT_ALLOWED') console.log('ℹ️  messages(越界命令) → 400 COMMAND_NOT_ALLOWED')
+    else { console.error(`❌ messages(越界) 期望 400 COMMAND_NOT_ALLOWED，实际 ${badRes.status} ${JSON.stringify(badBody)}`); localBad += 1 }
+    const uiRes = await fetch(`${base}/api/pixoffice/ui?workspace=${encodeURIComponent(PROJECT_DIR)}`)
+    const uiBody = await uiRes.json()
+    if (uiRes.status === 200 && uiBody.ok && uiBody.workspace && uiBody.workspace.id) console.log(`ℹ️  ui → 200 workspace=${uiBody.workspace.id} employees=${uiBody.employees}`)
+    else { console.error(`❌ ui 期望 200+workspace，实际 ${uiRes.status} ${JSON.stringify(uiBody)}`); localBad += 1 }
+    const replyRes = await fetch(`${base}/api/pixoffice/reply`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    const replyBody = await replyRes.json()
+    if (replyRes.status === 200 && replyBody.ok) console.log('ℹ️  reply → 200 ok')
+    else { console.error(`❌ reply 期望 200，实际 ${replyRes.status} ${JSON.stringify(replyBody)}`); localBad += 1 }
+  } catch (e) {
+    console.error(`❌ 路由探测异常：${(e && e.message) || e}`)
+    localBad += 1
+  }
+  return localBad
+}
+bad += await probeRoutes()
+try { server.close() } catch {}
 if (bad === 0) {
-  console.log(`✅ SSE 采样通过：快照含本公司员工（${WANT_EMP_ID}）、绑定合法、无 error 帧`)
+  console.log(`✅ SSE 采样通过：信封 office.sync、快照含本公司员工（${WANT_EMP_ID}）、绑定合法、事件 kind 合法、无 error 帧；messages/ui/reply 三条路由均实跑通过`)
   process.exit(0)
 }
 process.exit(1)

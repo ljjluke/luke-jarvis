@@ -27,7 +27,8 @@ fi
 rm -f "$PROBE_OUT"
 
 # ② 适配页 relayUrl 注入 + 面板 DOM 不回退
-ADA_URL="$BASE/jarvis-office/jarvis.html"
+# 显式带 workspace（插件侧 resolveWorkspace 是进程级单例，多项目并存会漂移：实测漂到 profile 目录 → 面板 0 员工）
+ADA_URL="$BASE/jarvis-office/jarvis.html?workspace=$(printf '%s' "$PROJECT_DIR" | sed 's#/#%2F#g')"
 C="$(curl -s -o /dev/null -w '%{http_code}' "$ADA_URL" || echo 000)"
 [ "$C" = "200" ] && ok "②-1 适配页 200" || red "②-1 适配页非 200（$C）——运行副本 office/ 缺 jarvis.html？重装或复制静态文件"
 REL="$(curl -s "$ADA_URL" | grep -c 'relayUrl' || true)"

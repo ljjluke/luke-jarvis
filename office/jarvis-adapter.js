@@ -19,7 +19,14 @@
  * 机械校验入口：window.__JARVIS_UI__ = { ok, employees:number, tasks:number, phase, roles:string[] }
  */
 
-const SNAPSHOT_URL = '/api/luke-jarvis/company?workspace=' // 真实引用（grep 校验用：api/luke-jarvis）
+// 工作区必须**显式指定**：插件侧 resolveWorkspace 是进程级单例（首个工具调用/首个 agent 决定），
+// 多项目并存时会漂移到别的工作区（实测漂移到 /root/.dsh/profiles/web → 面板 0 员工）。
+// 优先取 URL ?workspace=，其次 window.__JARVIS_WORKSPACE__，最后不带参数（服务端只能尽力而为）。
+const WORKSPACE = (() => {
+  try { const v = new URLSearchParams(location.search).get('workspace'); if (v) return v } catch {}
+  return String(globalThis.__JARVIS_WORKSPACE__ || '')
+})()
+const SNAPSHOT_URL = '/api/luke-jarvis/company' + (WORKSPACE ? '?workspace=' + encodeURIComponent(WORKSPACE) : '') // 真实引用（grep 校验用：api/luke-jarvis）
 const POLL_MS = 4000
 // T11：场景层经 relay 接本公司数据（relayUrl 同源；配置在 ./jarvis-scene-config.js）
 const RELAY_URL = '/api/pixoffice'
@@ -114,6 +121,7 @@ async function refresh() {
       phase,
       roles: employees.map((e) => String(e.role || '')),
       updatedAt: String(snap.updatedAt || ''),
+      workspace: String((snap.workspace && snap.workspace.id) || ''),
       ts: new Date().toISOString(),
     }
   } catch (err) {
