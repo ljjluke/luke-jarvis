@@ -2,6 +2,17 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.9.0] - 2026-11-02
+
+### 架构补充 P1：阶段状态机（阶段由插件计算，不是模型自述）
+
+借鉴 `dsh-superagent-prototype` 的 `core/stage.ts`（MIT，已 vendor 到 `src/host/vendor/`）。**不替换 agent-teams**，只补它缺的"编排层"。
+
+- **`computeStage(cwd)`**：纯读文件推导 6 阶段（clarify→decompose→design→build→execute→close），每阶段以"产物 + 闸门"双重判定，输出 `{stage,index,total,missing,next,done,artifacts}`。
+- **`renderStage(cwd)`**：渲染成注入文本，含「阶段 N/6 · 已通过 · 当前缺口 · 下一步 · 事实快照（需求规格/任务编排/方案设计/角色卡/团队/未完成任务/ponder核验）」。
+- **`luke-jarvis:protocol` 注入段升级为动态**：每次请求按该 agent 的 `session.header.cwd` 现算阶段并追加——**模型不需要"记得"流程，插件每一步都告诉它现在在哪、缺什么、下一步做什么**。
+- 实测 scan 工作区：正确算出「阶段 2/6 拆解，缺口 flowguard(decompose)」，事实快照 `需求规格=有 任务编排=有 方案设计=有 角色卡=7 团队=10 未完成任务=42 ponder核验=0`。
+
 ## [0.8.1] - 2026-10-31
 
 ### 修复：工作记忆不再丢失（扫描实证 12 天工作未落盘）

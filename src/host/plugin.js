@@ -4427,6 +4427,81 @@ export const JARVIS_CULTURE = `【企业文化 · 不可协商（优先级高于
 7. 交付可判定：结论要能被别人验证——写清怎么验、验什么、通过标准是什么。
 违反以上任一条 = 不合格交付（打回重做）。`
 
+// ── 阶段状态机（补充 P1，借鉴 dsh-superagent 的 core/stage.ts）────────────────
+// 核心思想：**阶段由插件按事实计算，不是模型自述**。每次请求把"当前第几步/缺什么/下一步做什么"注入 systemPrompt。
+const JARVIS_STAGES = ['clarify', 'decompose', 'design', 'build', 'execute', 'close']
+const STAGE_LABELS = {
+  clarify: '需求打磨', decompose: '拆解', design: '方案设计', build: '建队派活', execute: '执行盯控', close: '收口',
+}
+const STAGE_GATE = { // 该阶段必须持哪个闸才算过
+  clarify: 'clarify', decompose: 'decompose', design: 'design', build: 'build', execute: null, close: null,
+}
+/** 计算当前阶段（纯读文件，无副作用） */
+export function computeStage(cwd) {
+  const fs = _require('node:fs')
+  const path = _require('node:path')
+  const base = String(cwd || '')
+  const gates = _readGates(base)
+  const gateOk = (k) => Boolean(gates[k] && gates[k].ok)
+  const hasDoc = (re) => { try { return fs.readdirSync(path.join(base, '.jarvis/docs')).some((n) => re.test(n)) } catch { return false } }
+  let cards = 0
+  try { cards = fs.readdirSync(path.join(base, '.jarvis/cards')).filter((n) => n.endsWith('.md')).length } catch {}
+  let teams = 0
+  try { teams = fs.readdirSync(path.join(base, '.agent-teams')).length } catch {}
+  let openTasks = 0
+  try {
+    const td = path.join(base, '.agent-teams')
+    for (const t of fs.readdirSync(td)) {
+      try {
+        const d = JSON.parse(fs.readFileSync(path.join(td, t, 'team.json'), 'utf8'))
+        openTasks += (d.tasks || []).filter((x) => !['completed', 'cancelled'].includes(String(x.status))).length
+      } catch {}
+    }
+  } catch {}
+  const reqDoc = hasDoc(/^需求规格/)
+  const taskmap = hasDoc(/^任务编排/)
+  const designDoc = hasDoc(/^方案设计/)
+  let verify = 0
+  try { verify = fs.readdirSync(path.join(base, '.jarvis/docs/ponder-verify')).filter((n) => n.endsWith('.json')).length } catch {}
+
+  const states = [
+    { id: 'clarify', ok: reqDoc && gateOk('clarify'), missing: [...(reqDoc ? [] : ['.jarvis/docs/需求规格-*.md（≥300字且含验收）']), ...(gateOk('clarify') ? [] : ['jarvis_flowguard(step="clarify")'])], next: '打磨需求 → 产出需求规格 → jarvis_flowguard(step="clarify")' },
+    { id: 'decompose', ok: taskmap && gateOk('decompose'), missing: [...(taskmap ? [] : ['.jarvis/docs/任务编排-*.md（先跑 jarvis_taskgraph）']), ...(gateOk('decompose') ? [] : ['jarvis_flowguard(step="decompose")'])], next: 'jarvis_taskgraph 出任务编排 → jarvis_flowguard(step="decompose")' },
+    { id: 'design', ok: designDoc && gateOk('design'), missing: [...(designDoc ? [] : ['.jarvis/docs/方案设计-*.md']), ...(gateOk('design') ? [] : ['jarvis_flowguard(step="design")'])], next: '产出方案设计（每条需求→实现落点）→ jarvis_flowguard(step="design")' },
+    { id: 'build', ok: cards >= 2 && teams > 0 && gateOk('build'), missing: [...(cards >= 2 ? [] : [`.jarvis/cards/ 角色卡（当前 ${cards} 张，需≥2：带队卡+岗位卡）`]), ...(teams > 0 ? [] : ['建队（agent_teams_create）']), ...(gateOk('build') ? [] : ['jarvis_flowguard(step="build")'])], next: 'jarvis_distill 蒸馏角色卡 → jarvis_flowguard(step="build") → agent_teams_create → add_member' },
+    { id: 'execute', ok: openTasks === 0 && teams > 0, missing: [...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个`]), ...(verify > 0 ? [] : ['ponder 核验记录（成员交活前必须 jarvis_ponder_check(taskId=…) 拿 PASS）'])], next: '派活(带开工须知) → 盯控(agent_teams_status) → 每个成员任务 dismount 前过 ponder 核验' },
+    { id: 'close', ok: false, missing: ['jarvis_flowguard(step="close")（覆盖矩阵+ponder核验+三产物闭环）'], next: 'jarvis_coverage(persist) → jarvis_essence → jarvis_flowguard(step="close") → jarvis_snapshot' },
+  ]
+  let idx = states.findIndex((x) => !x.ok)
+  if (idx === -1) idx = states.length - 1
+  const cur = states[idx]
+  return {
+    stage: cur.id,
+    index: idx + 1,
+    total: states.length,
+    label: STAGE_LABELS[cur.id] || cur.id,
+    missing: cur.missing,
+    next: cur.next,
+    done: states.slice(0, idx).map((x) => x.id),
+    artifacts: { reqDoc, taskmap, designDoc, cards, teams, openTasks, verify },
+    gates,
+  }
+}
+/** 渲染成注入文本 */
+export function renderStage(cwd) {
+  const r = computeStage(cwd)
+  const lines = [
+    '【jarvis 当前阶段 · 插件实时计算（不是你的自述）】',
+    `阶段 ${r.index}/${r.total}：${r.label}（${r.stage}）`,
+    r.done.length ? `已通过：${r.done.join(' → ')}` : '已通过：（无）',
+    r.missing.length ? `当前缺口：${r.missing.join('；')}` : '当前缺口：无',
+    `下一步：${r.next}`,
+    `事实快照：需求规格=${r.artifacts.reqDoc ? '有' : '无'} 任务编排=${r.artifacts.taskmap ? '有' : '无'} 方案设计=${r.artifacts.designDoc ? '有' : '无'} 角色卡=${r.artifacts.cards} 团队=${r.artifacts.teams} 未完成任务=${r.artifacts.openTasks} ponder核验=${r.artifacts.verify}`,
+    '规则：只做当前阶段允许的动作；下游动作（建队/派活）在阶段未过时会被机械闸拒绝。',
+  ]
+  return lines.join('\n')
+}
+
 // ── 记忆保鲜闸（①）：project.md 落后于工作进度 → 拒绝关键动作 ──────────
 // 教训（scan 实证）：project.md 停在 10-19，会话跑到 10-31 —— 12 天工作全在上下文里，一压缩/换会话就"记忆没了"。
 const MEMORY_MAX_AGE_MS = 6 * 60 * 60 * 1000 // 6 小时
@@ -4918,7 +4993,13 @@ export default {
           sp.section({
             name: 'luke-jarvis:protocol',
             order: 118,
-            text: () => JARVIS_SYSTEM_PROTOCOL,
+            text: ({ agent }) => {
+              try {
+                const cwd = agent && agent.session && agent.session.header && agent.session.header.cwd
+                if (cwd) return JARVIS_SYSTEM_PROTOCOL + '\n\n' + renderStage(cwd)
+              } catch {}
+              return JARVIS_SYSTEM_PROTOCOL
+            },
           })
         )
       }

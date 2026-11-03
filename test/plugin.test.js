@@ -2958,3 +2958,40 @@ test('jarvis_snapshot：写入会话快照并报告未完成任务数', async ()
   assert.strictEqual(snap.sessionId, 'sess-1')
   assert.strictEqual(snap.openTasks.length, 1)
 })
+
+// ── v0.9.0：阶段状态机（借鉴 dsh-superagent core/stage.ts：阶段由插件算，不是模型自述）──
+
+test('computeStage：按产物+闸门推导当前阶段，并给出缺口与下一步', async () => {
+  const os = await import('node:os')
+  const { computeStage, renderStage } = await import('../src/host/plugin.js')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  let r = computeStage(dir)
+  assert.strictEqual(r.stage, 'clarify')
+  assert.ok(r.missing.some((m) => m.includes('需求规格')), '缺需求规格')
+
+  // 补需求规格 + clarify 闸 → 进入 decompose
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(150) + '\n验收：x')
+  recordGate(dir, 'clarify', true)
+  r = computeStage(dir)
+  assert.strictEqual(r.stage, 'decompose')
+  assert.deepStrictEqual(r.done, ['clarify'])
+
+  // 补任务编排 + decompose 闸 → design
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  recordGate(dir, 'decompose', true)
+  r = computeStage(dir)
+  assert.strictEqual(r.stage, 'design')
+
+  // 补方案设计 + design 闸 → build（卡不足仍算 build 阶段未完成）
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  recordGate(dir, 'design', true)
+  r = computeStage(dir)
+  assert.strictEqual(r.stage, 'build')
+  assert.ok(r.missing.some((m) => m.includes('角色卡')), '缺角色卡')
+
+  const txt = renderStage(dir)
+  assert.ok(txt.includes('阶段 4/6'), `渲染应含阶段序号：${txt.slice(0, 80)}`)
+  assert.ok(txt.includes('当前缺口'), '含缺口')
+  assert.ok(txt.includes('下一步'), '含下一步')
+})
