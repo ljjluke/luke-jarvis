@@ -4158,12 +4158,12 @@ export const TOOLS = [
             if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许建队派活）')
             else _dropMissing(missing, (m) => m.startsWith('方案设计'))
             // 人才层前置硬闸（glm-test 教训：无猎头/无角色卡直接建普通角色队 = 跳过蒸馏流程）
-            const talentMissing = await checkTalentPreconditions(fsSvc, projectDir, path)
+            const talentMissing = await checkTalentPreconditions(fsSvc, projectDir, path, ownedSet)
             missing.push(...talentMissing)
             // 派活必带开工须知：audit 团队任务
             const teamFound = await hasTeamJson(fsSvc, path.join(projectDir, '.agent-teams'))
             if (teamFound) {
-              const briefOk = await auditTeamBriefs(fsSvc, projectDir, path)
+              const briefOk = await auditTeamBriefs(fsSvc, projectDir, path, ownedSet)
               if (!briefOk) missing.push('有团队成员任务缺「开工须知」（派活后跑 jarvis_member_brief audit——成员没须知=不会跑 ponder）')
             }
           },
@@ -4177,14 +4177,14 @@ export const TOOLS = [
             if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许执行实现）')
             else _dropMissing(missing, (m) => m.startsWith('方案设计'))
             // 顶层不得自领执行任务（scan 教训：成员会话死后 captain 自己 claim 任务干完 → "全是上层在干活"）
-            const captainOwned = await auditCaptainOwnedTasks(fsSvc, projectDir, path)
+            const captainOwned = await auditCaptainOwnedTasks(fsSvc, projectDir, path, ownedSet)
             if (captainOwned.length) {
               missing.push(
                 `captain 自领未完成任务：${captainOwned.join('、')}（顶层 captain/贾维斯不得亲自执行——必须 agent_teams_reassign_task 派给团队成员以唤醒成员会话；纯协调/验收/汇报类任务请在 subject 标注【协调】豁免）`
               )
             }
             // 卡死任务必须 reassign（scan 教训：成员会话 end-seed 后任务停在 claimed/in_progress 没人管）
-            const staleTasks = await auditStaleTasks(fsSvc, projectDir, path)
+            const staleTasks = await auditStaleTasks(fsSvc, projectDir, path, ownedSet)
             if (staleTasks.length) {
               missing.push(
                 `疑似卡死任务：${staleTasks.join('、')}（claimed 未交付 / attempt≥4 产出为空——必须 agent_teams_reassign_task 唤醒成员或换人，不许顶层自己顶替）`
@@ -4226,7 +4226,7 @@ export const TOOLS = [
             } catch {}
             // 成员任务 ponder 核验硬闸（防"裸干交付"）
             try {
-              const povMissing = await checkPonderVerify(fsSvc, projectDir, path)
+              const povMissing = await checkPonderVerify(fsSvc, projectDir, path, ownedSet)
               missing.push(...povMissing)
             } catch {}
           },
@@ -4237,6 +4237,22 @@ export const TOOLS = [
       if (!cfg) {
         return { verdict: `⚠️ 未知步骤「${step}」（应为 clarify/decompose/design/build/execute/close）`, ok: false, step, missing: [], next: '' }
       }
+      // T13 ⑤：状态根唯一化——插件仓库自身（有 package.json name=luke-jarvis 或 src/host/plugin.js）
+      // 不是 jarvis 状态根；向它写 .jarvis/gates.json 会产生「第二个状态根 → 假 PASS」（T12 OBS-2 实证）。
+      if (looksLikePluginRepo(projectDir) && !(await hasGlob(getFsService(exec), path.join(projectDir, '.agent-teams'), 'team.json'))) {
+        return {
+          verdict: `⛔ 状态根冲突：${projectDir} 是插件仓库自身，不是 jarvis 项目工作区。一个工作区只能有一个 .jarvis 状态根；请用真实项目目录（或删除该目录里的 .jarvis）`,
+          ok: false,
+          step,
+          missing: ['状态根冲突（插件仓库自身不得持有 .jarvis 状态根——见 README「一个工作区只有一个状态根」）'],
+          next: '用真实项目工作区（含 .agent-teams）重跑 flowguard',
+          error: 'STATE_ROOT_CONFLICT',
+        }
+      }
+      // T13 ①：一次性算出本项目归属团队，四个审计共用（禁止三处各写一份口径）
+      const sessionId0 = String((exec && exec.agent && exec.agent.session && exec.agent.session.id) || '')
+      const ownedInfo = resolveOwnedTeams(projectDir, sessionId0)
+      const ownedSet = new Set(ownedInfo.teams)
       const missing = [...cfg.pre]
       try {
         const filtered = await cfg.check(missing)
@@ -4253,7 +4269,9 @@ export const TOOLS = [
       // F5：marker 消费方必须 honor {ok:false}（{ok:false} 是 truthy，旧写法会把它报成「已写入」）；
       // 另：build 闸通过时团队往往还没建（协议顺序），故 build 与 execute 两处都尝试补写，
       // teams 为空时不写空标记（避免「有标记但 teams=[]」被误读成已归属）。
-      if (ok && (step === 'build' || step === 'execute')) {
+      // T13 ③：**marker 与闸解耦**——真实工作区里 build/execute 可能被自家缺口拦住（T12 打回），
+      // 若只在 ok 时写，标记永远不写 → D5-v2 退 72h。故 build/execute 一律尝试写（写入失败如实回报）。
+      if (step === 'build' || step === 'execute') {
         try {
           const mk = writeActiveTeamMarker(projectDir, sessionId)
           if (mk && mk.ok && Array.isArray(mk.teams) && mk.teams.length > 0) {
@@ -4282,6 +4300,8 @@ export const TOOLS = [
         }
       }
       const out = {
+        ownedTeams: ownedInfo.teams,
+        ownedSource: ownedInfo.source,
         verdict: ok ? `✅ ${cfg.label}前置齐备，可进入${recorded ? '（已记录完成→' + recorded + '）' : ''}` : `⛔ BLOCKED：${cfg.label}缺前置产物——${missing.join('；')}`,
         ok,
         step,
@@ -4457,13 +4477,15 @@ async function countMeetingProgress(existingText, maxRounds) {
   } catch { return { roundsUsed: 1, maxRounds: Number(maxRounds) || 3 } }
 }
 
-async function auditTeamBriefs(fsSvc, projectDir, path) {
+export async function auditTeamBriefs(fsSvc, projectDir, path, owned) {
   if (!fsSvc) return true
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
     const teamNamesRaw = await listNames(fsSvc, teamsDir)
     if (teamNamesRaw === null) return true // 查不了 → 放行
-    const teamNames = teamNamesRaw
+    const names = teamNamesRaw
+    // T13 ①：只审计本项目归属团队（owned 为空=归属判不出来 → 保持原行为，避免把「判不出」变成「全放行」）
+    const teamNames = owned && owned.size ? names.filter((n) => owned.has(String(n))) : names
     let anyMissing = false
     for (const team of Array.isArray(teamNames) ? teamNames : []) {
       try {
@@ -4472,6 +4494,9 @@ async function auditTeamBriefs(fsSvc, projectDir, path) {
         const d = JSON.parse(txt)
         const PONDER_MARK = /ponder|开工须知|step-guard|十阶段|run_id|PONDER_DATA_DIR|先跑 ponder/
         for (const t of d.tasks || []) {
+          // T13 ①/②：终态任务不参与审计；协调类任务豁免开工须知（与 create_task 闸共用 COORD_TASK_RE）
+          if (TERMINAL_TASK_STATUS.includes(String(t.status || ''))) continue
+          if (COORD_TASK_RE.test(String(t.subject || ''))) continue
           const text = String(t.description || '') + ' ' + String(t.subject || '') + ' ' + String(t.acceptance || '')
           if (!PONDER_MARK.test(text)) { anyMissing = true; break }
         }
@@ -4486,7 +4511,7 @@ async function auditTeamBriefs(fsSvc, projectDir, path) {
 // 无 fs 环境返回空数组=放行（防环境缺 fs 误拦，与 hasGlob 一致）。
 const LEADER_CARD_RE = /CEO|总经理|厂长|店长|院长|校长|带队|leader/i
 const HEADHUNTER_CARD_RE = /猎头|headhunter|人才寻访|recruiter/i
-export async function checkTalentPreconditions(fsSvc, projectDir, path) {
+export async function checkTalentPreconditions(fsSvc, projectDir, path, owned) {
   const missing = []
   if (!fsSvc) return missing
   try {
@@ -4502,7 +4527,8 @@ export async function checkTalentPreconditions(fsSvc, projectDir, path) {
     const teamsDir = path.join(projectDir, '.agent-teams')
     const teamNamesRaw2 = await listNames(fsSvc, teamsDir)
     if (teamNamesRaw2 === null) return missing
-    const teamNames = teamNamesRaw2
+    // T13 ①：只检查本项目归属团队的成员岗位卡（别家团队的成员缺卡不该拦本项目 build）
+    const teamNames = owned && owned.size ? teamNamesRaw2.filter((n) => owned.has(String(n))) : teamNamesRaw2
     for (const team of teamNames) {
       try {
         const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
@@ -4528,15 +4554,73 @@ export async function checkTalentPreconditions(fsSvc, projectDir, path) {
 
 // 顶层不得自领执行任务（scan 教训：成员会话死后 captain 自己 claim 任务干完 → "全是上层在干活"）。
 // 规则：未完成任务里 assignee==='captain' 且 subject 未标协调类豁免 = 顶层亲自执行 → BLOCKED。
-const COORD_TASK_RE = /【协调】|协调|需求分析|拆解|排期|会议|汇报|盯控|裁决|验收|评审/
-export async function auditCaptainOwnedTasks(fsSvc, projectDir, path) {
+/** T13：协调类任务豁免（create_task 闸与 auditTeamBriefs **共用同一常量**，禁止两处各写一份口径） */
+export const COORD_TASK_RE = /【协调】|协调|需求分析|拆解|排期|会议|汇报|盯控|裁决|验收|评审/
+/** T13：终态任务不参与任何审计（completed/cancelled） */
+export const TERMINAL_TASK_STATUS = Object.freeze(['completed', 'cancelled'])
+/** T13：归属标记有效期（默认 7 天；过期→回退 72h 启发式并标 source=mtime-fallback） */
+export const ACTIVE_TEAM_MARKER_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * T13：**唯一**的「本项目归属团队」判定（禁止三处各写一份：computeStage / 四个审计 / marker 写入）。
+ * 判据 = active-team 标记内团队 ∪ 与当前 captainSessionId 相同的团队（建队发生在 build 闸之后，
+ * 只按标记快照会漏掉「本项目刚建的团队」→ 少算 = 假收口）。
+ * 标记缺失或过期 → 回退 mtime 72h 启发式（source='mtime-fallback'）。
+ * @returns {{teams:string[], source:'marker'|'mtime-fallback'|'none', sessionId:string, marker:object|null}}
+ */
+export function resolveOwnedTeams(baseDir, captainSessionId) {
+  const fs = _require('node:fs')
+  const path = _require('node:path')
+  const base = String(baseDir || '')
+  const sidArg = String(captainSessionId || '')
+  const td = path.join(base, '.agent-teams')
+  const marker = readActiveTeamMarker(base)
+  const sid = sidArg || (marker ? marker.sessionId : '')
+  const teams = []
+  let anyTeam = 0
+  try {
+    for (const t of fs.readdirSync(td)) {
+      const name = String(t)
+      if (ARCHIVED_TEAM_RE.test(name)) continue
+      let teamFile = ''
+      try {
+        teamFile = path.join(td, name, 'team.json')
+        if (!fs.statSync(teamFile).isFile()) continue
+      } catch { continue }
+      anyTeam += 1
+      const inMarker = Boolean(marker && marker.teams.includes(name))
+      let sameSession = false
+      if (sid) {
+        try { sameSession = String((JSON.parse(fs.readFileSync(teamFile, 'utf8')) || {}).captainSessionId || '') === sid } catch { sameSession = false }
+      }
+      if (inMarker || sameSession) teams.push(name)
+      // 回退 72h **只在「既无标记、也不知道 captainSessionId」时**使用（computeStage 无会话就是这种）。
+      // 一旦有 sessionId，归属必须按「同会话」严格判定——否则会把同一工作区里别人的新鲜团队全算进来（T13 跨项目污染）。
+      else if (!marker && !sid && Date.now() - fs.statSync(teamFile).mtimeMs <= ACTIVE_TEAM_MAX_AGE_MS) teams.push(name)
+    }
+  } catch { /* 无 .agent-teams */ }
+  return { teams, source: marker ? 'marker' : (anyTeam > 0 ? 'mtime-fallback' : 'none'), sessionId: sid, marker }
+}
+
+/** T13：该目录是否「插件仓库自身」（不是 jarvis 状态根）——用于拒绝写第二个状态根 */
+export function looksLikePluginRepo(dir) {
+  const fs = _require('node:fs')
+  const path = _require('node:path')
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(String(dir || ''), 'package.json'), 'utf8'))
+    if (String((pkg && pkg.name) || '').startsWith('luke-jarvis')) return true
+  } catch { /* 无 package.json */ }
+  try { return fs.statSync(path.join(String(dir || ''), 'src/host/plugin.js')).isFile() } catch { return false }
+}
+
+export async function auditCaptainOwnedTasks(fsSvc, projectDir, path, owned) {
   const ids = []
   if (!fsSvc) return ids
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
     const teamNamesRaw = await listNames(fsSvc, teamsDir)
     if (teamNamesRaw === null) return ids
-    const teamNames = teamNamesRaw
+    const teamNames = owned && owned.size ? teamNamesRaw.filter((n) => owned.has(String(n))) : teamNamesRaw
     for (const team of teamNames) {
       try {
         const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
@@ -4558,14 +4642,14 @@ export async function auditCaptainOwnedTasks(fsSvc, projectDir, path) {
 
 // 卡死任务必须处理（scan 教训：成员会话被 end-seed 后任务停在 claimed/in_progress，没人 reassign → 顶层只能自己干）。
 // 规则：未完成任务里 status==='claimed'（领了没交）或 attempt>=4 且产出为空 = 疑似卡死 → 必须 reassign 唤醒成员/换人。
-export async function auditStaleTasks(fsSvc, projectDir, path) {
+export async function auditStaleTasks(fsSvc, projectDir, path, owned) {
   const stale = []
   if (!fsSvc) return stale
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
     const teamNamesRaw = await listNames(fsSvc, teamsDir)
     if (teamNamesRaw === null) return stale
-    const teamNames = teamNamesRaw
+    const teamNames = owned && owned.size ? teamNamesRaw.filter((n) => owned.has(String(n))) : teamNamesRaw
     for (const team of teamNames) {
       try {
         const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
@@ -4792,7 +4876,14 @@ function readActiveTeamMarker(cwd) {
     const d = JSON.parse(raw)
     const teams = Array.isArray(d && d.teams) ? d.teams.map(String).filter(Boolean) : []
     if (!teams.length) return null
-    return { teams, updatedAt: String((d && d.updatedAt) || ''), source: String((d && d.source) || 'unknown'), sessionId: String((d && d.sessionId) || '') }
+    // T13 ③：标记必须有有效期——旧标记（如 3 个月前的 fallback-all）不得继续被当作「本项目归属」，
+    // 否则会造成 openTasks=0 / 假 close。过期 → 返回 null（调用方回退 72h 并标 source=mtime-fallback）。
+    const updatedAt = String((d && d.updatedAt) || '')
+    const expiresRaw = String((d && d.expiresAt) || '')
+    const updatedMs = updatedAt ? Date.parse(updatedAt) : NaN
+    const expiresMs = expiresRaw ? Date.parse(expiresRaw) : (Number.isFinite(updatedMs) ? updatedMs + ACTIVE_TEAM_MARKER_TTL_MS : NaN)
+    if (!Number.isFinite(expiresMs) || Date.now() > expiresMs) return null
+    return { teams, updatedAt, expiresAt: expiresRaw || new Date(expiresMs).toISOString(), source: String((d && d.source) || 'unknown'), sessionId: String((d && d.sessionId) || '') }
   } catch { return null } // 无标记/坏 JSON/无权限 → null（调用方回退 72h 启发式）
 }
 /** 写归属标记（flowguard(step="build") 通过时调用）。返回写入的对象；失败返回 null（不改闸结论）。 */
@@ -4827,7 +4918,12 @@ export function writeActiveTeamMarker(cwd, captainSessionId) {
   }
   const teams = mine.length ? mine : all
   const source = mine.length ? 'captain-session' : 'fallback-all'
-  const marker = { ok: true, teams, updatedAt: new Date().toISOString(), source, sessionId: sid }
+  const nowMs = Date.now()
+  const marker = {
+    ok: true, teams, updatedAt: new Date(nowMs).toISOString(),
+    expiresAt: new Date(nowMs + ACTIVE_TEAM_MARKER_TTL_MS).toISOString(), // T13 ③：7 天有效期，读端校验
+    source, sessionId: sid,
+  }
   if (teams.length === 0) {
     // 建队前尚无 team.json（flowguard(build) 在 create 之前跑）：**不写空标记**——
     // 否则 active-team.json 存在但 teams=[] 会被读端当作「有标记但无归属」，比没有标记更难排查。
@@ -4858,8 +4954,10 @@ export function computeStage(cwd) {
   let openTasks = 0
   const now = Date.now()
   // D5-v2：归属标记优先（见上方 readActiveTeamMarker 注释）；无标记才回退 72h 启发式。
-  const marker = readActiveTeamMarker(base)
-  const activeSet = marker ? new Set(marker.teams) : null
+  // T13 ①：归属判定只走 resolveOwnedTeams（单一实现）；marker 过期/缺失时它内部回退 72h。
+  const ownedInfo = resolveOwnedTeams(base, '')
+  const marker = ownedInfo.marker
+  const activeSet = new Set(ownedInfo.teams)
   try {
     for (const t of fs.readdirSync(td)) {
       if (ARCHIVED_TEAM_RE.test(String(t))) continue // 归档目录不是活跃团队
@@ -4871,16 +4969,9 @@ export function computeStage(cwd) {
       teams += 1
       try {
         const d = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
-        if (activeSet) {
-          const inMarker = activeSet.has(String(t))
-          // 建队发生在 flowguard(step="build") 通过之后 → 标记快照里不可能有「本项目刚建的团队」。
-          // 因此归属 = 标记内团队 ∪ 与标记同一 captainSessionId 的团队（同会话新建/续建/子队自动并入，无需刷新标记）。
-          // 这一步是防「少算→假收口」的关键：只按快照名单会被新团队漏掉（少算=未完成任务凭空消失）。
-          const sameSession = Boolean(marker.sessionId) && String((d && d.captainSessionId) || '') === marker.sessionId
-          if (!inMarker && !sameSession) continue // 既不在标记、也不是本会话团队 = 别人的/历史团队 → 不计
-        } else if (now - fs.statSync(teamFile).mtimeMs > ACTIVE_TEAM_MAX_AGE_MS) {
-          continue // 回退路径：72h 未更新 = 历史团队
-        }
+        // 归属只认 resolveOwnedTeams 的结果（T13：单一判定源；不再在这里手写第二份归属逻辑）
+        if (activeSet.size > 0 && !activeSet.has(String(t))) continue
+        if (activeSet.size === 0 && now - fs.statSync(teamFile).mtimeMs > ACTIVE_TEAM_MAX_AGE_MS) continue
         openTasks += (d.tasks || []).filter((x) => !['completed', 'cancelled'].includes(String(x.status))).length
       } catch { /* 坏 JSON/无权限 → 该团队不计未完成，不崩 */ }
     }
@@ -4920,8 +5011,8 @@ export function computeStage(cwd) {
     artifacts: {
       reqDoc, taskmap, designDoc, cards, teams, openTasks, verify,
       // D5-v2 观测：归属判据来源（marker=有归属标记 / mtime-fallback=回退 72h / none=无团队目录）
-      activeTeamSource: marker ? 'marker' : (teams > 0 ? 'mtime-fallback' : 'none'),
-      activeTeams: marker ? marker.teams : [],
+      activeTeamSource: ownedInfo.source,
+      activeTeams: ownedInfo.teams,
     },
     gates,
   }
@@ -5237,9 +5328,9 @@ export function jarvisFlowGuard(exec) {
     if (name === 'agent_teams_create_task') {
       const desc = String((exec && exec.arguments && exec.arguments.description) || '')
       const subj = String((exec && exec.arguments && exec.arguments.subject) || '')
-      const COORD = /【协调】|需求分析|拆解|排期|会议|汇报|盯控|裁决|验收/
+      // T13 ②：与 auditTeamBriefs 共用 COORD_TASK_RE（禁止两处各写一份口径 → 自家【协调】任务被拦）
       const HAS_BRIEF = /开工须知|jarvis_member_brief|ponder|step-guard|run_id|PONDER_DATA_DIR/
-      if (!COORD.test(subj) && !HAS_BRIEF.test(desc)) {
+      if (!COORD_TASK_RE.test(subj) && !HAS_BRIEF.test(desc)) {
         return `【jarvis 流程闸】派活必须附成员开工须知：任务「${subj.slice(0, 40)}」的描述里没有 ponder/开工须知指引。请先调 jarvis_member_brief(roleName=该成员) 生成须知，把 brief 原文附进 description，再建任务（否则成员不知道要跑 ponder 十阶段，只会裸干）。纯协调类任务可在 subject 标【协调】豁免。`
       }
     }
@@ -5279,14 +5370,14 @@ const BASELINE_FILE_RE = /^基线清单[-_](.+)\.json$/
  * 背景（scan 实证）：6/6 会话 jarvis_distill=0、成员会话 jarvis 工具 0~1 次、jarvis_ponder_check 从未调用，
  * 成员"裸干"交付。此闸把"每个任务都过 ponder 核验"变成机械要求。
  */
-export async function checkPonderVerify(fsSvc, projectDir, path) {
+export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
   const missing = []
   if (!fsSvc) return missing
   try {
     const teamsDir = path.join(projectDir, '.agent-teams')
     const teamsRaw = await listNames(fsSvc, teamsDir)
     if (teamsRaw === null) return missing
-    const teams = teamsRaw
+    const teams = owned && owned.size ? teamsRaw.filter((n) => owned.has(String(n))) : teamsRaw
     const completedMemberTasks = []
     for (const t of teams) {
       try {

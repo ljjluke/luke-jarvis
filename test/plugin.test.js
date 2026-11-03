@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand, PIXOFFICE_ACTOR_IDS } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService, resolveOwnedTeams, auditTeamBriefs, looksLikePluginRepo, COORD_TASK_RE, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand, PIXOFFICE_ACTOR_IDS } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -3918,4 +3918,188 @@ test('T11 recordGate：写入时保留人工 note（归档 noteHistory），不�
   const after2 = JSON.parse(fs.readFileSync(gateFile, 'utf8'))
   assert.ok(!after2.clarify.noteHistory, '无人工 note 时不应生成 noteHistory')
   assert.strictEqual(after2.clarify.stamped, true)
+})
+
+// ── t13：审计作用域收窄 / 协调豁免统一 / marker 解耦+有效期 / 状态根唯一化 ──
+
+/** 造多项目夹具：own 项目团队 + 6 个别家团队（别家含 claimed/captain 自领/缺卡成员/缺开工须知） */
+function makeMultiProjectFixture() {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't13-multi-'))
+  const td = path.join(proj, '.agent-teams')
+  fs.mkdirSync(td, { recursive: true })
+  // 自家：t1（含开工须知）、t4【协调】（无开工须知，应豁免）、t9 已完成（终态不参与审计）
+  fs.mkdirSync(path.join(td, 'luke-jarvis-完全体'), { recursive: true })
+  fs.writeFileSync(path.join(td, 'luke-jarvis-完全体/team.json'), JSON.stringify({
+    name: 'luke-jarvis-完全体', captainSessionId: 'cap',
+    tasks: [
+      { id: 't1', subject: '实现X', description: '【开工须知】先跑 ponder 十阶段', status: 'in_progress', assignee: 'm1' },
+      { id: 't4', subject: '【协调】M1/M2 收口验收与汇总回报', description: '汇总', status: 'in_progress', assignee: 'captain' },
+      { id: 't9', subject: '已完成', description: '无开工须知', status: 'completed', assignee: 'captain' },
+    ],
+  }))
+  // 别家 6 个：claimed 卡死 / captain 自领非协调 / 缺开工须知 / 已交活未 ponder
+  for (let i = 1; i <= 6; i += 1) {
+    const name = '其它项目-' + i
+    fs.mkdirSync(path.join(td, name), { recursive: true })
+    fs.writeFileSync(path.join(td, name + '/team.json'), JSON.stringify({
+      name, captainSessionId: 'cap-other-' + i,
+      tasks: [
+        { id: 'x1', subject: '别家实现', description: '无开工须知', status: 'in_progress', assignee: 'm2' },
+        { id: 'x2', subject: '别家交付', description: '无开工须知', status: 'claimed', assignee: 'm3', attempt: 5 },
+        { id: 'x3', subject: '别家非协调自领', description: '干', status: 'in_progress', assignee: 'captain' },
+      ],
+    }))
+  }
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/active-team.json'), JSON.stringify({ ok: true, teams: ['luke-jarvis-完全体'], updatedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 7 * 864e5).toISOString(), source: 'captain-session', sessionId: 'cap' }))
+  return proj
+}
+
+test('T13 ① resolveOwnedTeams：只认标记团队 ∪ 同 captainSessionId 团队（7 团队夹具里别家不参与）', () => {
+  const proj = makeMultiProjectFixture()
+  const owned = resolveOwnedTeams(proj, 'cap')
+  assert.deepStrictEqual(owned.teams, ['luke-jarvis-完全体'], `归属只应含自家团队：${JSON.stringify(owned.teams)}`)
+  assert.strictEqual(owned.source, 'marker')
+  // 无标记 → 回退 72h（本夹具团队都是新建，mtime 新鲜 → 7 个都算）
+  fs.unlinkSync(path.join(proj, '.jarvis/active-team.json'))
+  const fallback = resolveOwnedTeams(proj, '')
+  assert.strictEqual(fallback.source, 'mtime-fallback')
+  assert.ok(fallback.teams.length >= 7, `回退路径应把新鲜团队都算进来：${fallback.teams.length}`)
+})
+
+test('T13 ①④ 别家的缺口不拦本项目：auditTeamBriefs/auditCaptainOwnedTasks/auditStaleTasks/checkPonderVerify 只看自家', async () => {
+  applyRealFs()
+  const proj = makeMultiProjectFixture()
+  const owned = new Set(resolveOwnedTeams(proj, 'cap').teams)
+  const fsSvc = getFsService(null)
+  const briefOk = await auditTeamBriefs(fsSvc, proj, path, owned)
+  assert.strictEqual(briefOk, true, '别家缺开工须知 + 自家【协调】t4 都不应拦（终态 t9 也不参与）')
+  const captain = await auditCaptainOwnedTasks(fsSvc, proj, path, owned)
+  assert.deepStrictEqual(captain, [], `别家 captain 自领不应计入：${JSON.stringify(captain)}（自家 t4 是【协调】应豁免）`)
+  const stale = await auditStaleTasks(fsSvc, proj, path, owned)
+  assert.deepStrictEqual(stale, [], `别家 claimed/attempt=5 不应计入：${JSON.stringify(stale)}`)
+  const pov = await checkPonderVerify(fsSvc, proj, path, owned)
+  assert.deepStrictEqual(pov, [], `别家未 ponder 核验不应计入：${JSON.stringify(pov)}`)
+})
+
+test('T13 ①④ 多项目夹具回归：flowguard(build)/flowguard(execute) 不因别家被拦（自家产物齐备时 ok=true）', async () => {
+  applyRealFs()
+  const proj = makeMultiProjectFixture()
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160) + '\n验收：x')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头-人才寻访.md'), '# 猎头')
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO-带队.md'), '# CEO')
+  const build = await runFlowguard('build', proj)
+  assert.strictEqual(build.ok, true, `build 不应被别家拦：${JSON.stringify(build.missing)}`)
+  assert.deepStrictEqual(build.ownedTeams, ['luke-jarvis-完全体'], `输出应带归属团队：${JSON.stringify(build.ownedTeams)}`)
+  const exec = await runFlowguard('execute', proj)
+  assert.strictEqual(exec.ok, true, `execute 不应被别家拦：${JSON.stringify(exec.missing)}`)
+})
+
+test('T13 ② 协调豁免统一：create_task 闸与 auditTeamBriefs 共用 COORD_TASK_RE（自家【协调】不再拦 build）', async () => {
+  applyRealFs()
+  const proj = makeMultiProjectFixture()
+  const owned = new Set(resolveOwnedTeams(proj, 'cap-owned').teams)
+  // auditTeamBriefs 认豁免
+  assert.strictEqual(await auditTeamBriefs(getFsService(null), proj, path, owned), true)
+  // 纯协调 subject 也在常量里（同一份正则）
+  for (const s of ['【协调】汇总', '需求分析', '会议纪要', '验收汇总']) assert.ok(COORD_TASK_RE.test(s), `COORD_TASK_RE 应命中：${s}`)
+  assert.ok(!COORD_TASK_RE.test('实现 P2 网关'), '实现类任务不应被当协调豁免')
+})
+
+test('T13 ③ marker 与闸解耦：build 闸被自家缺口拦住时仍写 marker（不再退 72h）', async () => {
+  applyRealFs()
+  const proj = makeMultiProjectFixture()
+  // 故意制造自家缺口：把自家 t1 的开工须知去掉 → build 必 BLOCKED
+  const teamFile = path.join(proj, '.agent-teams/luke-jarvis-完全体/team.json')
+  const t = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
+  t.tasks = t.tasks.map((x) => (x.id === 't1' ? { ...x, description: '直接干' } : x))
+  fs.writeFileSync(teamFile, JSON.stringify(t))
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160))
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头.md'), '# 猎头')
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO.md'), '# CEO')
+  fs.unlinkSync(path.join(proj, '.jarvis/active-team.json')) // 先清标记，验证写入不依赖闸 ok
+  const r = await runFlowguard('build', proj)
+  assert.strictEqual(r.ok, false, '自家缺开工须知 → build 应 BLOCKED（判据未放宽）')
+  assert.ok(r.activeTeamMarker, `闸 BLOCKED 时也必须写 marker（解耦）：${JSON.stringify(r)}`)
+  const mk = JSON.parse(fs.readFileSync(path.join(proj, '.jarvis/active-team.json'), 'utf8'))
+  assert.ok(mk.expiresAt, 'marker 必须带 expiresAt')
+  assert.ok(Date.parse(mk.expiresAt) > Date.now(), 'expiresAt 应在未来')
+})
+
+test('T13 ③ 旧标记失效：3 个月前 fallback-all 标记不得造成 openTasks=0/假 close', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't13-stale-'))
+  fs.mkdirSync(path.join(proj, '.agent-teams/team-a'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/team-a/team.json'), JSON.stringify({ name: 'team-a', tasks: [{ id: 'o1', subject: '未完成', status: 'in_progress' }] }))
+  const old = new Date(Date.now() - 90 * 864e5).toISOString()
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/active-team.json'), JSON.stringify({ ok: true, teams: ['team-a'], updatedAt: old, source: 'fallback-all', sessionId: '' }))
+  const owned = resolveOwnedTeams(proj, '')
+  assert.strictEqual(owned.marker, null, '过期标记必须视为无效')
+  assert.strictEqual(owned.source, 'mtime-fallback', `过期应回退 mtime-fallback：${owned.source}`)
+  // computeStage：team.json 刚写（mtime 新鲜）→ 回退 72h 会算上它 → openTasks>0（不会假 close）
+  const st = computeStage(proj)
+  assert.ok(st.artifacts.openTasks >= 1, `过期标记不得把 openTasks 算成 0：${st.artifacts.openTasks}`)
+  assert.strictEqual(st.artifacts.activeTeamSource, 'mtime-fallback')
+  assert.strictEqual(st.gates.close ? Boolean(st.gates.close.ok) : false, false, 'close 不得为真')
+})
+
+test('T13 ⑤ 状态根唯一化：插件仓库自身（name=luke-jarvis）拒绝写 .jarvis 闸，返回 STATE_ROOT_CONFLICT', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't13-repo-'))
+  fs.writeFileSync(path.join(proj, 'package.json'), JSON.stringify({ name: 'luke-jarvis' }))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const r = await runFlowguard('clarify', proj)
+  assert.strictEqual(r.ok, false)
+  assert.strictEqual(r.error, 'STATE_ROOT_CONFLICT', `应返回 STATE_ROOT_CONFLICT：${JSON.stringify(r)}`)
+  assert.ok(!fs.existsSync(path.join(proj, '.jarvis/gates.json')), '拒绝时不得写 gates.json')
+  assert.strictEqual(looksLikePluginRepo(proj), true)
+  assert.strictEqual(looksLikePluginRepo(os.tmpdir()), false)
+})
+
+test('T13 ④ 终态任务不参与审计：completed/cancelled 的缺须知/自领/claimed 都不算缺口', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't13-terminal-'))
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({
+    name: 't1', captainSessionId: 'cap',
+    tasks: [
+      { id: 'a', subject: '已完成无须知', description: '无', status: 'completed', assignee: 'captain' },
+      { id: 'b', subject: '已取消自领', description: '无', status: 'cancelled', assignee: 'captain', attempt: 9 },
+    ],
+  }))
+  const owned = new Set(['t1'])
+  const fsSvc = getFsService(null)
+  assert.strictEqual(await auditTeamBriefs(fsSvc, proj, path, owned), true)
+  assert.deepStrictEqual(await auditCaptainOwnedTasks(fsSvc, proj, path, owned), [])
+  assert.deepStrictEqual(await auditStaleTasks(fsSvc, proj, path, owned), [])
+})
+
+test('T13 ① checkTalentPreconditions：别家团队的缺卡成员不拦本项目 build（团队枚举按 owned 收窄）', async () => {
+  applyRealFs()
+  const proj = makeMultiProjectFixture()
+  const fsSvc = getFsService(null)
+  // 自家成员的岗位卡不存在 → 只应报自家岗位；别家成员（fixture 里没有 members 字段）不参与
+  const teamFile = path.join(proj, '.agent-teams/luke-jarvis-完全体/team.json')
+  const d = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
+  d.members = [{ name: '企业架构师', role: '企业架构师' }]
+  fs.writeFileSync(teamFile, JSON.stringify(d))
+  const otherFile = path.join(proj, '.agent-teams/其它项目-1/team.json')
+  const od = JSON.parse(fs.readFileSync(otherFile, 'utf8'))
+  od.members = [{ name: '不存在岗位卡角色', role: '不存在岗位卡角色' }]
+  fs.writeFileSync(otherFile, JSON.stringify(od))
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/企业架构师-软件架构.md'), '# 架构师卡')
+  const missing = await checkTalentPreconditions(fsSvc, proj, path, new Set(['luke-jarvis-完全体']))
+  assert.ok(!missing.some((m) => m.includes('不存在岗位卡角色')), `别家岗位卡不应参与：${JSON.stringify(missing)}`)
+  // 若不收窄，则会报别家岗位卡缺口（证明收窄真的起作用）
+  const wide = await checkTalentPreconditions(fsSvc, proj, path, new Set())
+  assert.ok(wide.some((m) => m.includes('不存在岗位卡角色')), `不收窄时应能看到别家缺口（对照）：${JSON.stringify(wide)}`)
 })
