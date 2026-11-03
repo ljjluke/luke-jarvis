@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -2994,4 +2994,189 @@ test('computeStage：按产物+闸门推导当前阶段，并给出缺口与下�
   assert.ok(txt.includes('阶段 4/6'), `渲染应含阶段序号：${txt.slice(0, 80)}`)
   assert.ok(txt.includes('当前缺口'), '含缺口')
   assert.ok(txt.includes('下一步'), '含下一步')
+})
+
+// ── v0.10.0 P2：阶段网关（jarvisStageGate）——工具调用前按 computeStage 阶段机械放行/拒绝 ──
+// 设计依据：需求规格 R2/R3（.jarvis/docs/需求规格-luke-jarvis完全体.md）+ 方案设计 §2/§4。
+// 测试纪律：**一个断言态一个临时目录**——computeStage 每次实时读盘，但 _readGates(2s)/_flowState(3s)
+// 是进程内缓存，复用同一目录会让"刚落的闸"看起来还没落（方案设计 §5 的脆弱点）。
+
+/** 构造一个精确处于某阶段的工作区夹具（产物+gates 一次写齐，之后才首次调用被测函数） */
+function stageGateFixture(stage) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sg-${stage}-`))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目')
+  const doc = (name, text) => fs.writeFileSync(path.join(dir, '.jarvis/docs', name), text)
+  const order = { clarify: [], decompose: ['clarify'], design: ['clarify', 'decompose'], build: ['clarify', 'decompose', 'design'], execute: ['clarify', 'decompose', 'design', 'build'], close: ['clarify', 'decompose', 'design', 'build'] }[stage] || []
+  if (order.includes('clarify')) doc('需求规格-x.md', '# 需求'.repeat(160) + '\n验收：x')
+  if (order.includes('decompose')) doc('任务编排-x.md', '# 任务编排')
+  if (order.includes('design')) doc('方案设计-x.md', '# 方案')
+  if (order.includes('build')) {
+    fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+    fs.writeFileSync(path.join(dir, '.jarvis/cards/a.md'), 'x')
+    fs.writeFileSync(path.join(dir, '.jarvis/cards/b.md'), 'x')
+    fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
+    const open = stage === 'execute' // execute 阶段=还有未完成任务；close 阶段=任务清零+有 ponder 核验
+    fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({
+      name: 't1', captainSessionId: 'cap',
+      tasks: [{ id: 'task-1', status: open ? 'in_progress' : 'completed', assignee: 'm1', subject: 's' }],
+    }))
+    if (stage === 'close') {
+      fs.mkdirSync(path.join(dir, '.jarvis/docs/ponder-verify'), { recursive: true })
+      fs.writeFileSync(path.join(dir, '.jarvis/docs/ponder-verify/task-1.json'), JSON.stringify({ verdict: 'PASS' }))
+    }
+  }
+  for (const step of order) recordGate(dir, step, true)
+  return dir
+}
+
+/** 构造一次工具调用（guard 只读 exec.name / exec.agent.session.header.cwd / exec.arguments） */
+function gateCall(name, dir, args) {
+  return jarvisStageGate({ name, arguments: args, agent: { session: { id: 'sess-1', header: { cwd: dir } } } })
+}
+
+test('阶段网关 clarify：派活/拆解被拒，澄清与只读放行（阶段 1/6 需求打磨）', () => {
+  const dir = stageGateFixture('clarify')
+  const r = gateCall('agent_teams_create_task', dir, { subject: '实现X', description: '【开工须知】先跑 ponder' })
+  assert.ok(typeof r === 'string', `clarify 阶段派活必须被拒：${r}`)
+  assert.ok(r.includes('阶段 1/6') && r.includes('需求打磨'), `文案须含阶段编号+名称：${r}`)
+  assert.strictEqual(typeof gateCall('jarvis_taskgraph', dir), 'string', 'clarify 阶段不许先拆解')
+  assert.strictEqual(gateCall('jarvis_clarify', dir), undefined, '同阶段工具放行')
+  assert.strictEqual(gateCall('read', dir), undefined, '只读工具不受阶段网管')
+})
+
+test('阶段网关 decompose：拆解工具放行，建队派活被拒', () => {
+  const dir = stageGateFixture('decompose')
+  assert.strictEqual(gateCall('jarvis_taskgraph', dir), undefined, 'decompose 阶段允许拆解')
+  assert.strictEqual(typeof gateCall('agent_teams_create_task', dir), 'string', 'decompose 阶段不许派活')
+  assert.strictEqual(typeof gateCall('agent_teams_create', dir), 'string', 'decompose 阶段不许建队')
+})
+
+test('阶段网关 design：方案/评估工具放行，重拆与派活被拒', () => {
+  const dir = stageGateFixture('design')
+  assert.strictEqual(gateCall('jarvis_essence', dir), undefined, 'design 阶段允许方案评审类')
+  assert.strictEqual(typeof gateCall('jarvis_taskgraph', dir), 'string', 'design 阶段不许回头重拆')
+  assert.strictEqual(typeof gateCall('agent_teams_create', dir), 'string', 'design 阶段不许建队')
+})
+
+test('阶段网关 build：蒸馏/建队放行，重拆/覆盖矩阵/版本发布被拒', () => {
+  const dir = stageGateFixture('build')
+  assert.strictEqual(gateCall('agent_teams_create', dir), undefined, 'build 阶段允许建队')
+  assert.strictEqual(gateCall('jarvis_distill', dir), undefined, 'build 阶段允许蒸馏角色卡')
+  assert.strictEqual(typeof gateCall('jarvis_taskgraph', dir), 'string', 'build 阶段不许重拆')
+  assert.strictEqual(typeof gateCall('jarvis_coverage', dir), 'string', 'build 阶段不许做收口覆盖矩阵')
+  assert.strictEqual(typeof gateCall('jarvis_release', dir), 'string', 'build 阶段不许出版本账本')
+})
+
+test('阶段网关 execute：派活/盯控/核验放行，回改基线/重拆/发布被拒', () => {
+  const dir = stageGateFixture('execute')
+  assert.strictEqual(gateCall('agent_teams_create_task', dir, { subject: '实现X', description: '【开工须知】先跑 ponder' }), undefined, 'execute 阶段允许派活（链已齐备）')
+  assert.strictEqual(gateCall('agent_teams_update_task', dir, { task_id: 'task-1', status: 'in_progress' }), undefined, 'execute 阶段允许盯控更新')
+  assert.strictEqual(gateCall('agent_teams_status', dir), undefined, 'execute 阶段允许查状态')
+  assert.strictEqual(gateCall('jarvis_ponder_check', dir, { taskId: 'task-1' }), undefined, 'execute 阶段必须允许 ponder 核验')
+  assert.strictEqual(typeof gateCall('jarvis_baseline', dir), 'string', 'execute 阶段不许回头改基线')
+  assert.strictEqual(typeof gateCall('jarvis_taskgraph', dir), 'string', 'execute 阶段不许重拆')
+  assert.strictEqual(typeof gateCall('jarvis_release', dir), 'string', 'execute 阶段不许改版本账本')
+})
+
+test('阶段网关 close：收口类放行，再派活/加人被拒', () => {
+  const dir = stageGateFixture('close')
+  assert.strictEqual(gateCall('jarvis_coverage', dir), undefined, 'close 阶段允许覆盖矩阵')
+  assert.strictEqual(gateCall('jarvis_essence', dir), undefined, 'close 阶段允许需求本质校验')
+  assert.strictEqual(gateCall('jarvis_release', dir), undefined, 'close 阶段允许版本账本')
+  assert.strictEqual(typeof gateCall('agent_teams_create_task', dir, { subject: '补活', description: '【开工须知】先跑 ponder' }), 'string', 'close 阶段不许再派活')
+  assert.strictEqual(typeof gateCall('agent_teams_add_member', dir), 'string', 'close 阶段不许再加人')
+})
+
+test('阶段网关：六阶段拒绝文案都必须含三要素（阶段 N/6+名称 / 当前缺口 / 下一步）', () => {
+  const samples = [
+    ['clarify', 'agent_teams_create_task'],
+    ['decompose', 'agent_teams_create_task'],
+    ['design', 'jarvis_taskgraph'],
+    ['build', 'jarvis_coverage'],
+    ['execute', 'jarvis_baseline'],
+    ['close', 'agent_teams_create_task'],
+  ]
+  const labels = { clarify: '需求打磨', decompose: '拆解', design: '方案设计', build: '建队派活', execute: '执行盯控', close: '收口' }
+  samples.forEach(([stage, tool], i) => {
+    const r = gateCall(tool, stageGateFixture(stage))
+    assert.ok(typeof r === 'string', `${stage} 阶段 ${tool} 应被拒：${r}`)
+    assert.ok(new RegExp(`阶段 ${i + 1}/6 ${labels[stage]}`).test(r), `${stage} 文案须含「阶段 ${i + 1}/6 ${labels[stage]}」：${r}`)
+    assert.ok(r.includes('当前缺口'), `${stage} 文案须含「当前缺口」：${r}`)
+    assert.ok(r.includes('下一步'), `${stage} 文案须含「下一步」：${r}`)
+  })
+})
+
+test('阶段网关：非流程类工具（read/bash/write/grep）任何阶段都放行', () => {
+  const dir = stageGateFixture('clarify')
+  for (const name of ['read', 'glob', 'grep', 'bash', 'write', 'edit', 'subagent']) {
+    assert.strictEqual(gateCall(name, dir), undefined, `${name} 不在流程类，必须放行`)
+  }
+})
+
+test('阶段网关：非 jarvis 工作区不拦（纯 agent-teams 用户不受影响）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sg-nojarvis-'))
+  assert.strictEqual(gateCall('agent_teams_create_task', dir, { subject: 'x', description: '【开工须知】先跑 ponder' }), undefined, '没有 .jarvis 的工作区不适用 jarvis 阶段判定')
+})
+
+test('阶段网关：无 cwd → 放行（判不出来不误拦 headless 会话）', () => {
+  assert.strictEqual(jarvisStageGate({ name: 'agent_teams_create_task', agent: { session: { id: 's1' } } }), undefined, '无 cwd 放行')
+  assert.strictEqual(jarvisStageGate({ name: 'jarvis_release' }), undefined, '无 exec 上下文放行')
+})
+
+test('阶段网关·链式校验：只有 clarify 闸 → 派活被拒并点名缺 decompose/design/build', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sg-chain-'))
+  fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/project.md'), '# 项目')
+  fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160))
+  recordGate(dir, 'clarify', true) // 只有 clarify 闸
+  const r = gateCall('agent_teams_create_task', dir, { subject: '实现X', description: '【开工须知】先跑 ponder' })
+  assert.ok(typeof r === 'string', `缺链必须拒：${r}`)
+  assert.ok(r.includes('缺少前置闸'), `须明确是链式缺失：${r}`)
+  assert.ok(r.includes('decompose') && r.includes('design'), `须点名缺 decompose/design：${r}`)
+  assert.ok(r.includes('阶段 2/6'), `文案仍须含阶段编号：${r}`)
+})
+
+test('阶段网关·链式校验：clarify→decompose→design→build 齐备 → execute 阶段派活放行', () => {
+  const dir = stageGateFixture('execute')
+  const st = computeStage(dir)
+  assert.strictEqual(st.stage, 'execute', '夹具应精确处于 execute 阶段')
+  assert.strictEqual(gateCall('agent_teams_create_task', dir, { subject: '实现X', description: '【开工须知】先跑 ponder' }), undefined, '链齐备时派活放行')
+})
+
+test('hasGlob：兼容 DSH FileSystem（resolve+listDir，entry 取 name）', async () => {
+  const svc = {
+    resolve: async (p) => ({ targetKey: p, path: p }),
+    listDir: async () => [{ name: '需求规格-x.md', type: 'file' }, { name: 'notes.md', type: 'file' }],
+  }
+  assert.strictEqual(await hasGlob(svc, '/tmp/x/.jarvis/docs', '需求规格'), true, '按 entry.name 命中')
+  assert.strictEqual(await hasGlob(svc, '/tmp/x/.jarvis/docs', '任务编排'), false, '未命中应为 false（不再恒放行）')
+})
+
+test('hasGlob：服务能力缺失/异常 → 放行（fail-open，不改变既有语义）', async () => {
+  assert.strictEqual(await hasGlob(null, '/tmp/x', '需求规格'), true, '无服务放行')
+  assert.strictEqual(await hasGlob({}, '/tmp/x', '需求规格'), true, '既无 list 也无 listDir 放行')
+  assert.strictEqual(await hasGlob({ resolve: async () => ({ k: 1 }), listDir: async () => { throw new Error('boom') } }, '/tmp/x', '需求规格'), true, '列举抛错放行')
+  assert.strictEqual(await hasGlob({ list: async () => { throw new Error('boom') } }, '/tmp/x', '需求规格'), true, '旧 list 抛错也放行（语义不变）')
+})
+
+test('hasGlob：旧/测试形态 list(dir) 保持原语义', async () => {
+  const svc = { list: async () => ['需求规格-a.md', 'x.md'] }
+  assert.strictEqual(await hasGlob(svc, '/tmp/x/.jarvis/docs', '需求规格'), true)
+  assert.strictEqual(await hasGlob(svc, '/tmp/x/.jarvis/docs', '方案设计'), false)
+})
+
+test('apply：与既有两闸并列注册第三个 guard（阶段网关真挂上，不只函数可调用）', () => {
+  const guards = []
+  const ctx = {
+    tools: { register: () => () => {}, guard: (fn) => { guards.push(fn); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+    effect: (fn) => { try { fn() } catch {} },
+    get: () => undefined,
+  }
+  plugin.apply(ctx)
+  assert.strictEqual(guards.length, 3, `应注册 3 个 guard（captain/stage/flowguard）：实际 ${guards.length}`)
+  assert.strictEqual(guards[0], captainExecutionGuard, '第 1 个=captain 拦截')
+  assert.strictEqual(guards[1], jarvisStageGate, '第 2 个=阶段网关（顺序决定先给"走错阶段"的指引）')
+  assert.strictEqual(guards[2], jarvisFlowGuard, '第 3 个=流程闸（具体前置条件）')
 })

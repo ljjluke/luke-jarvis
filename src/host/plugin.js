@@ -4118,12 +4118,26 @@ export const TOOLS = [
 ]
 // ── jarvis_flowguard 辅助函数（模块级，TOOLS 数组外）──
 // 在目录里找含关键字的文件（fs 支持时；不支持则返回 true=放行，防环境缺 fs 误拦）
-async function hasGlob(fsSvc, dir, keyword) {
-  if (!fsSvc || typeof fsSvc.list !== 'function') return true
+// 兼容两种 fs 服务形态：
+//   ① 旧/测试形态：list(dir) → 文件名数组；
+//   ② DSH FileSystem（真实生产）：无 list，只有 resolve(path) + listDir(target) → FsDirEntry[]（entry.name 才是文件名）。
+// 旧实现只认 list → 真实环境恒返回 true（flowguard 的产物前置检查形同虚设，gates.json 里人工补写 note 即其痕迹）。
+// 语义不变：服务能力缺失或任何异常 → true（fail-open，不把"查不了"变成"拦截"）。
+export async function hasGlob(fsSvc, dir, keyword) {
+  if (!fsSvc) return true
   try {
-    const names = await fsSvc.list(dir)
-    return (Array.isArray(names) ? names : []).some((n) => String(n).includes(keyword))
+    if (typeof fsSvc.list === 'function') {
+      const names = await fsSvc.list(dir)
+      return (Array.isArray(names) ? names : []).some((n) => String(n).includes(keyword))
+    }
+    if (typeof fsSvc.resolve === 'function' && typeof fsSvc.listDir === 'function') {
+      const target = await fsSvc.resolve(dir)
+      if (!target) return true
+      const entries = await fsSvc.listDir(target)
+      return (Array.isArray(entries) ? entries : []).some((e) => String(e && e.name !== undefined ? e.name : e).includes(keyword))
+    }
   } catch { return true }
+  return true
 }
 // 审计团队任务是否每个都附了开工须知（含 ponder 指引）
 // 统计群聊会议进度：已有几轮发言、还剩几轮（供成员/CEO 看会议进行到哪）
@@ -4500,6 +4514,73 @@ export function renderStage(cwd) {
     '规则：只做当前阶段允许的动作；下游动作（建队/派活）在阶段未过时会被机械闸拒绝。',
   ]
   return lines.join('\n')
+}
+
+// ── 阶段网关（P2 · 完全体核心）：工具调用前按 computeStage 阶段机械拒绝「越阶段」────────────────
+// 为什么需要：v0.9.0 只有 computeStage + 每请求注入（提示词层），阶段推进全靠模型自觉；
+// 长会话/弱模型必然跳步。文字拦不住 → 必须在工具执行前让它**机械失败**（与 flowguard 同族思路）。
+// 设计（方案设计-luke-jarvis完全体.md §2）：
+//   • deny-list（不是 allowlist）：未知工具默认放行，避免误伤 read/glob/grep/bash 等只读/执行类工具；
+//   • 只对流程类工具生效（jarvis_* / agent_teams_*）；
+//   • 先判「是否 jarvis 工作区」+「有没有 cwd」——判不出来就放行（与 captainExecutionGuard/jarvisFlowGuard 同款保护），
+//     否则全局 guard（dsh-tools：plain-context guard 全局生效）会把纯 agent-teams 用户全误伤；
+//   • 否定文案必含三要素：阶段 N/6+名称、当前缺口、下一步（R2 验收点，也是模型唯一的纠错输入）。
+const STAGE_DENY = {
+  clarify: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  decompose: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_coverage', 'jarvis_release'],
+  design: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  build: ['jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  execute: ['jarvis_baseline', 'jarvis_taskgraph', 'jarvis_release'], // 执行期不回头改基线/重拆/改版本账本
+  close: ['agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_add_member'],
+}
+/** 派活类工具：除「本阶段允许」外，还必须持完整链（R3：build 必须建立在 clarify→decompose→design 之上） */
+const PAID_WORK_TOOLS = new Set(['agent_teams_create_task', 'agent_teams_reassign_task'])
+/** 链式校验：复用 computeStage 返回的 gates（同一份读取结果，避免与 flowguard 两处口径漂移） */
+function _stageChainMissing(gates) {
+  const g = gates || {}
+  const out = []
+  if (!(g.clarify && g.clarify.ok)) out.push('clarify（需求打磨）')
+  if (!(g.decompose && g.decompose.ok)) out.push('decompose（拆解）')
+  if (!(g.design && g.design.ok)) out.push('design（方案设计）')
+  if (!(g.build && g.build.ok)) out.push('build（建队）')
+  return out
+}
+/** 拒绝文案（三要素固定：阶段 N/6+名称 / 当前缺口 / 下一步） */
+function _stageGateText(st, name, extra) {
+  return [
+    `【jarvis 阶段网关】当前是「阶段 ${st.index}/${st.total} ${st.label}」，不允许调用 ${name}。`,
+    ...(extra ? [extra] : []),
+    `当前缺口：${st.missing && st.missing.length ? st.missing.join('；') : '无'}`,
+    `下一步：${st.next}`,
+    '这是插件按 .jarvis 产物+闸门算出来的阶段，不是提示词建议——先补当前阶段再往下一阶段走（不要试图绕过）。',
+  ].join('\n')
+}
+/**
+ * guard：按阶段机械放行/拒绝流程类工具调用。
+ * 返回字符串 = 拒绝该次调用；返回 undefined = 放行。
+ */
+export function jarvisStageGate(exec) {
+  try {
+    const name = String((exec && exec.name) || '')
+    if (!/^(jarvis_|agent_teams_)/.test(name)) return undefined // 只管流程类；read/glob/bash 等不受影响
+    const session = exec && exec.agent && exec.agent.session
+    const cwd = session && session.header && session.header.cwd
+    if (!cwd) return undefined // 判不出工作区 → 放行（不误拦 headless/无 cwd 会话）
+    if (!_flowState(String(cwd)).jarvis) return undefined // 非 jarvis 工作区不拦（纯 agent-teams 用户不受影响）
+    const st = computeStage(String(cwd))
+    // ① 链式校验（R3）：派活必须持完整链；缺哪环点名哪环（与 flowguard 的 chainMissing 同口径）
+    if (PAID_WORK_TOOLS.has(name)) {
+      const chainMissing = _stageChainMissing(st.gates)
+      if (chainMissing.length) {
+        return _stageGateText(st, name,
+          `缺少前置闸：${chainMissing.join('、')}——派活必须按 clarify → decompose → design → build 逐步过 jarvis_flowguard（每步产物要真实），不允许跳步。`)
+      }
+    }
+    // ② 阶段隔离：命中本阶段 deny-list 即拒（未知工具默认放行）
+    const deny = STAGE_DENY[st.stage] || []
+    if (!deny.includes(name)) return undefined
+    return _stageGateText(st, name)
+  } catch { return undefined }
 }
 
 // ── 记忆保鲜闸（①）：project.md 落后于工作进度 → 拒绝关键动作 ──────────
@@ -5045,9 +5126,12 @@ export default {
     }
 
     // 1.5) 插件级硬拦截：顶层 captain 不得亲自执行（作用于**已存在**会话——preset 无法追溯修改时的兜底）
+    //      顺序：captain 拦截（capability）→ 阶段网关（stage）→ 流程闸（具体工具前置条件）。
+    //      阶段网关在前，是为了让「你走错阶段」的指引先于具体前置条件到达模型（方案设计 §2.3）。
     try {
       if (toolsSvc && typeof toolsSvc.guard === 'function') {
         ctx.effect(() => toolsSvc.guard(captainExecutionGuard))
+        ctx.effect(() => toolsSvc.guard(jarvisStageGate))
         ctx.effect(() => toolsSvc.guard(jarvisFlowGuard))
       }
     } catch {}
