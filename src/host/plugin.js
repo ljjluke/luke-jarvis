@@ -4920,6 +4920,13 @@ export function writeActiveTeamMarker(cwd, captainSessionId) {
   } catch (e) {
     return { ok: false, reason: `读 .agent-teams 失败：${(e && e.message) || e}`, teams: [], source: 'failed', sessionId: sid }
   }
+  // T13 修订（八卦镜实证 F8-3/F5-2）：**有 sid 却匹配不到任何团队时，绝不写 fallback-all**——
+  // 否则任何第三方会话（新 GUI 会话/成员会话/复验者）在共享工作区跑一次 flowguard(build/execute)
+  // 就把全部非归档团队写成「本项目归属」并保 7 天 → 收窄立即反向失效。
+  // fallback-all 只在「调用方没提供 sid」（如 computeStage 预热/marker 预热）时才允许，且由读端按 72h 校验。
+  if (sid && mine.length === 0 && all.length > 0) {
+    return { ok: true, written: false, teams: [], source: 'no-match', sessionId: sid, reason: `本会话 ${sid} 不属于任何现有团队（${all.length} 个团队）→ 不认领（避免把别家团队写成本项目归属）；可先建队再跑 flowguard` }
+  }
   const teams = mine.length ? mine : all
   const source = mine.length ? 'captain-session' : 'fallback-all'
   const nowMs = Date.now()
@@ -4944,10 +4951,11 @@ export function writeActiveTeamMarker(cwd, captainSessionId) {
   return marker
 }
 /** 计算当前阶段（纯读文件，无副作用） */
-export function computeStage(cwd) {
+export function computeStage(cwd, opts = {}) {
   const fs = _require('node:fs')
   const path = _require('node:path')
   const base = String(cwd || '')
+  const sessionIdOpt = String((opts && opts.sessionId) || '')
   const gates = _readGates(base)
   const gateOk = (k) => Boolean(gates[k] && gates[k].ok)
   const hasDoc = (re) => { try { return fs.readdirSync(path.join(base, '.jarvis/docs')).some((n) => re.test(n)) } catch { return false } }
@@ -4959,7 +4967,7 @@ export function computeStage(cwd) {
   const now = Date.now()
   // D5-v2：归属标记优先（见上方 readActiveTeamMarker 注释）；无标记才回退 72h 启发式。
   // T13 ①：归属判定只走 resolveOwnedTeams（单一实现）；marker 过期/缺失时它内部回退 72h。
-  const ownedInfo = resolveOwnedTeams(base, '')
+  const ownedInfo = resolveOwnedTeams(base, sessionIdOpt)
   const marker = ownedInfo.marker
   const activeSet = new Set(ownedInfo.teams)
   try {
@@ -5022,8 +5030,8 @@ export function computeStage(cwd) {
   }
 }
 /** 渲染成注入文本 */
-export function renderStage(cwd) {
-  const r = computeStage(cwd)
+export function renderStage(cwd, opts = {}) {
+  const r = computeStage(cwd, opts)
   const lines = [
     '【jarvis 当前阶段 · 插件实时计算（不是你的自述）】',
     `阶段 ${r.index}/${r.total}：${r.label}（${r.stage}）`,

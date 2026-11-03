@@ -3401,7 +3401,7 @@ test('D5-v2 归属标记：坏 JSON / 空 teams 不崩且回退启发式', () =>
   assert.strictEqual(st.artifacts.activeTeamSource, 'mtime-fallback', '空 teams 等同无标记')
 })
 
-test('D5-v2 写标记：按 captainSessionId 精确归属；匹配不到才 fallback-all（供审计）', () => {
+test('D5-v2/T13 写标记：按 captainSessionId 精确归属；**sid 匹配不到时不认领**（fallback-all 仅限无 sid 预热）', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'd5v2-mk-'))
   teamFixture(dir, 'mine', [{ id: 'a', status: 'in_progress' }], 0)
   fs.writeFileSync(path.join(dir, '.agent-teams/mine/team.json'), JSON.stringify({ name: 'mine', captainSessionId: 'cap', tasks: [{ id: 'a', status: 'in_progress' }] }))
@@ -3411,9 +3411,15 @@ test('D5-v2 写标记：按 captainSessionId 精确归属；匹配不到才 fall
   assert.ok(mk && fs.existsSync(path.join(dir, '.jarvis/active-team.json')), '标记应落盘')
   assert.deepStrictEqual(mk.teams, ['mine'], `按 captainSessionId 只写本项目团队：${JSON.stringify(mk.teams)}`)
   assert.strictEqual(mk.source, 'captain-session')
+  // T13 修订：调控到的 sid 不属于任何团队时**不得 fallback-all 认领全工作区**（否则别家团队被写成自家 7 天）
   const mk2 = writeActiveTeamMarker(dir, 'someone-else')
-  assert.deepStrictEqual(mk2.teams.sort(), ['mine', 'other'], '匹配不到会话 → fallback 写全部非归档团队')
-  assert.strictEqual(mk2.source, 'fallback-all', 'fallback 必须标 source 供审计')
+  assert.deepStrictEqual(mk2.teams, [], `sid 匹配不到 → 不认领（实际 ${JSON.stringify(mk2.teams)}）`)
+  assert.strictEqual(mk2.source, 'no-match')
+  assert.strictEqual(mk2.written, false)
+  // fallback-all 仅保留给「无 sid 预热」场景（computeStage/marker 预热）
+  const warm = writeActiveTeamMarker(dir, '')
+  assert.deepStrictEqual(warm.teams.sort(), ['mine', 'other'], '无 sid 预热 → fallback 写全部非归档团队')
+  assert.strictEqual(warm.source, 'fallback-all')
 })
 
 test('R1/②：close.ok 读收口闸——未过时不闭环但 release 已放行；过了则 done 含 close', () => {
@@ -3685,7 +3691,8 @@ test('T10 F5：写入失败如实返回 ok=false + reason（不再静默 null）
   // 让 `.jarvis` 成为普通文件 → 写 active-team.json 必失败
   fs.writeFileSync(path.join(proj, '.jarvis'), 'not-a-dir')
   fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
-  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', tasks: [] }))
+  // T13 修订后：sid 必须与团队匹配才会真正尝试写盘（否则「不认领」直接返回）
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', captainSessionId: 'cap', tasks: [] }))
   const mk = writeActiveTeamMarker(proj, 'cap')
   assert.strictEqual(mk.ok, false, `写失败必须 ok=false：${JSON.stringify(mk)}`)
   assert.ok(typeof mk.reason === 'string' && mk.reason.length > 0, `失败必须带原因：${JSON.stringify(mk)}`)
@@ -4008,6 +4015,19 @@ test('T13 ② 协调豁免统一：create_task 闸与 auditTeamBriefs 共用 COO
   // 纯协调 subject 也在常量里（同一份正则）
   for (const s of ['【协调】汇总', '需求分析', '会议纪要', '验收汇总']) assert.ok(COORD_TASK_RE.test(s), `COORD_TASK_RE 应命中：${s}`)
   assert.ok(!COORD_TASK_RE.test('实现 P2 网关'), '实现类任务不应被当协调豁免')
+})
+
+test('T13 ③+ 写端不认领别家：sid 匹配不到任何团队时不写 fallback-all（防第三方会话一次 flowguard 认领全工作区 7 天）', () => {
+  const proj = makeMultiProjectFixture()
+  fs.unlinkSync(path.join(proj, '.jarvis/active-team.json'))
+  const mk = writeActiveTeamMarker(proj, 'session-not-belong-to-any-team')
+  assert.strictEqual(mk.written, false, `不匹配会话不得写标记：${JSON.stringify(mk)}`)
+  assert.deepStrictEqual(mk.teams, [], '不得把别家团队写成本项目归属')
+  assert.strictEqual(mk.source, 'no-match')
+  assert.ok(!fs.existsSync(path.join(proj, '.jarvis/active-team.json')), '不得落盘认领文件')
+  // 对照：无 sid（预热场景）才允许 fallback-all
+  const warm = writeActiveTeamMarker(proj, '')
+  assert.ok(warm.teams.length >= 7, `无 sid 预热应写全量团队（对照）：${JSON.stringify(warm.teams)}`)
 })
 
 test('T13 ③ marker 与闸解耦：build 闸被自家缺口拦住时仍写 marker（不再退 72h）', async () => {
