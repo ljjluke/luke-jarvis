@@ -3589,3 +3589,128 @@ test('T9 适配页：/jarvis-ui 302 指向 jarvis.html（而不是仍指向 demo
   assert.strictEqual(res.code, 302)
   assert.strictEqual(res.headers.location, '/jarvis-office/jarvis.html')
 })
+
+// ── t10：F4 flowguard 真检查 / F4b fs 取值与 hasGlob 语义 / F5 首建队标记 ──
+
+/** 真实 node:fs 支撑的 FileSystem 适配器（对齐 DSH FileSystem：resolve 对不存在路径抛 ENOENT） */
+function realFsAdapter() {
+  return {
+    async resolve(p) {
+      fs.realpathSync(p) // 不存在 → 抛 ENOENT（本地后端行为）
+      return { path: p }
+    },
+    async listDir(target) {
+      return fs.readdirSync(target.path, { withFileTypes: true }).map((d) => ({ name: d.name, type: d.isDirectory() ? 'directory' : 'file' }))
+    },
+    async readText(target) { return fs.readFileSync(target.path, 'utf8') },
+    async writeText(target, text) { fs.writeFileSync(target.path, text) },
+  }
+}
+/** 用真实 fs 服务 apply 一次（moduleCtx 生效 → getFsService 能取到） */
+function applyRealFs() {
+  const ctx = {
+    get: (k) => (k === 'fs' ? realFsAdapter() : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} }, webServer: { register: () => () => {} }, systemPrompt: { section: () => () => {} },
+  }
+  plugin.apply(ctx)
+}
+async function runFlowguard(step, proj) {
+  const def = TOOLS.find((t) => t.name === 'jarvis_flowguard')
+  return def.handler({ step, projectDir: proj }, { agent: { session: { id: 'cap', header: { cwd: proj } } } })
+}
+
+test('T10 F4：流程闸真检查——干净工作区四步全 BLOCKED 且点名；补产物后转 PASS 且 gates.json 真写入', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-f4-'))
+  // ① 干净工作区：clarify/decompose/design/build 必须 false，且 missing 点名
+  for (const step of ['clarify', 'decompose', 'design', 'build']) {
+    const r = await runFlowguard(step, proj)
+    assert.strictEqual(r.ok, false, `${step} 在无产物时必须 BLOCKED（当前 ok=${r.ok} missing=${JSON.stringify(r.missing)}）`)
+    assert.ok(Array.isArray(r.missing) && r.missing.length > 0, `${step} 必须点名缺口`)
+  }
+  // ② 逐步补产物后必须真 PASS（F4 的核心：pre 项被真正移除）
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160) + '\n验收：x')
+  let r = await runFlowguard('clarify', proj)
+  assert.strictEqual(r.ok, true, `补需求规格后 clarify 应 PASS：${JSON.stringify(r.missing)}`)
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  r = await runFlowguard('decompose', proj)
+  assert.strictEqual(r.ok, true, `补任务编排后 decompose 应 PASS：${JSON.stringify(r.missing)}`)
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  r = await runFlowguard('design', proj)
+  assert.strictEqual(r.ok, true, `补方案设计后 design 应 PASS：${JSON.stringify(r.missing)}`)
+  // ③ 闸必须真的落盘（证明不是空壳 PASS）
+  const gates = JSON.parse(fs.readFileSync(path.join(proj, '.jarvis/gates.json'), 'utf8'))
+  for (const step of ['clarify', 'decompose', 'design']) {
+    assert.strictEqual(gates[step] && gates[step].ok, true, `gates.json 缺 ${step} 真写入：${JSON.stringify(gates)}`)
+  }
+})
+
+test('T10 F4 反例：零产物六步不得出现「全 PASS」（修好注入后不许闸变空壳）', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-f4b-'))
+  const results = []
+  for (const step of ['clarify', 'decompose', 'design', 'build', 'execute', 'close']) {
+    const r = await runFlowguard(step, proj)
+    results.push([step, r.ok])
+  }
+  const allPass = results.every(([, ok]) => ok === true)
+  assert.strictEqual(allPass, false, `零产物六步全 PASS = 闸变空壳（实际：${JSON.stringify(results)}）`)
+  assert.ok(results.filter(([, ok]) => !ok).length >= 4, `至少 4 步必须 BLOCKED（实际：${JSON.stringify(results)}）`)
+})
+
+test('T10 F5：首建队场景——.agent-teams 不存在时先 mkdir 再写标记，含本团队名', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-f5a-'))
+  assert.ok(!fs.existsSync(path.join(proj, '.agent-teams')), '前置：.agent-teams 不存在')
+  // 模拟「建队目录刚创建」的形态：先创建团队目录与 team.json（真实顺序里 build 闸在建队前跑，
+  // 这里覆盖 mkdir 缺失目录的分支）
+  fs.mkdirSync(path.join(proj, '.agent-teams/t-first'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t-first/team.json'), JSON.stringify({ name: 't-first', captainSessionId: 'cap', tasks: [] }))
+  const mk = writeActiveTeamMarker(proj, 'cap')
+  assert.strictEqual(mk.ok, true, `首建队写标记应成功：${JSON.stringify(mk)}`)
+  assert.ok(mk.teams.includes('t-first'), `标记须含本团队名：${JSON.stringify(mk.teams)}`)
+  assert.ok(fs.existsSync(path.join(proj, '.jarvis/active-team.json')), '标记文件须落盘')
+  // 空 .agent-teams（尚未建队）：也要能写（mkdir 成功、teams 为空、不崩）
+  const proj2 = fs.mkdtempSync(path.join(os.tmpdir(), 't10-f5a2-'))
+  const mk2 = writeActiveTeamMarker(proj2, 'cap')
+  assert.strictEqual(mk2.ok, true, `空团队目录也应 mkdir+写成功：${JSON.stringify(mk2)}`)
+  assert.ok(fs.existsSync(path.join(proj2, '.agent-teams')), '应先创建 .agent-teams 目录')
+})
+
+test('T10 F5：写入失败如实返回 ok=false + reason（不再静默 null）', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-f5b-'))
+  // 让 `.jarvis` 成为普通文件 → 写 active-team.json 必失败
+  fs.writeFileSync(path.join(proj, '.jarvis'), 'not-a-dir')
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', tasks: [] }))
+  const mk = writeActiveTeamMarker(proj, 'cap')
+  assert.strictEqual(mk.ok, false, `写失败必须 ok=false：${JSON.stringify(mk)}`)
+  assert.ok(typeof mk.reason === 'string' && mk.reason.length > 0, `失败必须带原因：${JSON.stringify(mk)}`)
+  assert.ok(/失败/.test(mk.reason), `原因须说明失败点：${mk.reason}`)
+})
+
+test('T10 F4b parity：mock fs 服务与真实 FileSystem 对 hasGlob 结果一致（命中/未命中/目录不存在）', async () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-parity-'))
+  fs.mkdirSync(path.join(proj, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, 'docs/需求规格-a.md'), '# x')
+  const real = realFsAdapter()
+  const mock = {
+    resolve: async (p) => ({ path: p }),
+    listDir: async (t) => fs.readdirSync(t.path, { withFileTypes: true }).map((d) => ({ name: d.name, type: d.type === undefined ? (d.isDirectory() ? 'directory' : 'file') : d.type })),
+  }
+  for (const [dir, kw] of [[path.join(proj, 'docs'), '需求规格'], [path.join(proj, 'docs'), '方案设计'], [path.join(proj, 'nope'), '需求规格']]) {
+    const a = await hasGlob(real, dir, kw)
+    const b = await hasGlob(mock, dir, kw)
+    assert.strictEqual(b, a, `mock 与真实服务结果必须一致（${dir.split('/').pop()} / ${kw}）：real=${a} mock=${b}`)
+  }
+})
+
+test('T10 F4b hasGlob 语义：无服务→true；目录不存在→false；其他异常→true', async () => {
+  assert.strictEqual(await hasGlob(null, '/tmp/whatever', '需求规格'), true, '无服务=查不了→放行')
+  const real = realFsAdapter()
+  const missingDir = path.join(os.tmpdir(), 't10-not-exist-' + Date.now())
+  assert.strictEqual(await hasGlob(real, missingDir, '需求规格'), false, '目录不存在→false（没产物必须拦）')
+  const boomFs = { resolve: async () => ({ path: '/x' }), listDir: async () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }) } }
+  assert.strictEqual(await hasGlob(boomFs, '/x', '需求规格'), true, '其他异常→true（不确定=放行）')
+})

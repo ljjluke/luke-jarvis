@@ -251,6 +251,31 @@ import { createRequire } from 'node:module'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from './office-bridge.js'
 const _require = createRequire(import.meta.url)
+/**
+ * F4b：统一取 fs 服务。**模块级工具 handler 拿不到 apply 的形参 ctx**（裸 `ctx` 会 ReferenceError 被 catch 吞掉 →
+ * fsSvc 恒 null → hasGlob fail-open → 闸变空壳）。优先级：exec.ctx.fs > moduleCtx.fs > moduleCtx.get('fs')。
+ * 取不到返回 null（由 hasGlob/各审计函数按各自语义降级，绝不静默抛错）。
+ */
+export function getFsService(exec) {
+  const pick = (holder) => {
+    if (!holder) return null
+    try {
+      const direct = typeof holder.fs === 'object' && holder.fs ? holder.fs : null
+      if (direct && typeof direct.resolve === 'function') return direct
+    } catch { /* 继续 */ }
+    try {
+      const viaGet = typeof holder.get === 'function' ? holder.get('fs') : null
+      if (viaGet && typeof viaGet.resolve === 'function') return viaGet
+    } catch { /* 继续 */ }
+    return null
+  }
+  try {
+    const fromExec = pick(exec && exec.ctx)
+    if (fromExec) return fromExec
+  } catch { /* 继续 */ }
+  try { return pick(moduleCtx) } catch { return null }
+}
+
 /** 归一化 output.schema：根级/嵌套 required:[...] 数组 → 逐属性 required:true（value schema DSL）。
  * 递归处理嵌套对象节点；required 已按属性内联时原样返回。 */
 function normalizeOutputSchema(node) {
@@ -658,7 +683,7 @@ export const TOOLS = [
       },
       render: (r) => `行业=${r.industry}（置信 ${r.confidence ?? '?'}）建议=${r.suggestion}\n蒸馏方向：${r.distillDirection ?? ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const text = String(args.requirement ?? '')
       const hit = identifyIndustry(text)
       const out = {
@@ -709,7 +734,7 @@ export const TOOLS = [
       render: (r) =>
         `【项目沉淀 · .jarvis/】\n结构：${(r.structure || []).join('\n      ')}\n复用规则：${r.reuseRule}\n本次保存：${r.savePath ?? '—'}\n判定：${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const mode = String(args.mode ?? 'scaffold').trim()
       const projectDir = String(args.projectDir ?? '<workspace>/.jarvis/').trim()
       const itemType = String(args.itemType ?? '').trim()
@@ -860,7 +885,7 @@ export const TOOLS = [
       render: (r) =>
         `【进度经验结构化 · ${r.mode}】\n${r.schema ? '规范：' + r.schema : ''}${r.entry ? '\n条目：\n' + r.entry : ''}${r.missing?.length ? '\n缺失：' + r.missing.join('、') : ''}\n判定：${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const mode = String(args.mode ?? 'schema').trim()
       const schemaText =
         '每条教训必须包含 6 个字段：分类(category)/主责(owner)/现场标记(scene)/修向(fix)/状态(status)/复现脚本(repro)。规范条目格式：\n' +
@@ -940,7 +965,7 @@ export const TOOLS = [
       render: (r) =>
         `【${r.industry || '领域由 CEO 判断'} 流程 · ⚠️ CEO 现场定制（插件无预设）\n设计清单：${r.designChecklist ?? ''}\n阶段：${r.stages.join(' → ')}\n闸门：${r.gates.map((g) => '  ⛔ ' + g).join('\n')}\n红线：${r.redlines.map((x) => '  🚫 ' + x).join('\n')}\n必须角色：${(r.mustRoles || []).join(' / ')}\n会议触点：${(r.touchpoints || []).join(' / ')}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const industry = String(args.industry ?? '').trim()
       const req = String(args.requirement ?? '').trim()
       const projectRef = String(args.projectRef ?? '').trim()
@@ -1007,7 +1032,7 @@ export const TOOLS = [
         `✅ ${r.verdict}` +
         (r.depthScore !== undefined ? `\n深度 ${r.depthScore}/100${r.depthIssues?.length ? ' 待补:' + r.depthIssues.slice(0, 3).join(';') : ''}` : ''),
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const card = String(args.card ?? '')
       const isCeo = Boolean(args.isCeo)
       if (!card.trim()) {
@@ -1094,7 +1119,7 @@ export const TOOLS = [
       render: (r) =>
         `【${r.role ?? '角色'} 蒸馏引导 · 捕捉独有 HOW】\n目的：${r.purpose}\n品味原则：${(r.tastePrinciples || []).map((x) => '  · ' + x).join('\n')}\n来源分级：${(r.sourceHierarchy || []).map((x) => '  · ' + x).join('\n')}\n黑名单源：${(r.sourceBlacklist || []).join('、')}\n推荐源：${(r.sourceRecommended || []).join('、')}\n步骤：${(r.steps || []).map((x) => '  ' + x).join('\n')}\n决策启发式：${r.decisionHeuristics}\n验证锚点：${r.validationAnchors}\n防通用：${r.antiGeneric}\n职业底线：${r.professionTrace}\n深度动作链：${r.deepAnalysisTrace}\n${r.sourceCheck}\n响应格式：${r.respondAs}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const role = String(args.role ?? '').trim()
       const material = String(args.material ?? '').trim()
       const industry = String(args.industry ?? '').trim()
@@ -1137,7 +1162,7 @@ export const TOOLS = [
       render: (r) =>
         `裁决：${r.ruling}\n依据：${r.basis ?? ''}${r.analysis ? '\n分析：' + r.analysis : ''}${r.essenceCheck ? '\n需求本质核对：' + r.essenceCheck : ''}${r.falsifiableGateNote ? '\n可证伪预期门禁：' + r.falsifiableGateNote : ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const issue = String(args.issue ?? '')
       const sideA = String(args.sideA ?? '')
       const sideB = String(args.sideB ?? '')
@@ -1231,7 +1256,7 @@ export const TOOLS = [
       render: (r) =>
         `【需求本质审计】本质=${r.essence}\n四查：${(r.checks ?? []).map((c) => '  🔍 ' + c).join('\n')}\n防迎合：${r.flattery ?? ''}\n防幻觉：${r.hallucination ?? ''}\n偏离检查：${r.misalignments ?? ''}\n判定：${r.verdict}\n审计格式：${r.respondAs ?? ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const requirement = String(args.requirement ?? '').trim()
       const decision = String(args.decision ?? '').trim()
       const rationale = String(args.rationale ?? '').trim()
@@ -1286,7 +1311,7 @@ export const TOOLS = [
       render: (r) =>
         `问题上行：${r.ok ? '✅ 可上报' : '❌ 打回补细节：' + (r.missing || []).join('、')}\n${r.record}\n黑板条目：${r.boardEntry ?? ''}\n纪律：${r.protocol ?? ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const role = String(args.role ?? '?')
       const problem = String(args.problem ?? '').trim()
       const attempts = String(args.attempts ?? '').trim()
@@ -1309,7 +1334,7 @@ export const TOOLS = [
       let boardError = ''
       if (ok) {
         const fsSvc = (() => {
-          try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+          try { return getFsService(exec) } catch { return null }
         })()
         const disk = await readBoardItems(fsSvc)
         const items = disk.fromDisk ? disk.items : []
@@ -1362,7 +1387,7 @@ export const TOOLS = [
       render: (r) =>
         `【能力补足】缺口=${r.gap}\n决策=${r.decision}\n验证：${r.verifyNotes ?? ''}\n自研要求：${r.buildNote ?? ''}\n诚实边界：${r.honestNote ?? ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const task = String(args.task ?? '').trim()
       const existing = String(args.existingTools ?? '').trim()
       const market = String(args.marketSearch ?? '').trim()
@@ -1421,7 +1446,7 @@ export const TOOLS = [
       render: (r) =>
         `【版本检测】本地 ${r.localVersion} vs 远程 ${r.remoteVersion ?? '?'}${r.hasUpdate ? ' ⬆️ 有新版本' : ' ✅ 已是最新'}\n${r.changelog ? '变更摘要：' + r.changelog.slice(0, 120) + '\n' : ''}${r.upgradeStep ? '升级：' + r.upgradeStep + '\n' : ''}判定：${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
       const remoteUrl = String(args.remoteUrl ?? 'https://github.com/ljjluke/luke-jarvis.git')
@@ -1504,7 +1529,7 @@ export const TOOLS = [
       },
       render: (r) => `真实优先提示：${r.note}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       return {
         note: `问题「${String(args.question ?? '')}」：先用该角色卡的框架如何分析（引用卡中思维模型），但结论必须回到真实情况——检查真实数据/代码/复现后再下判断，禁止为迎合角色卡而扭曲事实。`,
       }
@@ -1543,7 +1568,7 @@ export const TOOLS = [
       },
       render: (r) => `【成员开工须知（派活必带）】\n${r.brief}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const os = _require('node:os')
       const path = _require('node:path')
       const mode = String(args.mode ?? 'generate').trim()
@@ -1574,7 +1599,7 @@ export const TOOLS = [
       // ⚠️ audit 模式：机械校验"团队每个任务是否都附了开工须知（含 ponder 指引）"——ssa 教训：
       //   captain 只对"验证 ponder 的方法测试任务"附了须知，真实任务(实现/修复/验收)没附 → 成员没跑 ponder
       if (mode === 'audit') {
-        const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        const fsSvc = getFsService(exec)
         const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
         const teamDir = String(args.teamDir ?? '').trim()
         const tasksJson = String(args.tasksJson ?? '').trim()
@@ -1742,7 +1767,7 @@ export const TOOLS = [
       render: (r) =>
         `【${r.role ?? '角色'} 深度思考任务单 · stakes=${r.stakes}\n① 前提审视：${r.premises}\n② 视角展开：${r.perspective}\n③ 反方攻击：${r.counter}\n④ 失效推演：${r.failure}\n⑤ 真实优先核对：${r.realityCheck}\n⑥ 诚实边界：${r.limits}\n⑦ 收敛结论：${r.conclusion}\n响应格式：${r.respondAs}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const q = String(args.question ?? '').trim()
       const card = String(args.roleCard ?? '').trim()
       const stakes = String(args.stakes ?? 'medium')
@@ -2032,7 +2057,7 @@ export const TOOLS = [
       },
       render: (r) => `保真度=${r.rating}（一手占比 ${r.firstHandRatio ?? '?'}）\n${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const card = String(args.card ?? '')
       const issues = []
       // 保真度不再"出现关键词就加分"，而是吃深度评估的实质证据：
@@ -2090,7 +2115,7 @@ export const TOOLS = [
       },
       render: (r) => `协同设计校验：${r.ok ? '✅ 可建队' : '❌ 待修'}\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const req = String(args?.requirement ?? '')
       const collab = String(args?.collabText ?? '')
       const issues = []
@@ -2195,7 +2220,7 @@ export const TOOLS = [
       },
       render: (r) => `【绩效评估 · ${r.role ?? '?'}】${r.action}\n${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const role = String(args.role ?? '').trim()
       const stageStatus = String(args.stageStatus ?? 'in_progress').trim()
       const stageRequirement = String(args.stageRequirement ?? '').trim()
@@ -2215,7 +2240,7 @@ export const TOOLS = [
       //   跨调用自动累计 strikes（CEO 无需手动传 history/存 historyNext）。
       //   有 ctx 且有 fs → 自动读写；无 ctx（单测/裸调）→ 纯函数行为不变（history 走参数）。
       const fsSvc = (() => {
-        try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+        try { return getFsService(exec) } catch { return null }
       })()
       const perfFile = role ? '.jarvis/perf-' + role.replace(/[\\/:*?"<>|]/g, '_') + '.json' : ''
       let history = []
@@ -2342,9 +2367,9 @@ export const TOOLS = [
       render: (r) =>
         `【${r.type} 会 · 目标】${r.goal}\n流程：${r.protocol ?? ''}\n决议记录：${r.resolutions}\n会后任务：${r.actions ?? ''}\n纪要格式：${r.respondAs ?? ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const type = String(args.meetingType ?? 'kickoff')
-      const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+      const fsSvc = getFsService(exec)
       const agenda = String(args.agenda ?? '').trim()
       const attendees = String(args.attendees ?? '全员').trim()
       const ctx = String(args.context ?? '').trim()
@@ -2379,7 +2404,7 @@ export const TOOLS = [
       //    + 明确时长（轮次上限）+ 明确主题 + 收敛判据（所有细节都没问题才结束，收敛才散会）──
       if (args.groupchat === true) {
         const path = _require('node:path')
-        const fsSvc3 = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        const fsSvc3 = getFsService(exec)
         const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
         const topic = String(args.topic ?? args.agenda ?? '未命名议题').trim()
         const attendees = String(args.attendees ?? '全员').trim().split(',').map((x) => x.trim()).filter(Boolean)
@@ -2471,7 +2496,7 @@ export const TOOLS = [
       const m = META[type] || META.kickoff
       // 公司状态自动同步（3D 画面显示"正在开会/会议结束"）
       try {
-        const fsSvc2 = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        const fsSvc2 = getFsService(exec)
         if (fsSvc2) {
           if (type === 'close') await syncCompanyState(fsSvc2, { type: 'meeting_done', meetingId: 'm' })
           else await syncCompanyState(fsSvc2, { type: 'meeting_started', meeting: { id: 'm', type, topic: agenda || m.goal, attendees: attendees.split(',') } })
@@ -2577,7 +2602,7 @@ export const TOOLS = [
       },
       render: (r) => `【交付版本${r.version ? ' · ' + r.version : ''}】${r.status ? '状态：' + r.status + '\n' : ''}${(r.checklist || []).map((c) => '  ☐ ' + c).join('\n')}${r.log ? '\n沟通留痕：' + r.log : ''}\n判定：${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const mode = String(args.mode ?? '').trim()
       const version = String(args.version ?? '').trim()
       const requirement = String(args.requirement ?? '').trim()
@@ -2684,7 +2709,7 @@ export const TOOLS = [
         let projectWritten = false
         let projectError = ''
         const fsSvc = (() => {
-          try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+          try { return getFsService(exec) } catch { return null }
         })()
         if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
           try {
@@ -2779,10 +2804,10 @@ export const TOOLS = [
           .map((i) => `  [${i.id}][${i.type}] ${i.role}: ${i.content}`)
           .join('\n') || '  （无未解决项——黑板收敛）'}\n二次会判定：${r.needsMeeting ? '⚠️ ' + r.reason : '✅ ' + r.reason}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const role = String(args.role ?? '?').trim() || '?'
       const fsSvc = (() => {
-        try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null }
+        try { return getFsService(exec) } catch { return null }
       })()
       // 真源：磁盘 .jarvis/board.json（项目级公屏）。board 参数仅作无 fs 环境（如单测）的显式回退。
       const disk = await readBoardItems(fsSvc)
@@ -2954,7 +2979,7 @@ export const TOOLS = [
       render: (r) =>
         `【需求澄清 · ${r.mode ?? 'analyze'}】\n本质：${r.essence ?? ''}\n模糊度：${r.vague === undefined ? '' : r.vague ? '⚠️ 模糊需澄清' : '✅ 可判定'}\n${r.candidates?.length ? '候选问题：\n  ' + r.candidates.map((c) => '· ' + c).join('\n  ') : ''}${r.trigger ? '\n触发：' + r.trigger : ''}${r.questions?.length ? '\n本轮话术：\n  ' + r.questions.map((q) => '· ' + q).join('\n  ') : ''}${r.duoCheck ? '\n双人判据：' + r.duoCheck : ''}${r.confirm ? '\n完成判定：' + r.confirm : ''}\n裁决：${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const mode = String(args.mode ?? 'analyze').trim()
       const req = String(args.requirement ?? '').trim()
       const industry = String(args.industry ?? '').trim()
@@ -3668,7 +3693,7 @@ export const TOOLS = [
         return `任务编排图：${r.ok ? '✅ 可派活' : '❌ 打回重拆'}（${r.taskCount} 任务）\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n并行建议：${(r.parallelGroups ?? []).join(' / ')}${staffLine}`
       },
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const req = String(args?.requirement ?? '')
       const issues = []
       let tasks = []
@@ -3863,7 +3888,7 @@ export const TOOLS = [
       const path = _require('node:path')
       const step = String(args.step ?? '').trim()
       const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
-      const fsSvc = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+      const fsSvc = getFsService(exec)
       const exists = async (rel) => {
         if (!fsSvc || typeof fsSvc.readText !== 'function') return false
         try { const t = await fsSvc.readText(path.join(projectDir, rel)); return !!t } catch { return false }
@@ -3909,7 +3934,7 @@ export const TOOLS = [
             }
             const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '需求规格')
             if (!found) missing.push('需求规格（.jarvis/docs/需求规格-*.md 不存在——需求没打磨清楚不许拆解）')
-            else missing = missing.filter((m) => !m.startsWith('需求规格'))
+            else _dropMissing(missing, (m) => m.startsWith('需求规格'))
           },
           next: '过 jarvis_taskgraph 结构闸 → 出《任务编排图》',
         },
@@ -3919,7 +3944,7 @@ export const TOOLS = [
           check: async (missing) => {
             const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '任务编排')
             if (!found) missing.push('任务编排图（.jarvis/docs/任务编排-*.md 不存在——没拆解不许写方案）')
-            else missing = missing.filter((m) => !m.startsWith('任务编排'))
+            else _dropMissing(missing, (m) => m.startsWith('任务编排'))
           },
           next: '出《方案设计》（.jarvis/docs/方案设计-*.md 每条需求→实现落点）',
         },
@@ -3929,11 +3954,11 @@ export const TOOLS = [
           check: async (missing) => {
             // 需求规格（与 decompose 一致：存在则移除，不存在则留）
             const reqFound = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '需求规格')
-            if (reqFound) missing = missing.filter((m) => !m.startsWith('需求规格'))
+            if (reqFound) _dropMissing(missing, (m) => m.startsWith('需求规格'))
             else missing.push('需求规格（.jarvis/docs/需求规格-*.md 不存在——需求没打磨清楚不许建队派活）')
             const fd = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
             if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许建队派活）')
-            else missing = missing.filter((m) => !m.startsWith('方案设计'))
+            else _dropMissing(missing, (m) => m.startsWith('方案设计'))
             // 人才层前置硬闸（glm-test 教训：无猎头/无角色卡直接建普通角色队 = 跳过蒸馏流程）
             const talentMissing = await checkTalentPreconditions(fsSvc, projectDir, path)
             missing.push(...talentMissing)
@@ -3952,7 +3977,7 @@ export const TOOLS = [
           check: async (missing) => {
             const fd = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
             if (!fd) missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——没方案不许执行实现）')
-            else missing = missing.filter((m) => !m.startsWith('方案设计'))
+            else _dropMissing(missing, (m) => m.startsWith('方案设计'))
             // 顶层不得自领执行任务（scan 教训：成员会话死后 captain 自己 claim 任务干完 → "全是上层在干活"）
             const captainOwned = await auditCaptainOwnedTasks(fsSvc, projectDir, path)
             if (captainOwned.length) {
@@ -3976,7 +4001,7 @@ export const TOOLS = [
           check: async (missing) => {
             const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis'), 'board.json')
             if (!found) { missing.push('黑板（.jarvis/board.json 不存在——没有决策/阻塞记录不许收口）'); return }
-            missing = missing.filter((m) => !m.startsWith('黑板'))
+            _dropMissing(missing, (m) => m.startsWith('黑板'))
             // 黑板归拢检查（zyh 教训：收口后 18 项决策/风险全 open 假未决堆积）：
             // 已定案决策（含 采用/上线/不引入/轮不配/已交付/定稿/确认 等定案词）必须标 resolved；
             // 已处理风险/问题（含 已/修复/闭环/解决 等）必须 resolve；否则=未归拢=不许收口
@@ -4015,7 +4040,10 @@ export const TOOLS = [
         return { verdict: `⚠️ 未知步骤「${step}」（应为 clarify/decompose/design/build/execute/close）`, ok: false, step, missing: [], next: '' }
       }
       const missing = [...cfg.pre]
-      try { await cfg.check(missing) } catch {}
+      try {
+        const filtered = await cfg.check(missing)
+        if (Array.isArray(filtered)) { missing.length = 0; missing.push(...filtered) } // F4：兼容「返回新数组」写法
+      } catch {}
       const ok = missing.length === 0
       // 落闸留痕：通过才记（后续建队/派活/收口会检查这些闸）
       const sessionId = String((exec && exec.agent && exec.agent.session && exec.agent.session.id) || '')
@@ -4032,7 +4060,7 @@ export const TOOLS = [
       // 步骤完成留痕（done=true 且前置齐备 → 记录到 .jarvis/flow-progress.json，学 ponder step-guard after）
       let recorded = null
       if (args.done === true && ok) {
-        const fsSvc2 = (() => { try { return (ctx && ctx.get && ctx.get('fs')) || null } catch { return null } })()
+        const fsSvc2 = getFsService(exec)
         if (fsSvc2 && typeof fsSvc2.readText === 'function' && typeof fsSvc2.writeText === 'function') {
           try {
             const fp = path.join(projectDir, '.jarvis/flow-progress.json')
@@ -4091,7 +4119,7 @@ export const TOOLS = [
       },
       render: (r) => `【产物结构指纹】${r.verdict}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const crypto = _require('node:crypto')
       const mode = String(args.mode ?? 'compute').trim()
       // 结构提取：按 kind 或内容特征取"可辨识结构"（多重集），过滤内容噪音（值/文案/空白）
@@ -4170,6 +4198,14 @@ export const TOOLS = [
   },
 ]
 // ── jarvis_flowguard 辅助函数（模块级，TOOLS 数组外）──
+/** F4：在**调用方数组上原地**删除满足 pred 的缺项（`missing = missing.filter(...)` 只是参数重绑定，
+ *  pre 项永远留在 handler 的数组里 → decompose/design/build/execute 恒 BLOCKED）。
+ *  handler 侧也兼容「check 返回新数组」的写法（返回数组则整体替换）。 */
+function _dropMissing(missing, pred) {
+  for (let i = missing.length - 1; i >= 0; i -= 1) if (pred(missing[i])) missing.splice(i, 1)
+  return missing
+}
+
 // 在目录里找含关键字的文件（fs 支持时；不支持则返回 true=放行，防环境缺 fs 误拦）
 // 兼容两种 fs 服务形态：
 //   ① 旧/测试形态：list(dir) → 文件名数组；
@@ -4177,6 +4213,16 @@ export const TOOLS = [
 // 旧实现只认 list → 真实环境恒返回 true（flowguard 的产物前置检查形同虚设，gates.json 里人工补写 note 即其痕迹）。
 // 语义不变：服务能力缺失或任何异常 → true（fail-open，不把"查不了"变成"拦截"）。
 export async function hasGlob(fsSvc, dir, keyword) {
+  // 语义（F4b，T7 复验要求可区分）：
+  //   • 无 fs 服务 / 服务不提供列举能力 → true（"查不了"放行，与历史 fail-open 一致，不能把环境缺失变成拦截）
+  //   • 目录不存在（ENOENT/ENOTDIR/NOT_FOUND）→ false（明确"没有这个目录" = 没产物 → 流程闸必须拦）
+  //   • 列举成功但无关键字命中 → false
+  //   • 其他异常（权限/超时/后端错误）→ true（不确定=放行，避免误拦）
+  const isMissing = (e) => {
+    const code = String((e && (e.code || e.errno)) || '')
+    if (/ENOENT|ENOTDIR|NOT_FOUND|absent/i.test(code)) return true
+    return /no such file|not exist|not found|不存在/i.test(String((e && e.message) || ''))
+  }
   if (!fsSvc) return true
   try {
     if (typeof fsSvc.list === 'function') {
@@ -4184,12 +4230,13 @@ export async function hasGlob(fsSvc, dir, keyword) {
       return (Array.isArray(names) ? names : []).some((n) => String(n).includes(keyword))
     }
     if (typeof fsSvc.resolve === 'function' && typeof fsSvc.listDir === 'function') {
-      const target = await fsSvc.resolve(dir)
-      if (!target) return true
+      let target
+      try { target = await fsSvc.resolve(dir) } catch (e) { return isMissing(e) ? false : true }
+      if (!target) return false // resolve 明确返回空 = 该目录不存在 → 没产物
       const entries = await fsSvc.listDir(target)
       return (Array.isArray(entries) ? entries : []).some((e) => String(e && e.name !== undefined ? e.name : e).includes(keyword))
     }
-  } catch { return true }
+  } catch (e) { return isMissing(e) ? false : true }
   return true
 }
 // 审计团队任务是否每个都附了开工须知（含 ponder 指引）
@@ -4538,14 +4585,21 @@ function readActiveTeamMarker(cwd) {
 }
 /** 写归属标记（flowguard(step="build") 通过时调用）。返回写入的对象；失败返回 null（不改闸结论）。 */
 export function writeActiveTeamMarker(cwd, captainSessionId) {
+  const fs = _require('node:fs')
+  const path = _require('node:path')
+  const base = String(cwd || '')
+  const td = path.join(base, '.agent-teams')
+  const sid = String(captainSessionId || '')
+  // F5（T7 打回 medium）：**先 mkdir `.agent-teams`**——首建队时该目录还不存在（flowguard(build) 在建队前跑），
+  // 旧实现直接 readdirSync 抛 ENOENT → 整个函数 catch 返回 null → D5-v2 标记永不写入 → 阶段退 72h 启发式。
   try {
-    const fs = _require('node:fs')
-    const path = _require('node:path')
-    const base = String(cwd || '')
-    const td = path.join(base, '.agent-teams')
-    const sid = String(captainSessionId || '')
-    const all = []
-    const mine = []
+    fs.mkdirSync(td, { recursive: true })
+  } catch (e) {
+    return { ok: false, reason: `mkdir .agent-teams 失败：${(e && e.message) || e}`, teams: [], source: 'failed', sessionId: sid }
+  }
+  const all = []
+  const mine = []
+  try {
     for (const t of fs.readdirSync(td)) {
       if (ARCHIVED_TEAM_RE.test(String(t))) continue
       try {
@@ -4556,14 +4610,21 @@ export function writeActiveTeamMarker(cwd, captainSessionId) {
         if (sid && String((d && d.captainSessionId) || '') === sid) mine.push(String(t))
       } catch { /* 坏 team.json → 不计入标记 */ }
     }
-    const teams = mine.length ? mine : all
-    const source = mine.length ? 'captain-session' : 'fallback-all'
-    const marker = { teams, updatedAt: new Date().toISOString(), source, sessionId: sid }
-    const dir = path.join(base, '.jarvis')
+  } catch (e) {
+    return { ok: false, reason: `读 .agent-teams 失败：${(e && e.message) || e}`, teams: [], source: 'failed', sessionId: sid }
+  }
+  const teams = mine.length ? mine : all
+  const source = mine.length ? 'captain-session' : 'fallback-all'
+  const marker = { ok: true, teams, updatedAt: new Date().toISOString(), source, sessionId: sid }
+  const dir = path.join(base, '.jarvis')
+  try {
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'active-team.json'), JSON.stringify(marker, null, 2))
-    return marker
-  } catch { return null }
+  } catch (e) {
+    // 如实回报失败原因（旧实现静默返回 null → 调用方只能看到「没标记」，无法归因）
+    return { ok: false, reason: `写 .jarvis/active-team.json 失败：${(e && e.message) || e}`, teams, source: 'failed', sessionId: sid }
+  }
+  return marker
 }
 /** 计算当前阶段（纯读文件，无副作用） */
 export function computeStage(cwd) {
