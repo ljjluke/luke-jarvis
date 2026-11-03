@@ -3278,3 +3278,59 @@ test('D6 deny 补集：execute 阶段 claim_task/update_task/amend_task 放行�
   assert.strictEqual(gateCall('agent_teams_update_task', dir, { task_id: 'task-1', status: 'in_progress' }), undefined, 'execute 必须放行 update_task')
   assert.strictEqual(gateCall('agent_teams_amend_task', dir, { task_id: 'task-1' }), undefined, 'execute 必须放行 amend_task（返工改契约）')
 })
+
+// ── D7：jarvis_ponder_check 的 PASS 记录落盘路径（修 resolveWorkspace 漂移到 profile 目录）──
+// 实证：成员会话里记录写到 /root/.dsh/profiles/web/.jarvis/docs/ponder-verify，
+// 而 flowguard/收口闸读的是「会话 cwd 下 .jarvis/docs/ponder-verify」→ 读不到 → 交活被误拒。
+
+test('D7 ponderVerifyProjectDir：来源优先级 args.projectDir > exec 会话 cwd > 进程兜底', async () => {
+  const { ponderVerifyProjectDir } = await import('../src/host/plugin.js')
+  const exec = { agent: { session: { header: { cwd: '/tmp/session-cwd' } } } }
+  assert.strictEqual(ponderVerifyProjectDir({ projectDir: '/tmp/explicit' }, exec), '/tmp/explicit', '显式 projectDir 最优先')
+  assert.strictEqual(ponderVerifyProjectDir({}, exec), '/tmp/session-cwd', '其次取调用会话 cwd')
+  assert.ok(ponderVerifyProjectDir({}, undefined).length > 0, '拿不到会话时给进程兜底（不抛错/不空串）')
+  assert.strictEqual(ponderVerifyProjectDir({ projectDir: '  ' }, exec), '/tmp/session-cwd', '空白的 projectDir 视为未指定')
+})
+
+test('D7 jarvis_ponder_check：PASS 记录落在指定项目目录（不再漂到进程工作区）', async () => {
+  // 合成一个「十阶段按序完整 + 子 agent 达标 + 产出齐全」的 run 夹具（不依赖任何真实 run，T4 可复现）
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'd7-data-'))
+  const projDir = fs.mkdtempSync(path.join(os.tmpdir(), 'd7-proj-'))
+  const otherCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'd7-other-'))
+  const steps = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']
+  const agents = { bagua: 8, plans: 5, score: 3, simulate: 3, debate: 3 }
+  const pad = (o) => JSON.stringify(o, null, 2) + '\n' + 'x'.repeat(400)
+  fs.writeFileSync(path.join(dataDir, 'step-guard.cjson'), JSON.stringify({
+    run_id: 'run_test_d7', completed: steps, sequence: steps.map((step, i) => ({ step, at: `2026-11-03T00:0${i}:00Z`, agents: agents[step] || 0 })),
+    agents, certainties: {}, superseded_run: null,
+  }))
+  const files = {
+    'stage-interview.json': { userProfile: { 天: 'x', 地: 'x', 人: 'x', 法: 'x', 物: 'x' }, persona: 'x' },
+    'stage-shensi.json': { stake: { level: 'high' }, premises: [{ premise: 'p', trap_type: '无', status: 'confirmed' }] },
+    'stage-divergence.json': { perspectives: ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => ({ name: n, insight: 'x'.repeat(20), data_source: 'x', assumption: 'x' })), consensus: 'c', certainty: 0.7 },
+    'stage-bagua.json': { dimensions: ['F1驱动力', 'F2基础', 'F3变化', 'F4渗透', 'F5风险', 'F6依附', 'F7边界', 'F8平衡'].map((name) => ({ name, blindspot: '盲点'.repeat(10), insight: '重要'.repeat(10) })), key_finding: 'k' },
+    'stage-plans.json': { plans: [1, 2, 3, 4, 5].map((i) => ({ name: `方案${i}`, rationale: 'r', condition: 'c', antithesis: 'a', synthesis: 's' })), certainty: 0.7 },
+    'stage-converge.json': { survivors: [1, 2, 3].map((i) => ({ name: `方案${i}`, score: 0.7, reason: 'x'.repeat(20) })), certainty: 0.7 },
+    'stage-score.json': { scored_survivors: [1, 2, 3].map((i) => ({ name: `方案${i}`, total: 0.7, key_finding: 'x' })), certainty: 0.7 },
+    'stage-simulate.json': { simulations: [1, 2, 3].map((i) => ({ solution_name: `方案${i}`, scenarios: [{ scenario: 'realistic', score: 0.6, key_finding: 'x', risks: 'x', bottleneck: 'x' }], overall: 'x' })) },
+    'stage-debate.json': { ranked: [1, 2, 3].map((i) => ({ rank: i, name: `方案${i}`, pros: ['x'], cons: ['x'] })), debate_summary: 'x', certainty: 0.7 },
+    'stage-synthesis.json': { recommendation: '方案1', conclusion: '采用方案1（合成夹具）', reasoning: 'x', risk: 'x', certainty: 0.7 },
+    'end-state.md': '# 终态\n' + 'y'.repeat(400),
+  }
+  for (const [name, obj] of Object.entries(files)) {
+    fs.writeFileSync(path.join(dataDir, name), name.endsWith('.md') ? obj : pad(obj))
+  }
+  const def = TOOLS.find((t) => t.name === 'jarvis_ponder_check')
+  // 关键：exec 会话 cwd 指向另一个目录（模拟漂移场景），显式 projectDir 才是记账位置
+  const r = await def.handler(
+    { taskId: 't7d', runId: 'run_test_d7', dataDir, evidenceDir: dataDir, projectDir: projDir },
+    { agent: { session: { id: 's1', header: { cwd: otherCwd } } } },
+  )
+  assert.strictEqual(r.verdict, 'PASS', `合成完整 run 应 PASS：${JSON.stringify(r.issues)}`)
+  assert.ok(r.recordPath && r.recordPath.startsWith(projDir), `记录必须落在 projectDir：${r.recordPath}`)
+  assert.ok(fs.existsSync(r.recordPath), '记录文件应真实存在')
+  const rec = JSON.parse(fs.readFileSync(r.recordPath, 'utf8'))
+  assert.strictEqual(rec.taskId, 't7d')
+  assert.strictEqual(rec.verdict, 'PASS')
+  assert.ok(!fs.existsSync(path.join(otherCwd, '.jarvis/docs/ponder-verify')), '不应再写进 exec 会话 cwd（显式 projectDir 优先）')
+})

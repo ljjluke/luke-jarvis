@@ -1765,6 +1765,7 @@ export const TOOLS = [
         dataDir: { type: 'string', description: '该 run 的 step-guard 数据目录（PONDER_DATA_DIR，默认 ~/.dsh/data/ponder）——多成员并发时每人应隔离到自己的目录，核验要指向本人目录' },
         evidenceDir: { type: 'string', description: '阶段产出目录（如 <项目>/.jarvis/ponder-runs/<run_id>/）——传了就核验每阶段产出文件是否真落盘' },
         claimedConclusion: { type: 'string', description: '内容指纹核验（ws8634 借鉴 P0）：交付声称的结论/摘要——工具读 run 的 synthesis/end-state 产出，核验"声称结论 vs 实际结论"是否一致（防空跑/结论脱节/编造结论）' },
+        projectDir: { type: 'string', description: '（D7）PASS 核验记录的落盘项目目录（缺省=调用会话工作区 exec.agent.session.header.cwd；再缺省=进程工作区兜底）——修「记录漂移到 profile 目录（resolveWorkspace 单例）」的缺陷' },
       },
     },
     output: {
@@ -1784,6 +1785,8 @@ export const TOOLS = [
           evidenceMissing: { type: 'array', items: { type: 'string' }, description: '记录完成但无产出文件的阶段' },
           issues: { type: 'array', items: { type: 'string' }, description: '核验发现的问题' },
           action: { type: 'string', description: '处置建议（通过/打回重跑/要求补证据）' },
+          recordPath: { type: 'string', description: '（D7）PASS 核验记录的落盘绝对路径（未落盘=空）' },
+          recordProjectDir: { type: 'string', description: '（D7）落盘所选的项目目录（供核验来源优先级是否正确）' },
         },
         required: ['verdict', 'issues', 'action'],
       },
@@ -1795,7 +1798,7 @@ export const TOOLS = [
         + `${r.evidenceMissing?.length ? '产出缺失：' + r.evidenceMissing.join('；') + '\n' : ''}`
         + `问题：${(r.issues ?? []).join(' | ') || '无'}\n处置：${r.action ?? ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
       const os = _require('node:os')
@@ -1931,10 +1934,14 @@ export const TOOLS = [
 
       // 核验留痕：PASS 且有 taskId → 写 .jarvis/docs/ponder-verify/<taskId>-<runId>.json
       // 收口闸据此强制"每个成员任务都经过 ponder 真核验"（scan 实证：jarvis_ponder_check 从未被调用）
+      // D7：落盘目录必须来自「本次调用的事实」，不能用进程级单例 resolveWorkspace(moduleCtx)——
+      // 实证漂移：成员会话里记录写到了 /root/.dsh/profiles/web/.jarvis（收口闸读的是项目目录 → 读不到记录）。
+      // 来源优先级：args.projectDir > exec.agent.session.header.cwd > resolveWorkspace(moduleCtx) > '.'
+      const wrote = { path: '', dir: '' }
       try {
         const taskId = String(args.taskId ?? '').trim()
         if (ok && taskId) {
-          const cwd = resolveWorkspace(moduleCtx) || '.'
+          const cwd = ponderVerifyProjectDir(args, exec)
           const dir = path.join(cwd, '.jarvis/docs/ponder-verify')
           fs.mkdirSync(dir, { recursive: true })
           const rec = {
@@ -1945,9 +1952,11 @@ export const TOOLS = [
             agentShortfalls,
             verifiedAt: new Date().toISOString(),
           }
-          fs.writeFileSync(path.join(dir, `${taskId.replace(/[^\w.:-]/g, '_')}-${String(state.run_id).replace(/[^\w.:-]/g, '_')}.json`), JSON.stringify(rec, null, 2))
+          wrote.path = path.join(dir, `${taskId.replace(/[^\w.:-]/g, '_')}-${String(state.run_id).replace(/[^\w.:-]/g, '_')}.json`)
+          wrote.dir = dir
+          fs.writeFileSync(wrote.path, JSON.stringify(rec, null, 2))
         }
-      } catch {}
+      } catch { /* 落盘失败不改变核验结论（但 recordPath 为空，调用方可见） */ }
       return {
         verdict: ok ? 'PASS' : 'FAIL',
         runId: state.run_id,
@@ -1963,6 +1972,7 @@ export const TOOLS = [
         action: ok
           ? '✅ 核验通过：十阶段按序完整执行、子 agent 数达标' + (evidenceDir ? '、阶段产出齐全' : '（本次未核验产出文件，建议下次带 evidenceDir）')
           : '⛔ 打回：不许把"声称已完成"当"已深度思考"——要求该角色补齐缺失阶段/按其隔离目录重跑并留下顺序记录与阶段产出，再交核验',
+        ...(wrote.path ? { recordPath: wrote.path, recordProjectDir: wrote.dir.replace(/[/\\\\]\.jarvis[/\\\\]docs[/\\\\]ponder-verify$/, '') } : {}),
       }
     },
   },
@@ -4961,6 +4971,29 @@ export function resolveWorkspace(ctx, exec) {
   } catch { /* 拿不到会话则用兜底 */ }
   _resolvedWorkspace = (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
   return _resolvedWorkspace
+}
+
+/**
+ * D7：jarvis_ponder_check 核验记录的落盘项目目录（纯函数，可单测）。
+ * 来源优先级（显式 > 会话 > 进程兜底）：
+ *   ① args.projectDir（调用方显式指定，最可信）
+ *   ② exec.agent.session.header.cwd（本次调用的会话工作区=用户真实工作区）
+ *   ③ resolveWorkspace(moduleCtx)（进程级单例兜底——**已知会漂移**：成员会话曾把记录写到 profile 目录）
+ *   ④ '.'（最后一档，保证不抛错）
+ * 缺陷实证（D7）：原实现直接用 ③，记录落到 /root/.dsh/profiles/web/.jarvis/docs/ponder-verify，
+ * 而收口闸/flowguard 读的是「会话 cwd 下的 .jarvis/docs/ponder-verify」→ 读不到记录 → 交活被误拒。
+ */
+export function ponderVerifyProjectDir(args, exec) {
+  try {
+    const explicit = String((args && args.projectDir) || '').trim()
+    if (explicit) return explicit
+  } catch { /* 继续下一档 */ }
+  try {
+    const agent = exec && (exec.agent || (exec.session && { session: exec.session }))
+    const w = agent && agent.session && agent.session.header && agent.session.header.cwd
+    if (w && typeof w === 'string' && w.length > 0) return w
+  } catch { /* 继续下一档 */ }
+  return resolveWorkspace(moduleCtx) || '.'
 }
 
 export default {
