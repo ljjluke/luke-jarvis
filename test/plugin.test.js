@@ -3791,17 +3791,23 @@ test('T11 relay：buildPixOfficeFrame 生成合法快照帧（无 INVALID_BINDIN
   const verdict = validatePixOfficeFrame(frame)
   assert.strictEqual(verdict.ok, true, `帧必须合法：${JSON.stringify(verdict.errors)}`)
   assert.strictEqual(frame.seq, 7)
-  assert.strictEqual(frame.type, 'snapshot')
-  const actors = frame.employees.map((e) => e.sceneActorId)
+  // 上游 zod 联合体只认 office.sync / office.sync.start / office.sync.complete
+  assert.strictEqual(frame.type, 'office.sync', '帧信封必须是 office.sync')
+  assert.ok(frame.snapshot && Array.isArray(frame.snapshot.employees), '快照必须在 snapshot 字段内')
+  const actors = frame.snapshot.employees.map((e) => e.sceneActorId)
   actors.forEach((a) => assert.ok(PIXOFFICE_ACTOR_IDS.includes(a), `sceneActorId 必须在演员表：${a}`))
-  assert.ok(frame.employees.some((e) => e.role === 'CEO'), '快照须含本公司角色')
-  assert.ok(frame.events.length >= 1, '会议应映射成事件')
+  assert.ok(frame.snapshot.employees.some((e) => e.role === 'CEO'), '快照须含本公司角色')
+  assert.ok(frame.snapshot.events.length >= 1, '会议应映射成事件')
+  for (const e of frame.snapshot.events) {
+    assert.ok(['note','task.assigned','task.started','task.blocked','task.completed'].includes(e.kind), `事件 kind 必须在上游枚举：${e.kind}`)
+    assert.ok(e.summary.length >= 1 && e.summary.length <= 300, '事件 summary 长度须 1..300')
+  }
 })
 
 test('T11 relay：employees >200 截断；tasks/events 也按上游上限截断', () => {
   const many = Array.from({ length: 260 }, (_, i) => ({ id: 'e' + i, role: '角色' + i, status: 'idle' }))
   const frame = buildPixOfficeFrame({ employees: many }, { seq: 1 })
-  assert.strictEqual(frame.employees.length, 200, `employees 必须截断到 200（实际 ${frame.employees.length}）`)
+  assert.strictEqual(frame.snapshot.employees.length, 200, `employees 必须截断到 200（实际 ${frame.snapshot.employees.length}）`)
   assert.strictEqual(validatePixOfficeFrame(frame).ok, true, '截断后仍应合法')
 })
 
@@ -3817,9 +3823,10 @@ test('T11 relay：seq 单调 + 幂等——同 seq 同内容判 duplicate，同 
   // seq 缺失/非法 → 校验器必须判 SEQ_REQUIRED（buildPixOfficeFrame 会把非法 seq 兜底成 1，故直接校验裸帧）
   const noSeq = validatePixOfficeFrame({ workspace: { id: 'w' }, employees: [], tasks: [], events: [] })
   assert.strictEqual(noSeq.ok, false, '缺 seq 必须判非法')
-  assert.strictEqual(noSeq.errors[0].code, 'SEQ_REQUIRED')
-  const badSeq = validatePixOfficeFrame({ seq: 0, workspace: { id: 'w' } })
-  assert.strictEqual(badSeq.errors[0].code, 'SEQ_REQUIRED', 'seq=0 必须判非法')
+  assert.ok(noSeq.errors.some((e) => e.code === 'SEQ_REQUIRED'), `应报 SEQ_REQUIRED：${JSON.stringify(noSeq.errors)}`)
+  // seq=0：信封与 seq 两条都报（信封是新加的强制项，顺序不代表优先级）
+  const badSeq = validatePixOfficeFrame({ type: 'office.sync', seq: 0, snapshot: { workspace: { id: 'w' } } })
+  assert.ok(badSeq.errors.some((e) => e.code === 'SEQ_REQUIRED'), `seq=0 必须判非法：${JSON.stringify(badSeq.errors)}`)
 })
 
 test('T11 relay：SSE 帧字符串合法（data: <单帧 JSON> 可解析、无内嵌换行破帧）', () => {
@@ -3830,7 +3837,24 @@ test('T11 relay：SSE 帧字符串合法（data: <单帧 JSON> 可解析、无�
   const jsonPart = str.slice(6).trim()
   const parsed = JSON.parse(jsonPart)
   assert.strictEqual(parsed.seq, 3)
-  assert.ok(parsed.employees.length === 1)
+  assert.strictEqual(parsed.type, 'office.sync')
+  assert.ok(parsed.snapshot.employees.length === 1)
+})
+
+test('T11 relay：上游事件枚举收敛——meeting/recruiting/employee/ceo 一律压成 note，非法 kind 被校验器拒绝', () => {
+  const state = { employees: [{ id: 'ceo', role: 'CEO', status: 'working' }], meetings: [{ topic: '周会', status: 'done' }], recruiting: [{ position: '测试', status: 'interviewing' }] }
+  const frame = buildPixOfficeFrame(state, { seq: 1 })
+  const kinds = frame.snapshot.events.map((e) => e.kind)
+  assert.ok(kinds.length >= 2, '会议/招募应各自成事件')
+  kinds.forEach((k) => assert.ok(['note','task.assigned','task.started','task.blocked','task.completed'].includes(k), `kind 必须收敛到上游枚举：${k}`))
+  assert.ok(frame.snapshot.events.every((e) => e.summary.length <= 300), 'summary 必须裁剪到 300')
+  // 非法 kind / 空 summary 必须被校验器拒绝（上游会整帧丢弃）
+  const bad = { type: 'office.sync', seq: 2, snapshot: { workspace: { id: 'w' }, employees: [], tasks: [], events: [{ id: 'e1', kind: 'meeting.done', summary: '', occurredAt: '2026-01-01T00:00:00Z' }] } }
+  const v = validatePixOfficeFrame(bad)
+  assert.strictEqual(v.ok, false)
+  assert.ok(v.errors.some((e) => e.code === 'EVENT_KIND_INVALID'), `应报 EVENT_KIND_INVALID：${JSON.stringify(v.errors)}`)
+  // 信封不对也必须报错（不是静默）
+  assert.strictEqual(validatePixOfficeFrame({ type: 'snapshot', seq: 1, snapshot: { workspace: { id: 'w' } } }).errors[0].code, 'ENVELOPE_INVALID')
 })
 
 test('T11 relay：命令白名单——越界命令明确拒绝（COMMAND_NOT_ALLOWED），白名单内且有 payload 才接受', () => {
@@ -3880,6 +3904,15 @@ test('T11 recordGate：写入时保留人工 note（归档 noteHistory），不�
   assert.ok(Array.isArray(after.decompose.noteHistory) && after.decompose.noteHistory.length === 1, '人工 note 须归档到 noteHistory')
   assert.strictEqual(after.decompose.noteHistory[0].note, manual.decompose.note)
   assert.strictEqual(after.decompose.noteHistory[0].archivedBy, 'recordGate')
+  // 重复机械写：同一条 note 只归档一次（不得无界膨胀），且人工署名 by 保留
+  const withBy = JSON.parse(fs.readFileSync(gateFile, 'utf8'))
+  withBy.decompose.by = 'captain'
+  fs.writeFileSync(gateFile, JSON.stringify(withBy, null, 2))
+  recordGate(proj, 'decompose', true)
+  recordGate(proj, 'decompose', true)
+  const after3 = JSON.parse(fs.readFileSync(gateFile, 'utf8'))
+  assert.strictEqual(after3.decompose.noteHistory.length, 1, `重复写不得膨胀 noteHistory（实际 ${after3.decompose.noteHistory.length}）`)
+  assert.strictEqual(after3.decompose.by, 'captain', '人工署名 by 必须保留')
   // 没有人工 note 的条目不应凭空产生 noteHistory
   recordGate(proj, 'clarify', true)
   const after2 = JSON.parse(fs.readFileSync(gateFile, 'utf8'))

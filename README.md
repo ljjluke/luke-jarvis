@@ -204,7 +204,7 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ## 🧪 质量保证
 
-- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:284 -->`
+- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:285 -->`
 - verify_host_pipeline **48 用例 0 VIOLATION**
 - selfcheck **11 项发布前自检**
 - 部署双形态验证（仓库 + 实体部署）全链路跑通
