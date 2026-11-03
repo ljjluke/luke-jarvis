@@ -4893,6 +4893,10 @@ export function writeActiveTeamMarker(cwd, captainSessionId) {
   const base = String(cwd || '')
   const td = path.join(base, '.agent-teams')
   const sid = String(captainSessionId || '')
+  // T13 ⑤：插件仓库自身不是 jarvis 状态根 → 不写归属标记（也不 mkdir 空 .agent-teams，避免污染仓库根）
+  if (looksLikePluginRepo(base)) {
+    return { ok: false, reason: '插件仓库自身不是 jarvis 状态根（拒绝写 .jarvis/active-team.json，见 README）', teams: [], source: 'failed', sessionId: sid }
+  }
   // F5（T7 打回 medium）：**先 mkdir `.agent-teams`**——首建队时该目录还不存在（flowguard(build) 在建队前跑），
   // 旧实现直接 readdirSync 抛 ENOENT → 整个函数 catch 返回 null → D5-v2 标记永不写入 → 阶段退 72h 启发式。
   try {
@@ -5165,6 +5169,20 @@ function _readGates(cwd) {
 /** flowguard 通过时落闸（step → {ok, at}）；失败不落闸（旧闸保留，避免抖动静默放行） */
 export function recordGate(cwd, step, ok) {
   if (!cwd || !step || !ok) return false
+  // T13 ⑤ 纵深防御：插件仓库自身不是 jarvis 状态根 → 一律拒写（防止任何调用方（含测试/旧会话）
+  // 把第二个 .jarvis 写出来造成假 PASS）
+  if (looksLikePluginRepo(cwd)) {
+    // 插件仓库自身只有在「真的存在 .agent-teams/<团队>/team.json」时才可能承载 jarvis 状态（例如本地联调），
+    // 否则一律拒写——注意不能只看 `.agent-teams` 目录是否存在（mkdir 也会造出空目录）。
+    const fs0 = _require('node:fs')
+    const path0 = _require('node:path')
+    let hasTeam = false
+    try {
+      const td = path0.join(String(cwd), '.agent-teams')
+      hasTeam = fs0.readdirSync(td).some((n) => { try { return fs0.statSync(path0.join(td, String(n), 'team.json')).isFile() } catch { return false } })
+    } catch { hasTeam = false }
+    if (!hasTeam) return false
+  }
   try {
     const fs = _require('node:fs')
     const path = _require('node:path')
