@@ -174,9 +174,23 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ---
 
+## 🚧 阶段网关（P2 · 完全体）
+
+插件不再只"注入提示词"，而是在**工具调用前机械放行/拒绝**：`computeStage(cwd)` 每次实时按 `.jarvis` 产物 + `gates.json` 算出当前阶段，`jarvisStageGate` 据此把越阶段的流程类工具（`jarvis_*` / `agent_teams_*`）直接拒掉。
+
+- **六阶段 deny-list**（`clarify → decompose → design → build → execute → close`）：如 clarify/decompose/design 拒建队/派活/交活（`create`/`add_member`/`create_task`/`reassign`/`update_task`/`delete`/`resume` 等）；execute 拒 `jarvis_baseline`/`jarvis_taskgraph`/`jarvis_release`；close 拒再派活/加人。**未知工具默认放行**（deny-list 取舍：避免误伤 read/glob/bash 等只读/执行工具）。
+- **拒绝文案固定三要素**：`阶段 N/6 + 名称`｜`当前缺口`｜`下一步`——模型被拒后知道该补什么，而不是原地重试。
+- **链式校验**：派活（`create_task`/`reassign_task`）必须持 `clarify → decompose → design → build` 完整链，缺哪环点名哪环（与 `jarvis_flowguard` 同一份 `gates` 口径，且先于 deny 判定，所以不依赖 guard 注册顺序）。
+- **归属判据**：`.jarvis/active-team.json`（`jarvis_flowguard(step="build")` 通过时写入）标记"本项目团队"，`computeStage` 只统计标记内团队的未完成任务；无标记才回退 72h mtime 启发式（老工作区兼容）。
+- **收口可判定**：`close.ok` 读 `gateOk('close')`——跑过 `jarvis_flowguard(step="close")` 后 `done` 才含 close，不再永远停在「收口未完成」。
+- ⚠️ **运行副本需重启生效**：DSH profile 以 `file:` 依赖硬链安装，仓库里 `plugin.js` 被重写会让硬链断裂留下旧副本（版本号看到新版、代码还是旧的）。升级后用 `bash scripts/check-install-consistency.sh` 比对仓库与运行副本的 sha256，输出「不一致」= 需重装 profile 并重启 `dsh web`（重启会中断在跑成员，须等全员空闲时做）。
+- **已知边界**（诚实标注，不计缺陷）：手写 `gates.json` + 空壳产物可伪造阶段（威胁模型只防「无意识跳步」）；deny 补集未穷举（完整闭合靠运行时工具面 parity）；缓存 2s/3s 滞后；成员/无 `.jarvis` 工作区按 fail-open 放行。
+
+---
+
 ## 🧪 质量保证
 
-- 单测 **228 项**（含蒸馏深度闸/防展示型空泛/绩效对齐度/覆盖核查/任务编排图/公司状态同步等硬闸测试）
+- 单测 **260 项**（含蒸馏深度闸/防展示型空泛/绩效对齐度/覆盖核查/任务编排图/公司状态同步/阶段网关六阶段矩阵等硬闸测试）
 - verify_host_pipeline **48 用例 0 VIOLATION**
 - selfcheck **11 项发布前自检**
 - 部署双形态验证（仓库 + 实体部署）全链路跑通
