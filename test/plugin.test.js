@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -3333,4 +3333,108 @@ test('D7 jarvis_ponder_check：PASS 记录落在指定项目目录（不再漂�
   assert.strictEqual(rec.taskId, 't7d')
   assert.strictEqual(rec.verdict, 'PASS')
   assert.ok(!fs.existsSync(path.join(otherCwd, '.jarvis/docs/ponder-verify')), '不应再写进 exec 会话 cwd（显式 projectDir 优先）')
+})
+
+// ── t6 / T3 打回项：F1 交活、D5-v2 归属判据、close.ok、D6b 归零型工具 ──
+
+test('F1（R2）：clarify 阶段交活（agent_teams_update_task）被拒，execute 放行', () => {
+  const clarifyDir = stageGateFixture('clarify')
+  const r = gateCall('agent_teams_update_task', clarifyDir, { task_id: 'old-t1', status: 'completed' })
+  assert.ok(typeof r === 'string', `clarify 阶段交活必须被拒（R2「clarify 拒绝交活」）：${r}`)
+  assert.ok(r.includes('阶段 1/6') && r.includes('需求打磨'), `须含阶段编号+名称：${r}`)
+  const execDir = stageGateFixture('execute')
+  assert.strictEqual(gateCall('agent_teams_update_task', execDir, { task_id: 'task-1', status: 'completed' }), undefined, 'execute 阶段交活必须放行')
+})
+
+test('D6b：delete/resume 在 clarify/decompose/design 被拒（防零成本把 openTasks 归零），execute 放行 resume', () => {
+  for (const stage of ['clarify', 'decompose', 'design']) {
+    const dir = stageGateFixture(stage)
+    for (const tool of ['agent_teams_delete', 'agent_teams_resume']) {
+      const r = gateCall(tool, dir, {})
+      assert.ok(typeof r === 'string', `${stage} 阶段 ${tool} 必须被拒：${r}`)
+    }
+  }
+  const execDir = stageGateFixture('execute')
+  assert.strictEqual(gateCall('agent_teams_resume', execDir, {}), undefined, 'execute 阶段放行 resume（复活团队）')
+})
+
+test('D5-v2 归属标记：只统计标记内团队的未完成任务（标记外旧团队不计）', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 't-cur', [{ id: 'a', status: 'in_progress' }, { id: 'b', status: 'claimed' }], 0)
+  teamFixture(dir, 't-old', [{ id: 'x', status: 'in_progress' }, { id: 'y', status: 'pending' }, { id: 'z', status: 'in_progress' }], 100)
+  fs.writeFileSync(path.join(dir, '.jarvis/active-team.json'), JSON.stringify({ teams: ['t-cur'], updatedAt: new Date().toISOString(), source: 'captain-session' }))
+  const st = computeStage(dir)
+  assert.strictEqual(st.artifacts.openTasks, 2, `只数标记内团队（t-cur 2 个）：实际 ${st.artifacts.openTasks}`)
+  assert.strictEqual(st.artifacts.activeTeamSource, 'marker', '归属判据来源应为 marker')
+  assert.deepStrictEqual(st.artifacts.activeTeams, ['t-cur'])
+})
+
+test('D5-v2 归属标记：标记内团队静默超过 72h 仍计数（修「静默→假收口」主通道）', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 't-cur', [{ id: 'a', status: 'in_progress' }, { id: 'b', status: 'pending' }], 100) // 本项目团队 100h 没写入
+  fs.writeFileSync(path.join(dir, '.jarvis/active-team.json'), JSON.stringify({ teams: ['t-cur'], updatedAt: new Date().toISOString() }))
+  const st = computeStage(dir)
+  assert.strictEqual(st.artifacts.openTasks, 2, `标记内团队不因 mtime 超 72h 被排除：实际 ${st.artifacts.openTasks}`)
+  assert.strictEqual(st.stage, 'execute', '仍有未完成任务 → 不得提前进 close（这是 T3 R1 裁决要修的假收口）')
+})
+
+test('D5-v2 归属标记：无标记时回退 72h 启发式（向后兼容老工作区）', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 't-cur', [{ id: 'a', status: 'in_progress' }], 0)
+  teamFixture(dir, 't-old', [{ id: 'x', status: 'in_progress' }], 100)
+  const st = computeStage(dir)
+  assert.strictEqual(st.artifacts.openTasks, 1, `回退路径：只数新鲜团队：实际 ${st.artifacts.openTasks}`)
+  assert.strictEqual(st.artifacts.activeTeamSource, 'mtime-fallback', '无标记应标为 mtime-fallback')
+})
+
+test('D5-v2 归属标记：坏 JSON / 空 teams 不崩且回退启发式', () => {
+  const dir = builtWorkspace()
+  teamFixture(dir, 't-cur', [{ id: 'a', status: 'in_progress' }], 0)
+  fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/active-team.json'), '{坏 JSON')
+  let st
+  assert.doesNotThrow(() => { st = computeStage(dir) }, '坏标记不应崩')
+  assert.strictEqual(st.artifacts.openTasks, 1, '坏标记 → 回退启发式')
+  assert.strictEqual(st.artifacts.activeTeamSource, 'mtime-fallback')
+  fs.writeFileSync(path.join(dir, '.jarvis/active-team.json'), JSON.stringify({ teams: [] }))
+  st = computeStage(dir)
+  assert.strictEqual(st.artifacts.activeTeamSource, 'mtime-fallback', '空 teams 等同无标记')
+})
+
+test('D5-v2 写标记：按 captainSessionId 精确归属；匹配不到才 fallback-all（供审计）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'd5v2-mk-'))
+  teamFixture(dir, 'mine', [{ id: 'a', status: 'in_progress' }], 0)
+  fs.writeFileSync(path.join(dir, '.agent-teams/mine/team.json'), JSON.stringify({ name: 'mine', captainSessionId: 'cap', tasks: [{ id: 'a', status: 'in_progress' }] }))
+  teamFixture(dir, 'other', [{ id: 'b', status: 'in_progress' }], 0)
+  fs.writeFileSync(path.join(dir, '.agent-teams/other/team.json'), JSON.stringify({ name: 'other', captainSessionId: 'cap-other', tasks: [{ id: 'b', status: 'in_progress' }] }))
+  const mk = writeActiveTeamMarker(dir, 'cap')
+  assert.ok(mk && fs.existsSync(path.join(dir, '.jarvis/active-team.json')), '标记应落盘')
+  assert.deepStrictEqual(mk.teams, ['mine'], `按 captainSessionId 只写本项目团队：${JSON.stringify(mk.teams)}`)
+  assert.strictEqual(mk.source, 'captain-session')
+  const mk2 = writeActiveTeamMarker(dir, 'someone-else')
+  assert.deepStrictEqual(mk2.teams.sort(), ['mine', 'other'], '匹配不到会话 → fallback 写全部非归档团队')
+  assert.strictEqual(mk2.source, 'fallback-all', 'fallback 必须标 source 供审计')
+})
+
+test('R1/②：close.ok 读收口闸——未过时不闭环但 release 已放行；过了则 done 含 close', () => {
+  const notClosed = builtWorkspace()
+  teamFixture(notClosed, 't-cur', [{ id: 'a', status: 'completed' }], 0)
+  fs.mkdirSync(path.join(notClosed, '.jarvis/docs/ponder-verify'), { recursive: true })
+  fs.writeFileSync(path.join(notClosed, '.jarvis/docs/ponder-verify/ok.json'), JSON.stringify({ verdict: 'PASS' }))
+  const st1 = computeStage(notClosed)
+  assert.strictEqual(st1.stage, 'close', `execute 已满足应到 close：${st1.stage}`)
+  assert.ok(!st1.done.includes('close'), '收口闸未过 → done 不得含 close')
+  assert.ok(st1.missing.some((m) => m.includes('flowguard(step="close")')), `缺口须点名收口闸：${st1.missing.join('；')}`)
+  assert.strictEqual(gateCall('jarvis_release', notClosed), undefined, 'close 阶段 release 已放行（但收口未闭环）')
+
+  const closed = builtWorkspace()
+  teamFixture(closed, 't-cur', [{ id: 'a', status: 'completed' }], 0)
+  fs.mkdirSync(path.join(closed, '.jarvis/docs/ponder-verify'), { recursive: true })
+  fs.writeFileSync(path.join(closed, '.jarvis/docs/ponder-verify/ok.json'), JSON.stringify({ verdict: 'PASS' }))
+  recordGate(closed, 'close', true)
+  const st2 = computeStage(closed)
+  assert.strictEqual(st2.stage, 'close', '仍在 close 阶段（最后一态）')
+  assert.ok(st2.done.includes('close'), `收口闸过了 done 必须含 close：${st2.done.join(',')}`)
+  assert.strictEqual(st2.done.length, 6, `六阶段全部通过：${st2.done.join(',')}`)
+  assert.strictEqual(st2.missing.length, 0, '收口完成应无缺口')
 })

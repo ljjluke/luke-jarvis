@@ -3820,6 +3820,7 @@ export const TOOLS = [
           step: { type: 'string', description: '本次检查的步骤' },
           missing: { type: 'array', items: { type: 'string' }, description: '缺失的前置产物（打回补齐项）' },
           recorded: { type: 'string', description: '步骤完成留痕路径（done=true 时写入 flow-progress.json；未 done 不返回）' },
+          activeTeamMarker: { type: 'string', description: '（D5-v2）build 闸通过时写入的归属标记路径（.jarvis/active-team.json）' },
           next: { type: 'string', description: '下一步该做什么' },
         },
         required: ['verdict', 'ok'],
@@ -3827,7 +3828,7 @@ export const TOOLS = [
       render: (r) => `【主流程守卫 · ${r.step ?? ''}】${r.ok ? '✅ 前置齐备可进入' : '⛔ BLOCKED 缺前置产物：' + (r.missing || []).join('；')}
 下一步：${r.next ?? ''}`,
     },
-    handler: async (args) => {
+    handler: async (args, exec) => {
       const path = _require('node:path')
       const step = String(args.step ?? '').trim()
       const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
@@ -3986,7 +3987,17 @@ export const TOOLS = [
       try { await cfg.check(missing) } catch {}
       const ok = missing.length === 0
       // 落闸留痕：通过才记（后续建队/派活/收口会检查这些闸）
+      const sessionId = String((exec && exec.agent && exec.agent.session && exec.agent.session.id) || '')
       try { if (ok) recordGate(projectDir, step, true) } catch {}
+      // D5-v2：build 闸通过 = 建队完成 → 把「本项目团队」写进 .jarvis/active-team.json（归属判据，
+      // computeStage 据此只统计本项目团队的未完成任务；见 readActiveTeamMarker 注释里的判据关系与误判边界）。
+      let activeTeamMarker = ''
+      if (ok && step === 'build') {
+        try {
+          const mk = writeActiveTeamMarker(projectDir, sessionId)
+          if (mk) activeTeamMarker = path.join(projectDir, '.jarvis/active-team.json')
+        } catch { /* 写标记失败不改变闸结论（computeStage 会回退 72h 启发式） */ }
+      }
       // 步骤完成留痕（done=true 且前置齐备 → 记录到 .jarvis/flow-progress.json，学 ponder step-guard after）
       let recorded = null
       if (args.done === true && ok) {
@@ -4013,6 +4024,7 @@ export const TOOLS = [
         next: ok ? cfg.next : `先补齐缺失项（${missing.join('；')}）再进${cfg.label}`,
       }
       if (recorded) out.recorded = recorded
+      if (activeTeamMarker) out.activeTeamMarker = activeTeamMarker
       return out
     },
   },
@@ -4473,6 +4485,55 @@ const STAGE_GATE = { // 该阶段必须持哪个闸才算过
 //   本轮只在两个"明确"信号上排除（明确归档名、明确超时），其余一律按活跃计。
 const ACTIVE_TEAM_MAX_AGE_MS = 72 * 60 * 60 * 1000
 const ARCHIVED_TEAM_RE = /archive|^old|^_old|history/i
+// ── D5-v2：归属判据 `.jarvis/active-team.json`（替代 72h 墙钟启发式作为主判据）──────────────
+// 结构：{ teams: ['团队目录名'], updatedAt: ISO, source: 'captain-session'|'fallback-all', sessionId }
+// 写入时机：jarvis_flowguard(step="build") 通过时（建队完成=本项目归属可确定）。
+// 与 72h 启发式的关系（注释即契约，勿只改一处）：
+//   • 有有效标记：只统计「标记内团队」的未完成任务——不论 mtime 多旧（团队静默>72h 不再被误判历史 → 消除假收口主通道）；
+//   • 无标记 / 标记坏 / teams 为空：回退原有 72h 启发式（老工作区没有标记时的唯一可用判据，保持向后兼容）；
+//   • 误判边界：标记里多写别人的团队 = 多算（阶段停 execute，代价小）；漏写本项目团队 = 少算（假收口，代价大）
+//     → 写标记时按 captainSessionId 精确匹配当前会话的团队，匹配不到才 fallback 写全部非归档团队（source='fallback-all' 供审计）。
+//   • 标记本身可被手写（威胁模型仍是「防无意识跳步」，不防有意伪造；与 gas.json 同一边界）。
+function readActiveTeamMarker(cwd) {
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    const raw = fs.readFileSync(path.join(String(cwd || ''), '.jarvis/active-team.json'), 'utf8')
+    const d = JSON.parse(raw)
+    const teams = Array.isArray(d && d.teams) ? d.teams.map(String).filter(Boolean) : []
+    if (!teams.length) return null
+    return { teams, updatedAt: String((d && d.updatedAt) || ''), source: String((d && d.source) || 'unknown'), sessionId: String((d && d.sessionId) || '') }
+  } catch { return null } // 无标记/坏 JSON/无权限 → null（调用方回退 72h 启发式）
+}
+/** 写归属标记（flowguard(step="build") 通过时调用）。返回写入的对象；失败返回 null（不改闸结论）。 */
+export function writeActiveTeamMarker(cwd, captainSessionId) {
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    const base = String(cwd || '')
+    const td = path.join(base, '.agent-teams')
+    const sid = String(captainSessionId || '')
+    const all = []
+    const mine = []
+    for (const t of fs.readdirSync(td)) {
+      if (ARCHIVED_TEAM_RE.test(String(t))) continue
+      try {
+        const teamFile = path.join(td, String(t), 'team.json')
+        if (!fs.statSync(teamFile).isFile()) continue
+        const d = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
+        all.push(String(t))
+        if (sid && String((d && d.captainSessionId) || '') === sid) mine.push(String(t))
+      } catch { /* 坏 team.json → 不计入标记 */ }
+    }
+    const teams = mine.length ? mine : all
+    const source = mine.length ? 'captain-session' : 'fallback-all'
+    const marker = { teams, updatedAt: new Date().toISOString(), source, sessionId: sid }
+    const dir = path.join(base, '.jarvis')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'active-team.json'), JSON.stringify(marker, null, 2))
+    return marker
+  } catch { return null }
+}
 /** 计算当前阶段（纯读文件，无副作用） */
 export function computeStage(cwd) {
   const fs = _require('node:fs')
@@ -4487,6 +4548,9 @@ export function computeStage(cwd) {
   let teams = 0
   let openTasks = 0
   const now = Date.now()
+  // D5-v2：归属标记优先（见上方 readActiveTeamMarker 注释）；无标记才回退 72h 启发式。
+  const marker = readActiveTeamMarker(base)
+  const activeSet = marker ? new Set(marker.teams) : null
   try {
     for (const t of fs.readdirSync(td)) {
       if (ARCHIVED_TEAM_RE.test(String(t))) continue // 归档目录不是活跃团队
@@ -4497,8 +4561,11 @@ export function computeStage(cwd) {
       } catch { continue } // 无 team.json（retired-members.json 等杂项）不计
       teams += 1
       try {
-        // 72h 未更新 = 历史团队：它的未完成任务不再阻塞本项目推进
-        if (now - fs.statSync(teamFile).mtimeMs > ACTIVE_TEAM_MAX_AGE_MS) continue
+        if (activeSet) {
+          if (!activeSet.has(String(t))) continue // 不在归属标记内 = 别人的/历史团队 → 不计
+        } else if (now - fs.statSync(teamFile).mtimeMs > ACTIVE_TEAM_MAX_AGE_MS) {
+          continue // 回退路径：72h 未更新 = 历史团队
+        }
         const d = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
         openTasks += (d.tasks || []).filter((x) => !['completed', 'cancelled'].includes(String(x.status))).length
       } catch { /* 坏 JSON/无权限 → 该团队不计未完成，不崩 */ }
@@ -4516,11 +4583,16 @@ export function computeStage(cwd) {
     { id: 'design', ok: designDoc && gateOk('design'), missing: [...(designDoc ? [] : ['.jarvis/docs/方案设计-*.md']), ...(gateOk('design') ? [] : ['jarvis_flowguard(step="design")'])], next: '产出方案设计（每条需求→实现落点）→ jarvis_flowguard(step="design")' },
     { id: 'build', ok: cards >= 2 && teams > 0 && gateOk('build'), missing: [...(cards >= 2 ? [] : [`.jarvis/cards/ 角色卡（当前 ${cards} 张，需≥2：带队卡+岗位卡）`]), ...(teams > 0 ? [] : ['建队（agent_teams_create）']), ...(gateOk('build') ? [] : ['jarvis_flowguard(step="build")'])], next: 'jarvis_distill 蒸馏角色卡 → jarvis_flowguard(step="build") → agent_teams_create → add_member' },
     { id: 'execute', ok: openTasks === 0 && teams > 0, missing: [...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个`]), ...(verify > 0 ? [] : ['ponder 核验记录（成员交活前必须 jarvis_ponder_check(taskId=…) 拿 PASS）'])], next: '派活(带开工须知) → 盯控(agent_teams_status) → 每个成员任务 dismount 前过 ponder 核验' },
-    { id: 'close', ok: false, missing: ['jarvis_flowguard(step="close")（覆盖矩阵+ponder核验+三产物闭环）'], next: 'jarvis_coverage(persist) → jarvis_essence → jarvis_flowguard(step="close") → jarvis_snapshot' },
+    // R1/②：close.ok 不再恒 false——由「收口闸」真实判定（gateOk('close')），过了才算收口完成。
+    // 否则过了 flowguard(step="close") 阶段也永远停在 6/6「收口未完成」，`done` 永不包含 close（T3 报告 §三 边界 5）。
+    { id: 'close', ok: gateOk('close'), missing: [...(gateOk('close') ? [] : ['jarvis_flowguard(step="close")（覆盖矩阵+ponder核验+三产物闭环）'])], next: 'jarvis_coverage(persist) → jarvis_essence → jarvis_flowguard(step="close") → jarvis_snapshot' },
   ]
-  let idx = states.findIndex((x) => !x.ok)
-  if (idx === -1) idx = states.length - 1
+  const firstOpen = states.findIndex((x) => !x.ok)
+  const allOk = firstOpen === -1
+  const idx = allOk ? states.length - 1 : firstOpen
   const cur = states[idx]
+  // close 已通过（全部 ok）时 done 必须包含 close（原实现 slice(0,5) 会漏掉最后一态 → 永远显示「收口未完成」）。
+  const done = allOk ? states.map((x) => x.id) : states.slice(0, idx).map((x) => x.id)
   return {
     stage: cur.id,
     index: idx + 1,
@@ -4528,8 +4600,13 @@ export function computeStage(cwd) {
     label: STAGE_LABELS[cur.id] || cur.id,
     missing: cur.missing,
     next: cur.next,
-    done: states.slice(0, idx).map((x) => x.id),
-    artifacts: { reqDoc, taskmap, designDoc, cards, teams, openTasks, verify },
+    done,
+    artifacts: {
+      reqDoc, taskmap, designDoc, cards, teams, openTasks, verify,
+      // D5-v2 观测：归属判据来源（marker=有归属标记 / mtime-fallback=回退 72h / none=无团队目录）
+      activeTeamSource: marker ? 'marker' : (teams > 0 ? 'mtime-fallback' : 'none'),
+      activeTeams: marker ? marker.teams : [],
+    },
     gates,
   }
 }
@@ -4564,10 +4641,15 @@ export function renderStage(cwd) {
 // 在 clarify/design 阶段也能调，阶段隔离形同虚设。
 // 边界（诚实标注）：这只是「显式补几项」，不是穷举——完整闭合按 project.md D6 裁决排进 P3 的 meta 穷举
 // （遍历流程类工具名，未表态即测试红）。未知工具仍默认放行（deny-list 的固有取舍）。
+// F1（T3 打回 medium，R2「clarify 拒绝交活」）：update_task 是成员交活（status=completed）入口，
+//   原表未含 → 两道闸都放行，clarify 阶段就能把任务标 completed 造成「假交活」。现并入 clarify/decompose/design；
+//   build 阶段起放行（建队后派活/盯控需要）。
+// D6b：delete（归档团队）与 resume（复活团队）都能零成本把 openTasks 归零 → 并入 clarify/decompose/design；
+//   execute 放行 resume/update/claim/amend（执行期需要复活/交活/返工）。
 const STAGE_DENY = {
-  clarify: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
-  decompose: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_coverage', 'jarvis_release'],
-  design: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  clarify: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  decompose: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_coverage', 'jarvis_release'],
+  design: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
   build: ['agent_teams_claim_task', 'agent_teams_amend_task', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'], // 建队期不许改验收契约/认领（换人 add/remove 仍允许）
   execute: ['jarvis_baseline', 'jarvis_taskgraph', 'jarvis_release'], // 执行期不回头改基线/重拆/改版本账本；claim/update/amend 放行（交活与返工需要）
   close: ['agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_add_member'],
