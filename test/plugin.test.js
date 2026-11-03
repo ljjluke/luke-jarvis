@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand, PIXOFFICE_ACTOR_IDS } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -3567,8 +3567,10 @@ test('T9 适配页：office/jarvis.html 真实引用快照接口 + DOM 面板钩
   // 适配页必须从快照渲染角色/任务（否则 DOM 断言无来源）
   assert.ok(/renderEmployees/.test(js) && /renderTasks/.test(js), '适配脚本应渲染 employees/tasks')
   assert.ok(/__JARVIS_UI__/.test(js), '应暴露 window.__JARVIS_UI__ 供机械校验')
-  // 诚实边界：不得在页面里宣称「场景由本公司数据驱动」
-  assert.ok(/未绑定本公司数据/.test(html), '页面必须标注「场景层未绑定本公司数据」的边界')
+  // 诚实边界（T11 起场景层改经 relay 接本公司数据，但仍不得宣称「已上线/已渲染」）：
+  // 页面必须显式写「需重启后目视确认」这一待验证边界，并暴露 relayUrl
+  assert.ok(/需重启后目视确认/.test(html), '页面必须标注「场景是否真绑上需重启后目视确认」的边界（T11）')
+  assert.ok(html.includes('relayUrl'), '适配页必须暴露 relayUrl（T11 场景层 relay 注入）')
   // 原 demo 页保持不变（仍可直接访问）
   assert.ok(fs.existsSync(path.join(repo, '../office/office/index.html')), '原 PixOffice demo 页必须保留')
 })
@@ -3768,4 +3770,119 @@ test('T10+ 无 list 能力的 FileSystem（只有 resolve+listDir）：审计闸
   const missing = await checkTalentPreconditions(fsSvc, proj, path)
   assert.ok(missing.some((m) => m.includes('猎头')), `无 list 后端也必须检出缺猎头卡：${JSON.stringify(missing)}`)
   assert.ok(missing.some((m) => m.includes('带队')), `无 list 后端也必须检出缺带队卡：${JSON.stringify(missing)}`)
+})
+
+// ── t11：PixOffice relay（方案B）——快照帧合法性 / seq 幂等 / 截断 / 映射 / SSE 帧 / 命令白名单 / recordGate 保留 note ──
+
+const PIX_ACTOR = 'office-lead'
+
+test('T11 relay：buildPixOfficeFrame 生成合法快照帧（无 INVALID_BINDING，含本公司 employee id）', () => {
+  const state = {
+    employees: [
+      { id: 'ceo', role: 'CEO', persona: 'To C-level or not to C-level', status: 'working' },
+      { id: 'architect', role: '企业架构师', persona: 'Fowler', status: 'working' },
+      { id: 'verifier', role: '质量-探索式测试', persona: 'Bach', status: 'working' },
+      { id: 'release', role: '办公体系专家', persona: 'Office', status: 'idle' },
+    ],
+    tasks: [{ id: 't1', subject: 'P2 网关', status: 'completed', assignee: 'CEO' }],
+    meetings: [{ id: 'm1', topic: '周会', status: 'done', attendees: ['CEO'] }],
+  }
+  const frame = buildPixOfficeFrame(state, { seq: 7, workspaceId: 'jarvis-t11' })
+  const verdict = validatePixOfficeFrame(frame)
+  assert.strictEqual(verdict.ok, true, `帧必须合法：${JSON.stringify(verdict.errors)}`)
+  assert.strictEqual(frame.seq, 7)
+  assert.strictEqual(frame.type, 'snapshot')
+  const actors = frame.employees.map((e) => e.sceneActorId)
+  actors.forEach((a) => assert.ok(PIXOFFICE_ACTOR_IDS.includes(a), `sceneActorId 必须在演员表：${a}`))
+  assert.ok(frame.employees.some((e) => e.role === 'CEO'), '快照须含本公司角色')
+  assert.ok(frame.events.length >= 1, '会议应映射成事件')
+})
+
+test('T11 relay：employees >200 截断；tasks/events 也按上游上限截断', () => {
+  const many = Array.from({ length: 260 }, (_, i) => ({ id: 'e' + i, role: '角色' + i, status: 'idle' }))
+  const frame = buildPixOfficeFrame({ employees: many }, { seq: 1 })
+  assert.strictEqual(frame.employees.length, 200, `employees 必须截断到 200（实际 ${frame.employees.length}）`)
+  assert.strictEqual(validatePixOfficeFrame(frame).ok, true, '截断后仍应合法')
+})
+
+test('T11 relay：seq 单调 + 幂等——同 seq 同内容判 duplicate，同 seq 不同内容判 conflict（上游 409）', () => {
+  const f1 = buildPixOfficeFrame({ employees: [{ id: 'ceo', role: 'CEO', status: 'working' }] }, { seq: 1 })
+  assert.deepStrictEqual(relaySeqDecision(null, f1), { status: 'fresh', seq: 1 })
+  const prev = { seq: 1, hash: frameHash(f1) }
+  assert.strictEqual(relaySeqDecision(prev, f1).status, 'duplicate', '同 seq 同内容应幂等')
+  const f2 = buildPixOfficeFrame({ employees: [{ id: 'ceo', role: 'CEO', status: 'idle' }] }, { seq: 2 })
+  assert.strictEqual(relaySeqDecision(prev, f2).status, 'fresh', '新 seq 应 fresh')
+  const conflict = buildPixOfficeFrame({ employees: [{ id: 'ceo', role: 'CEO', status: 'working' }, { id: 'qa', role: '质量-探索式测试', status: 'working' }] }, { seq: 1 })
+  assert.strictEqual(relaySeqDecision(prev, conflict).status, 'conflict', '同 seq 不同内容必须 conflict')
+  // seq 缺失/非法 → 校验器必须判 SEQ_REQUIRED（buildPixOfficeFrame 会把非法 seq 兜底成 1，故直接校验裸帧）
+  const noSeq = validatePixOfficeFrame({ workspace: { id: 'w' }, employees: [], tasks: [], events: [] })
+  assert.strictEqual(noSeq.ok, false, '缺 seq 必须判非法')
+  assert.strictEqual(noSeq.errors[0].code, 'SEQ_REQUIRED')
+  const badSeq = validatePixOfficeFrame({ seq: 0, workspace: { id: 'w' } })
+  assert.strictEqual(badSeq.errors[0].code, 'SEQ_REQUIRED', 'seq=0 必须判非法')
+})
+
+test('T11 relay：SSE 帧字符串合法（data: <单帧 JSON> 可解析、无内嵌换行破帧）', () => {
+  const frame = buildPixOfficeFrame({ employees: [{ id: 'ceo', role: 'CEO', status: 'working' }] }, { seq: 3 })
+  const str = sseFrameString(frame)
+  assert.ok(str.startsWith('data: '), 'SSE 帧必须以 data: 开头')
+  assert.ok(str.endsWith('\n\n'), 'SSE 帧必须以空行结束')
+  const jsonPart = str.slice(6).trim()
+  const parsed = JSON.parse(jsonPart)
+  assert.strictEqual(parsed.seq, 3)
+  assert.ok(parsed.employees.length === 1)
+})
+
+test('T11 relay：命令白名单——越界命令明确拒绝（COMMAND_NOT_ALLOWED），白名单内且有 payload 才接受', () => {
+  assert.strictEqual(validatePixOfficeCommand({ command: 'actor.create', payload: {} }).ok, false)
+  assert.strictEqual(validatePixOfficeCommand({ command: 'actor.create', payload: {} }).code, 'COMMAND_NOT_ALLOWED')
+  assert.strictEqual(validatePixOfficeCommand({ command: 'map.edit', payload: {} }).ok, true)
+  assert.strictEqual(validatePixOfficeCommand({ command: 'object.state.set', payload: {} }).ok, true)
+  const noPayload = validatePixOfficeCommand({ command: 'map.edit' })
+  assert.strictEqual(noPayload.ok, false)
+  assert.strictEqual(noPayload.code, 'PAYLOAD_REQUIRED')
+})
+
+test('T11 relay：路由注册齐备（events/messages/ui/reply 均为 exact，注册在静态前缀之前）', () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  plugin.apply(ctx)
+  for (const p of ['/api/pixoffice/events', '/api/pixoffice/messages', '/api/pixoffice/ui', '/api/pixoffice/reply']) {
+    const r = routes.find((x) => x.path === p)
+    assert.ok(r, `缺路由 ${p}`)
+    assert.strictEqual(r.kind, 'exact', `${p} 应为 exact`)
+  }
+  const idxEvents = routes.findIndex((x) => x.path === '/api/pixoffice/events')
+  const idxStatic = routes.findIndex((x) => x.path === '/jarvis-office')
+  if (idxStatic !== -1) assert.ok(idxEvents < idxStatic, 'relay 路由必须注册在静态 prefix 之前')
+})
+
+test('T11 recordGate：写入时保留人工 note（归档 noteHistory），不静默覆盖', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't11-gate-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const gateFile = path.join(proj, '.jarvis/gates.json')
+  const manual = {
+    clarify: { ok: true, at: '2026-11-01T00:00:00.000Z' },
+    decompose: { ok: true, at: '2026-11-01T00:00:00.000Z', note: '人工核验：flowguard 的 fs 目录检查在本环境 fail-open/误报，已由 node fs 复核' },
+  }
+  fs.writeFileSync(gateFile, JSON.stringify(manual, null, 2))
+  const ok = recordGate(proj, 'decompose', true)
+  assert.strictEqual(ok, true)
+  const after = JSON.parse(fs.readFileSync(gateFile, 'utf8'))
+  assert.strictEqual(after.decompose.note, manual.decompose.note, '人工 note 必须保留原文')
+  assert.strictEqual(after.decompose.stamped, true, '机械写入须标记 stamped')
+  assert.ok(Array.isArray(after.decompose.noteHistory) && after.decompose.noteHistory.length === 1, '人工 note 须归档到 noteHistory')
+  assert.strictEqual(after.decompose.noteHistory[0].note, manual.decompose.note)
+  assert.strictEqual(after.decompose.noteHistory[0].archivedBy, 'recordGate')
+  // 没有人工 note 的条目不应凭空产生 noteHistory
+  recordGate(proj, 'clarify', true)
+  const after2 = JSON.parse(fs.readFileSync(gateFile, 'utf8'))
+  assert.ok(!after2.clarify.noteHistory, '无人工 note 时不应生成 noteHistory')
+  assert.strictEqual(after2.clarify.stamped, true)
 })

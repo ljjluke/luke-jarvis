@@ -308,6 +308,117 @@ async function hasTeamJson(fsSvc, teamsDir) {
   }
   return false
 }
+// ══════════════════════════════════════════════════════════════════════════════════
+// T11：PixOffice relay 协议（方案B）——把 company-state 投影成「场景快照帧 + 命令」
+//
+// 上游事实（T9 逆向实测）：页面 EventSource(<relayUrl>/api/pixoffice/events?...)，只认 onmessage、
+// 单帧 JSON（>512KB 丢弃）；快照里 employees[].sceneActorId 必须落在 readActors() 的演员集合内，
+// 否则 INVALID_BINDING 整批丢弃；seq 必填且单调，同 seq 内容变 → 409；无 actor.create 命令，
+// 员工只能靠快照 initialize 一次性换绑。
+// 纯函数集中在这里，便于单测与探针脚本复用（不做 IO）。
+// ══════════════════════════════════════════════════════════════════════════════════
+
+/** 上游 readActors() 的演员 id 白名单（T9 实测：office-lead/review-agent/data-agent/file-agent/app-agent/code-agent） */
+export const PIXOFFICE_ACTOR_IDS = Object.freeze(['office-lead', 'review-agent', 'data-agent', 'file-agent', 'app-agent', 'code-agent'])
+const PIXOFFICE_ACTOR_SET = new Set(PIXOFFICE_ACTOR_IDS)
+/** 上游 schema 上限 */
+export const PIXOFFICE_LIMITS = Object.freeze({ employees: 200, tasks: 1000, events: 500 })
+/** 上游命令白名单（超出白名单的命令必须被拒绝，而不是静默吞掉） */
+export const PIXOFFICE_COMMANDS = Object.freeze([
+  'map.edit', 'activity.start', 'activity.stop', 'command.cancel', 'actor.presentation.set', 'object.state.set',
+])
+
+/**
+ * 由 company-state 生成「场景快照帧」。
+ * @param {object} state company-state（employees/tasks/meetings/recruiting/ceo/headhunter）
+ * @param {object} opts  {seq, workspaceId, workspaceName}
+ */
+export function buildPixOfficeFrame(state, opts = {}) {
+  const seq = Number(opts.seq)
+  const safeSeq = Number.isInteger(seq) && seq > 0 ? seq : 1
+  const snap = toPixOfficeSnapshot(state, {
+    seq: safeSeq,
+    workspaceId: String(opts.workspaceId || 'jarvis-workspace'),
+    workspaceName: String(opts.workspaceName || 'jarvis'),
+  })
+  return {
+    ...snap,
+    type: 'snapshot',
+    seq: safeSeq,
+    employees: (Array.isArray(snap.employees) ? snap.employees : []).slice(0, PIXOFFICE_LIMITS.employees),
+    tasks: (Array.isArray(snap.tasks) ? snap.tasks : []).slice(0, PIXOFFICE_LIMITS.tasks),
+    events: (Array.isArray(snap.events) ? snap.events : []).slice(0, PIXOFFICE_LIMITS.events),
+  }
+}
+
+/**
+ * 校验帧：返回 {ok, errors:[{code,message}]}。error code 与上游一致（便于页面/日志识别）。
+ * INVALID_BINDING：sceneActorId 不在演员表（上游会整批丢弃）；SEQ_REQUIRED：缺 seq。
+ */
+export function validatePixOfficeFrame(frame) {
+  const errors = []
+  const f = frame && typeof frame === 'object' ? frame : {}
+  const seq = Number(f.seq)
+  if (!Number.isInteger(seq) || seq <= 0) errors.push({ code: 'SEQ_REQUIRED', message: 'seq 必填且为正整数（上游据此判重/拒绝乱序）' })
+  if (!f.workspace || !f.workspace.id) errors.push({ code: 'WORKSPACE_REQUIRED', message: 'workspace.id 必填且同一工作区不可变' })
+  const employees = Array.isArray(f.employees) ? f.employees : []
+  if (employees.length > PIXOFFICE_LIMITS.employees) errors.push({ code: 'EMPLOYEES_LIMIT', message: `employees 超上限 ${PIXOFFICE_LIMITS.employees}` })
+  for (const e of employees) {
+    const actor = String((e && e.sceneActorId) || '')
+    if (!PIXOFFICE_ACTOR_SET.has(actor)) {
+      errors.push({ code: 'INVALID_BINDING', message: `sceneActorId=${actor || '(空)'} 不在上游演员表（会被整批丢弃）` })
+    }
+  }
+  const tasks = Array.isArray(f.tasks) ? f.tasks : []
+  if (tasks.length > PIXOFFICE_LIMITS.tasks) errors.push({ code: 'TASKS_LIMIT', message: `tasks 超上限 ${PIXOFFICE_LIMITS.tasks}` })
+  const events = Array.isArray(f.events) ? f.events : []
+  if (events.length > PIXOFFICE_LIMITS.events) errors.push({ code: 'EVENTS_LIMIT', message: `events 超上限 ${PIXOFFICE_LIMITS.events}` })
+  return { ok: errors.length === 0, errors }
+}
+
+/** SSE 帧字符串（EventSource 只吃 `data: <json>\n\n`；单帧 JSON，勿拆多行外层字段） */
+export function sseFrameString(frame) {
+  return 'data: ' + JSON.stringify(frame) + '\n\n'
+}
+
+/**
+ * seq 决策（幂等 + 断线续）：同 seq 同内容 → duplicate（不重发）；同 seq 不同内容 → conflict（409）；
+ * 新 seq 大于上一条 → fresh。
+ */
+export function relaySeqDecision(prev, frame) {
+  const seq = Number(frame && frame.seq)
+  if (!prev || !Number.isInteger(Number(prev.seq))) return { status: 'fresh', seq }
+  if (seq < Number(prev.seq)) return { status: 'conflict', seq, reason: 'seq 回退（上游会拒绝乱序）' }
+  if (seq === Number(prev.seq)) {
+    const same = String(prev.hash || '') === String(frameHash(frame))
+    return { status: same ? 'duplicate' : 'conflict', seq, reason: same ? '同 seq 同内容（幂等跳过）' : '同 seq 内容不同（上游 409）' }
+  }
+  return { status: 'fresh', seq }
+}
+
+/** 帧内容哈希（FNV-1a；用于 seq 判重，不含 seq 本身） */
+export function frameHash(frame) {
+  const body = JSON.stringify({ ...(frame || {}), seq: undefined })
+  let h = 0x811c9dc5
+  for (let i = 0; i < body.length; i += 1) {
+    h ^= body.charCodeAt(i)
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0
+  }
+  return h.toString(36)
+}
+
+/** 命令校验：白名单内 → {ok:true}；否则 {ok:false, code:'COMMAND_NOT_ALLOWED'}（不静默吞） */
+export function validatePixOfficeCommand(command) {
+  const c = String((command && command.command) || command || '')
+  if (!PIXOFFICE_COMMANDS.includes(c)) {
+    return { ok: false, code: 'COMMAND_NOT_ALLOWED', allowed: [...PIXOFFICE_COMMANDS], message: `命令 ${c || '(空)'} 不在上游白名单` }
+  }
+  if (!command || typeof command !== 'object' || !command.payload || typeof command.payload !== 'object') {
+    return { ok: false, code: 'PAYLOAD_REQUIRED', message: '命令必须带 payload 对象' }
+  }
+  return { ok: true, command: c }
+}
+
 /**
  * F4b：统一取 fs 服务。**模块级工具 handler 拿不到 apply 的形参 ctx**（裸 `ctx` 会 ReferenceError 被 catch 吞掉 →
  * fsSvc 恒 null → hasGlob fail-open → 闸变空壳）。优先级：exec.ctx.fs > moduleCtx.fs > moduleCtx.get('fs')。
@@ -4941,7 +5052,21 @@ export function recordGate(cwd, step, ok) {
     const file = path.join(dir, 'gates.json')
     let gates = {}
     try { gates = JSON.parse(fs.readFileSync(file, 'utf8')) || {} } catch { gates = {} }
-    gates[step] = { ok: true, at: new Date().toISOString() }
+    // T11（captain 追加）：**不许静默覆盖人工 note**。原 gates.json 里人工补写的 note/by/manual 字段
+    // 是审计痕迹（真实工作区曾有 4 条「fail-open 误报，已人工复核」的 note），覆盖前归档到 noteHistory，
+    // 并保留 note 原文 + stamped 标记（stamped=true 表示该条目由机械闸写入，not 人工）。
+    const now = new Date().toISOString()
+    const prev = gates[step] && typeof gates[step] === 'object' ? gates[step] : null
+    const manualNote = prev && (typeof prev.note === 'string' ? prev.note : '')
+    const entry = { ok: true, at: now, stamped: true }
+    if (manualNote) {
+      entry.note = manualNote
+      entry.noteHistory = [
+        ...(Array.isArray(prev.noteHistory) ? prev.noteHistory : []),
+        { note: manualNote, at: prev.at || null, archivedAt: now, archivedBy: 'recordGate', reason: '机械闸写入前归档人工 note（不许静默覆盖）' },
+      ]
+    }
+    gates[step] = entry
     fs.writeFileSync(file, JSON.stringify(gates, null, 2))
     _gateCache.at = 0
     return true
@@ -5265,6 +5390,156 @@ export default {
     moduleCtx = ctx
     resolveWorkspace(ctx) // 预热：apply 时即解析用户工作区（首个工具调用即用对路径）
 
+    // ── T11：PixOffice relay 路由（方案B）──
+    // 上游页面用 EventSource(<relayUrl>/api/pixoffice/events) 拉单帧 JSON 快照，再发 messages/reply 命令。
+    // 我们这里只做「投影 + 下发」，不实现上游的业务逻辑；命令校验按白名单（越界明确拒绝，不静默吞）。
+    try {
+      const webSvcRelay = (ctx && ctx.webServer) || (typeof ctx.get === 'function' ? ctx.get('webServer') : undefined)
+      if (webSvcRelay && typeof webSvcRelay.register === 'function') {
+        const relayPath = _require('node:path') // apply 作用域里没有模块级 path（relay 路由里要用 basename）
+        const relayDir = (req) => {
+          try {
+            const q = String((req && req.url) || '')
+            const m = q.match(/[?&]workspace=([^&]+)/)
+            if (m) return decodeURIComponent(m[1])
+          } catch { /* 忽略 */ }
+          return resolveWorkspace(moduleCtx) || process.cwd()
+        }
+        const relayReadState = async (req) => {
+          const cwd = relayDir(req)
+          let fsSvc = null
+          try { fsSvc = getFsService(null) } catch { fsSvc = null }
+          const state = await readCompanyState(fsSvc, cwd)
+          return { cwd, state: state || {}, seq0: Number((state && state.__seq) || 0) }
+        }
+        // ① SSE：/api/pixoffice/events
+        ctx.effect(() =>
+          webSvcRelay.register({
+            kind: 'exact',
+            path: '/api/pixoffice/events',
+            handler: async (req, res) => {
+              const headers = {
+                'content-type': 'text/event-stream; charset=utf-8',
+                'cache-control': 'no-store',
+                connection: 'keep-alive',
+                'access-control-allow-origin': '*',
+              }
+              try {
+                res.writeHead(200, headers)
+                if (typeof res.flushHeaders === 'function') res.flushHeaders()
+              } catch { return }
+              let seq = 1
+              let prev = null
+              let closed = false
+              const write = (frame) => {
+                const verdict = validatePixOfficeFrame(frame)
+                if (!verdict.ok) {
+                  // 校验失败必须发 error 帧（页面据此判断 INVALID_BINDING 等），不能静默丢弃
+                  try { res.write(sseFrameString({ type: 'error', seq: frame.seq, code: verdict.errors[0].code, errors: verdict.errors })) } catch {}
+                  return false
+                }
+                try { res.write(sseFrameString(frame)) } catch { return false }
+                return true
+              }
+              const tick = async () => {
+                if (closed) return
+                try {
+                  const { cwd, state } = await relayReadState(req)
+                  const frame = buildPixOfficeFrame(state, { seq, workspaceId: 'jarvis-' + relayPath.basename(cwd), workspaceName: 'Jarvis 数字员工公司' })
+                  const decision = relaySeqDecision(prev, frame)
+                  if (!prev) {
+                    if (write(frame)) { prev = { seq: frame.seq, hash: frameHash(frame) }; seq += 1 }
+                  } else if (decision.status === 'fresh') {
+                    const distinct = frameHash(frame)
+                    if (distinct !== prev.hash) {
+                      if (write(frame)) { prev = { seq: frame.seq, hash: distinct }; seq += 1 }
+                    } else if (Number(prev.seq) === frame.seq) {
+                      // 内容没变 → 同 seq 幂等跳过（不重发，避免上游把重复帧当 409）
+                      return
+                    }
+                  } else if (decision.status === 'conflict') {
+                    try { res.write(sseFrameString({ type: 'error', seq: frame.seq, code: 'STALE_SEQ', message: decision.reason })) } catch {}
+                  }
+                  // 心跳（保持 EventSource 不被中间层断开）
+                  try { res.write(': keep-alive\n\n') } catch {}
+                } catch (e) {
+                  try { res.write(sseFrameString({ type: 'error', seq, code: 'RELAY_ERROR', message: String((e && e.message) || e) })) } catch {}
+                }
+              }
+              await tick()
+              const timer = setInterval(() => { tick() }, 4000)
+              const close = () => { closed = true; clearInterval(timer); try { res.end() } catch {} }
+              if (req && typeof req.on === 'function') req.on('close', close)
+              if (typeof res.on === 'function') res.on('close', close)
+            },
+          })
+        )
+        // ② 页面 → relay 的命令：/api/pixoffice/messages（白名单校验）
+        ctx.effect(() =>
+          webSvcRelay.register({
+            kind: 'exact',
+            path: '/api/pixoffice/messages',
+            handler: async (req, res) => {
+              const send = (status, body) => {
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+              }
+              if (!req || req.method !== 'POST') return send(405, { ok: false, error: 'method-not-allowed' })
+              let body = null
+              try {
+                const chunks = []
+                if (typeof req.on === 'function') {
+                  await new Promise((resolve) => {
+                    req.on('data', (c) => chunks.push(c))
+                    req.on('end', resolve)
+                    req.on('error', resolve)
+                  })
+                } else if (typeof req.text === 'function') {
+                  chunks.push(await req.text())
+                }
+                const raw = chunks.map((c) => (Buffer.isBuffer(c) ? c.toString('utf8') : String(c))).join('')
+                body = raw ? JSON.parse(raw) : null
+              } catch { body = null }
+              const verdict = validatePixOfficeCommand(body)
+              if (!verdict.ok) return send(400, verdict)
+              return send(200, { ok: true, accepted: verdict.command, at: new Date().toISOString() })
+            },
+          })
+        )
+        // ③ UI 状态：/api/pixoffice/ui
+        ctx.effect(() =>
+          webSvcRelay.register({
+            kind: 'exact',
+            path: '/api/pixoffice/ui',
+            handler: async (req, res) => {
+              const send = (status, body) => {
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+              }
+              try {
+                const { cwd, state } = await relayReadState(req)
+                return send(200, { ok: true, workspace: { id: 'jarvis-' + relayPath.basename(cwd), name: 'Jarvis 数字员工公司' }, phase: String((state && state.phase) || ''), employees: Array.isArray(state && state.employees) ? state.employees.length : 0 })
+              } catch (e) {
+                return send(500, { ok: false, error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        // ④ 回执：/api/pixoffice/reply（上游发送后等回执，缺了会重试）
+        ctx.effect(() =>
+          webSvcRelay.register({
+            kind: 'exact',
+            path: '/api/pixoffice/reply',
+            handler: async (req, res) => {
+              const send = (status, body) => {
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+              }
+              if (!req || req.method !== 'POST') return send(405, { ok: false, error: 'method-not-allowed' })
+              return send(200, { ok: true, at: new Date().toISOString() })
+            },
+          })
+        )
+      }
+    } catch { /* webServer 不可用：relay 降级（页面会显示连接失败） */ }
+
     // ── webServer route：client 静态 bundle 读取黑板（host.call 仅 dynamic 沙箱可用，静态走 HTTP）──
     try {
       const webSvc = (ctx && ctx.webServer) || (typeof ctx.get === 'function' ? ctx.get('webServer') : undefined)
@@ -5371,7 +5646,7 @@ export default {
                 let state = null
                 try { state = JSON.parse(fsm.readFileSync(target, 'utf8')) } catch { state = null }
                 const seq = Number(state && state.__seq) > 0 ? Number(state.__seq) : (officeSeq = (officeSeq || 0) + 1)
-                const snap = toPixOfficeSnapshot(state || {}, { seq, workspaceId: 'jarvis-' + path.basename(cwd), workspaceName: (state && state.company && state.company.name) || 'Jarvis 数字员工公司' })
+                const snap = toPixOfficeSnapshot(state || {}, { seq, workspaceId: 'jarvis-' + relayPath.basename(cwd), workspaceName: (state && state.company && state.company.name) || 'Jarvis 数字员工公司' })
                 return send(200, { ok: true, active: Boolean(state), snapshot: snap })
               } catch (e) {
                 return send(200, { ok: false, active: false, error: String((e && e.message) || e) })
