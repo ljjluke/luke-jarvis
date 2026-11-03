@@ -53,9 +53,9 @@
         <div id="jarvis-extra" data-testid="jarvis-extras"></div>
       </aside>
       <div id="scene-wrap">
-        <iframe id="scene" title="PixOffice 场景" src="/jarvis-office/office/index.html"></iframe>
-        <div id="scene-note">场景层 = 上游 PixOffice 渲染（demo 场景，未绑定本公司数据）。
-          本公司员工/任务/阶段以左侧面板为准（DOM 可机械校验，见 <code>window.__JARVIS_UI__</code>）。</div>
+        <iframe id="scene" title="PixOffice 场景（relay 接本公司数据）" src="/jarvis-office/jarvis-scene.html" data-relayUrl="/api/pixoffice"></iframe>
+        <div id="scene-note">场景层 = 上游 PixOffice 渲染，经 relay（relayUrl=/api/pixoffice，SSE 快照）接本公司数据；
+          左侧面板为同源直读（DOM 可机械校验，见 <code>window.__JARVIS_UI__</code>）；场景是否真绑上需重启后目视确认（见 README 边界）。</div>
       </div>
     </div>
     <script type="module" src="/jarvis-office/jarvis-adapter.js"></script>

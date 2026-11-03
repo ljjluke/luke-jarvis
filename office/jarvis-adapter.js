@@ -21,6 +21,10 @@
 
 const SNAPSHOT_URL = '/api/luke-jarvis/company?workspace=' // 真实引用（grep 校验用：api/luke-jarvis）
 const POLL_MS = 4000
+// T11：场景层经 relay 接本公司数据（relayUrl 同源；配置在 ./jarvis-scene-config.js）
+const RELAY_URL = '/api/pixoffice'
+globalThis.__JARVIS_RELAY__ = { relayUrl: RELAY_URL, events: RELAY_URL + '/events', scene: '/jarvis-office/jarvis-scene.html' }
+
 
 const $ = (id) => document.getElementById(id)
 

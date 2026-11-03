@@ -146,6 +146,9 @@ pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
 装好插件并重启 dsh web 后，公司画面就是 **PixOffice 像素办公室**（员工工位/会议室/任务看板/黑板，数据来自 `.jarvis/company-state.json`）：
 
 - **入口**：`http://<你的 dsh 地址>/jarvis-ui`（302 → **`/jarvis-office/jarvis.html`**：本公司数据适配页）；上游 demo 页仍在 `/jarvis-office/`（对照/素材来源）
+- **场景层 relay（T11）**：`/api/pixoffice/{events,messages,ui,reply}` 由插件提供——`events` 是 SSE，首帧即公司快照（`type=snapshot`，`employees[].sceneActorId` 绑定上游 6 个演员，`seq` 单调、同 seq 同内容幂等、同 seq 内容变→409），后续每 4s 检测 company-state 变化推增量帧；`messages` 按上游白名单校验命令（越界明确 400，不静默吞）。场景页 `office/jarvis-scene.html` 通过 `office/jarvis-scene-config.js` 注入 `__PIXOFFICE_CONFIG__.relayUrl=''`（同源）——**原 demo 页的 `pixoffice-config.js` 零改动**。
+- ⚠️ **T11 硬边界**：relay 协议与页面接线已用 `bash scripts/check-pixoffice-scene.sh` 验证（本仓库代码本地挂载采 SSE 帧：含 `emp-ceo-4as972`、绑定合法、无 error 帧；DOM 面板 4/4 不回退；场景页/原 demo 页均 200）。**但「3D 画面里真换成本公司员工」需重装 profile + 重启 dsh 后目视确认**——运行副本仍旧代码，relay 路由在现网尚不存在，不得宣称已上线。
+- **双副本一致性**：`bash scripts/check-office-consistency.sh`（sha256 清单比对仓库 `office/` vs 运行副本 `office/`；缺文件/内容不一致 → exit 2 并给处置；`--copy` 为本地验证同步）。典型征兆：面板员工掉 0/4 = 运行副本 office/ 缺文件或旧版本。
 - **适配页（T9）**：`office/jarvis.html` + `office/jarvis-adapter.js` —— 左侧是**本公司实时数据面板**（角色/任务/阶段/会议招募，数据源 `GET /api/luke-jarvis/company`，每 4s 轮询，DOM 可机械校验、暴露 `window.__JARVIS_UI__`），右侧 iframe 是 PixOffice 场景渲染。⚠️ **诚实边界**：场景层仍是上游 demo 渲染，**未绑定本公司数据**（上游只认 `/api/pixoffice/{events,messages,ui,reply}` 协议，本插件未实现）；「画面里是本公司的人/任务」以左侧面板为准，不以场景动画为准。`bash scripts/check-pixoffice.sh` 会断言 DOM 含 ≥3 个本公司角色名并截图 `artifacts/pixoffice-company-<date>.png`。
 - **数据怎么进去**：CEO/成员每做关键动作（派活/汇报/开会/评估/开除/招募确认）调 `jarvis_company(mode=update|action)` → 写 `.jarvis/company-state.json` → 页面轮询 `/api/luke-jarvis/company` 投影渲染。
 - **落盘兜底（T8 修复）**：`jarvis_company` 以前只认宿主 `fs` 服务，服务不可用就**静默不落盘**（画面空白）；现在 fs 服务失败会自动用 `node:fs` 原子写（`mkdir` + `.tmp` + `rename`）落到 `<项目>/.jarvis/company-state.json`，返回值如实标明 `written` / `storageMode`（`fs-service` 或 `node-fs-fallback`）。
@@ -201,7 +204,7 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ## 🧪 质量保证
 
-- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:277 -->`
+- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:284 -->`
 - verify_host_pipeline **48 用例 0 VIOLATION**
 - selfcheck **11 项发布前自检**
 - 部署双形态验证（仓库 + 实体部署）全链路跑通
