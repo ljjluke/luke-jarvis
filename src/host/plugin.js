@@ -4465,8 +4465,12 @@ const STAGE_GATE = { // 该阶段必须持哪个闸才算过
 // 12 个未完成任务里只有 4 个属本项目（其余属 dsh-neon-theme/dsh-web-hardening/tech-neo-theme 与历史团队），
 // 于是本项目永远到不了 close（jarvis_release 在 execute 阶段被拒）。
 // 判据：① 归档目录（名字含 archive/old/history）一律不计；② team.json mtime 超过 72h = 历史团队，其未完成任务不计。
-// 误判方向（重要）：宁可多算不可少算——算成活跃只是阶段多停在 execute（与现状一致）；
-// 算成历史会让未完成任务凭空消失 → 阶段提前进 close（假收口）。故只排除「明确归档」或「明确超时」的团队。
+// 诚实标注（72h 是启发式，不是归属判据，双向都会误判）：
+//   • 多算（漏排除他人任务）→ 阶段多停在 execute，与修复前一致，只是没改善——代价小；
+//   • 少算（把真在跑但静默>72h 的团队当历史）→ 未完成任务凭空消失 → 阶段提前进 close（假收口）——代价大；
+//   • 验证者侧：git checkout / rsync / CI 会把 mtime 刷成新时间，历史团队又变"活跃"→ 同一份代码在不同机器上算出不同阶段。
+//   真正的归属判据需要 team.json 里有项目标识（cwd/projectId），属上游 agent-teams 数据契约变更（本任务范围外，已上报）。
+//   本轮只在两个"明确"信号上排除（明确归档名、明确超时），其余一律按活跃计。
 const ACTIVE_TEAM_MAX_AGE_MS = 72 * 60 * 60 * 1000
 const ARCHIVED_TEAM_RE = /archive|^old|^_old|history/i
 /** 计算当前阶段（纯读文件，无副作用） */
