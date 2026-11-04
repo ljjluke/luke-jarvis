@@ -1,4 +1,4 @@
-# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.10.0`
+# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.10.1`
 
 > **别再一句一句地"问 AI"了——把需求丢给一家替你干活的数字公司。**
 > 你说一句（哪怕模糊的）需求 → 它自动组建一支由**真实大佬思维驱动**的多角色 AI 团队，像真实公司一样澄清、拆解、分工、验证、返工——最后交给你**能逐条验收的成果**。
@@ -219,11 +219,23 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ---
 
+## 📚 文档导航（先看这三份）
+
+| 文档 | 用途 |
+|---|---|
+| [docs/STRUCTURE.md](docs/STRUCTURE.md) | **结构**：目录树、分层职责、单一事实源、安装模型、迁移台账 |
+| [docs/CHAINS.md](docs/CHAINS.md) | **链路**：安装/挂载/预设/技能/工具/闸/状态/UI/测试/发布 11 条链路的唯一事实源与验证命令 |
+| [docs/CORE.md](docs/CORE.md) | **内核**：任务单/派单/汇报/阶段/裁决（`jarvis_ticket`） |
+
+其余文档见 [docs/README.md](docs/README.md)（索引：入门/运维/设计/发布/归档）。
+
+---
+
 ## 🧪 质量保证
 
 - 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:296 -->`
 - verify_host_pipeline **48 用例 0 VIOLATION**
-- selfcheck **11 项发布前自检**
+- selfcheck **15 项发布前自检**（含 core 分层、状态根隔离、归档隔离）
 - 部署双形态验证（仓库 + 实体部署）全链路跑通
 
 ---

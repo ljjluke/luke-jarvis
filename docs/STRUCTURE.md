@@ -48,14 +48,16 @@ luke-jarvis/
 │   ├── jarvis.md             # 唯一入口技能
 │   └── ponder/               # 十阶段（stages/ engine/ scripts/ resources/）
 ├── src/host/
-│   ├── plugin.js             # 6170 行：30 工具 + 闸 + 命令 + 路由 + systemPrompt
-│   ├── core/                 # ★ 领域内核（移植自 dsh-superagent-prototype）：model/ports/reasons/stage/tickets/engine/memory
-│   ├── adapters/             # ★ 端口适配：json-tickets（.jarvis/tickets 持久化）
+│   ├── plugin.js             # 5764 行：30 工具 + 闸 + 命令 + 路由 + systemPrompt
+│   ├── core/                 # 领域内核（移植自 dsh-superagent-prototype）：model/ports/reasons/stage/tickets/engine/memory
+│   ├── adapters/             # 端口适配：json-tickets（.jarvis/tickets 持久化）
+│   ├── distill/              # 蒸馏内核：卡校验/深度/引导/领域判定/内容指纹
+│   ├── protocol/             # 协议文本：固定注入的工作方式与企业文化
 │   └── vendor/               # superagent background.ts（P3 执行器预留，尚未接线）
 ├── office/                   # PixOffice 静态页（24MB，含 characters/assets）
 ├── test/                     # plugin 296 用例 + core 14 用例 + e2e + bagua
 ├── scripts/                  # selfcheck / build-preset-patches / 一致性 / 预演
-├── docs/                     # 架构、方案、安装、发布（含 archive/）
+├── docs/                     # 索引 README.md + 架构/结构/链路/安装/发布（含 archive/）
 ├── CHANGELOG.md              # 版本记录（0.9.2 及以前）
 ├── README.md
 └── （无状态目录：.jarvis/.agent-teams/历史归档均在仓库外）

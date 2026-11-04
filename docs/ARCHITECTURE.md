@@ -2,7 +2,7 @@
 
 > 本文档描述 luke-jarvis 数字员工公司**实际执行**的流程。每一层都从 `src/host/plugin.js`、`skills/jarvis.md`、`preset/agent.cordis.yml` 核实过，不是设计稿。
 > 验证基线（2026-09-03，v0.2.3）：单测 **110/110**、verify_host_pipeline **43 用例 0 VIOLATION**、selfcheck **11/11**、e2e 全链路。
-> 当前基线（2026-11-03，v0.10.0）：30 工具、单测 296 + core 14 = **310**、selfcheck **13 项**（新增完全插件包装 + 状态根隔离检查）；结构和安装见 [STRUCTURE.md](STRUCTURE.md)。
+> 当前基线（2026-11-04，v0.10.1）：30 工具、单测 296 + core 14 = **310**、selfcheck **15 项**（含 core 分层/状态根隔离/归档隔离）；结构见 [STRUCTURE.md](STRUCTURE.md)，链路见 [CHAINS.md](CHAINS.md)，内核见 [CORE.md](CORE.md)。
 
 ## 一、架构总览
 

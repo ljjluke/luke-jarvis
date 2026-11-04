@@ -2,6 +2,22 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.10.1] - 2026-11-04
+
+### 结构整理：模块化 + 全链路文档
+
+**问题**：`plugin.js` 6,170 行把工具/闸/阶段/路由/协议全塞在一起；文档散落无索引；链路细节只存在于负责人脑内。
+
+- **拆出 `src/host/distill/`**：`SECTIONS`/`EVIDENCE_SECTIONS`/`COLLAB_FOUR` + `checkCollabHealth`/`validateCardShape`/`assessCardDepth`/`distillGuide`/`identifyIndustry`/`checkContentFingerprint`（纯逻辑，`createRequire` 自带）。
+- **拆出 `src/host/protocol/`**：`JARVIS_SYSTEM_PROTOCOL`/`JARVIS_CULTURE`（固定注入文本）。
+- `plugin.js` 通过 import + re-export 保持导入面不变（`test/plugin.test.js` 的具名 import 不受影响）；6,170 → **5,764 行**。
+- **新增 [docs/CHAINS.md](docs/CHAINS.md)**：11 条链路的唯一事实源/落点/验证命令（安装/挂载/预设/技能/工具/闸/状态/UI/测试/发布 + 债务清单）。
+- **新增 [docs/README.md](docs/README.md)**：文档索引（入门/运维/设计/发布/归档）。
+- selfcheck 第 15 项扩展为「领域内核与模块化」：core/index/adapters/distill/protocol 齐全。
+- 测试：296 + 14 = **310 全绿**；selfcheck 15 项。
+
+**仍未做**：`tools/`、`gates/`、`state/`、`ui/` 从 `plugin.js` 拆出（P2 待续）；`scripts/` 平铺未分组；`vendor/` 未接线（P3）。
+
 ## [0.10.0] - 2026-11-04
 
 ### 领域内核：把 dsh-superagent-prototype 的核心架构搬进 luke-jarvis
