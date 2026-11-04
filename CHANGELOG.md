@@ -2,6 +2,47 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.10.2] - 2026-11-04
+
+### 结构整理（续）：分层收敛 / plugin.js 从 5,764 行降到 647 行
+
+**问题**（0.10.1 遗留）：`plugin.js` 仍有 5,764 行——30 个工具、阶段机、流程闸、六审计、状态落盘、relay 协议全在一个文件里；改一段要读五千行，判定口径还各写一份。
+
+**代码：按依赖方向单向分层（每步一个提交、每步 310 全绿）**
+
+| 新模块 | 内容 | 依赖 |
+|---|---|---|
+| `src/host/runtime.js` | 宿主 ctx / 最近 exec / 工作区解析 / fs 服务探测 / fs 助手 / jarvis 会话登记 | 零 |
+| `src/host/gates/ownership.js` | 归属判定 `resolveOwnedTeams`、状态根守卫、active-team 标记读写、协调/终态常量 | 零（node:fs） |
+| `src/host/state/` | `board.js`（公屏 + 版本乐观并发）、`company.js`（3D 公司状态 + fs 兜底原子写） | runtime + ownership |
+| `src/host/pixoffice/` | relay 帧/事件枚举/命令白名单/SSE（纯函数，无 IO） | office-bridge |
+| `src/host/gates/store.js` | `.jarvis/gates.json` 读写（人工 note 幂等归档）、记忆保鲜、工作区画像缓存 | ownership |
+| `src/host/gates/stage.js` | 阶段机 `computeStage`/`renderStage`/`jarvisStageGate` + `captainExecutionGuard` | store + ownership |
+| `src/host/gates/flow.js` | 流程闸 `jarvisFlowGuard`（需求/角色卡/闸门/链条/ponder） | store + audit + stage |
+| `src/host/gates/audit.js` | 六个机械审计（开工须知/人才层/自领/卡死/ponder/覆盖矩阵） | runtime + ownership |
+| `src/host/tools/` | 30 工具按域拆 6 组（intake/memory/distill/review/org/deliver）+ `index.js` 汇总 | 上述各层 |
+
+- `plugin.js` **5,764 → 647 行**：只剩 `apply`（挂载/4 路由/4 guard/systemPrompt/命令）+ `inject` + `/jarvis` 命令分词。
+- 公开导入面**一个没改**（`test/plugin.test.js` 的 100+ 具名 import 全兼容，插件仍从 `plugin.js` re-export）。
+- 依赖方向禁止反向：`plugin → tools → gates/state/pixoffice → runtime/core`；无环（`_flowState`/`_readGates` 下沉到 `store` 才断开）。
+- 共享可变状态收敛：`moduleCtx`/`latestExec`/`_resolvedWorkspace`/`_jarvisSessions` 只在 `runtime.js` 有一份，其余模块走 `setRuntimeContext`/`markJarvisSession` 等访问器。
+
+**工具与自检**
+
+- selfcheck 第 15 项升级：分层文件清单（runtime/tools/gates/state/pixoffice/core/adapters/distill/protocol）+ **`TOOLS.length === 30` 且 handler 齐全**硬对账。
+- 说明：工具名现在在 `src/host/tools/*.js`，selfcheck 的铁律/distill 检查改为递归 `src/host`（否则「拆完就红」）。
+
+**验证（实跑）**
+
+```
+node --test test/plugin.test.js test/core.test.js → 310 / 310
+bash scripts/selfcheck.sh                        → 15 / 15（含 TOOLS-COUNT-OK）
+node test/e2e-flow.test.mjs                      → 30 工具，链路闭环
+node scripts/build-preset-patches.mjs --check    → OK
+```
+
+**仍未做**（诚实债务，非遗漏）：`scripts/` 仍平铺；`vendor/superagent-background.ts` 未接线（P3 执行器）；`plugin.js` 里 apply 的 4 条路由仍在（约 300 行，可再拆 `ui/`，但收益低于风险，留作下一步）。
+
 ## [0.10.1] - 2026-11-04
 
 ### 结构整理：模块化 + 全链路文档

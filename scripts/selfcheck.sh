@@ -21,11 +21,11 @@ grep -q "DOMAIN_PROCESS" src/host/plugin.js && { echo "   FAIL: jarvis_process �
 grep -qE "黄峥|巴菲特" src/host/plugin.js && { echo "   FAIL: identifyIndustry 仍有领域关键词"; exit 1; } || echo "   identifyIndustry 无行业关键词: OK"
 
 echo "== 5) 铁律落位（防 bug 核心） =="
-R=$(grep -l "现场蒸馏\|项目沉淀\|真实情况优先" src/host/plugin.js skills/jarvis.md preset/agent.cordis.yml README.md 2>/dev/null | wc -l)
+R=$(grep -l "现场蒸馏\|项目沉淀\|真实情况优先" src/host/*.js src/host/tools/*.js skills/jarvis.md preset/agent.cordis.yml README.md 2>/dev/null | wc -l)
 [ "$R" -ge 3 ] && echo "   铁律已内嵌(≥3 处文件): $R" || { echo "   铁律缺失: $R"; exit 1; }
 
 echo "== 6) distill 校验四检查（source/六段式/协同架构/防冒名） =="
-grep -q "validateCardShape" src/host/plugin.js && grep -q "协同架构" src/host/plugin.js && grep -q "source" src/host/plugin.js && grep -q "防冒名" src/host/plugin.js && echo "   DISTILL-CHECKS-OK" || { echo "   DISTILL-CHECKS-MISSING"; exit 1; }
+grep -rq "validateCardShape" src/host && grep -rq "协同架构" src/host && grep -rq "防冒名" src/host && echo "   DISTILL-CHECKS-OK" || { echo "   DISTILL-CHECKS-MISSING"; exit 1; }
 
 echo "== 7) 单元测试（node --test） =="
 node --test test/plugin.test.js >/dev/null 2>&1 && echo "   TESTS-OK" || { echo "   TESTS-FAIL"; exit 1; }
@@ -34,7 +34,7 @@ echo "== 8) 端到端流程（入口→流程→蒸馏→保真度→协同→�
 node test/e2e-flow.test.mjs >/dev/null 2>&1 && echo "   E2E-OK" || { echo "   E2E-FAIL"; exit 1; }
 
 echo "== 9) 新铁律落位（需求本质/问题上行/能力补足/项目记忆库/深度闸/蒸馏引导/版本交付/绩效换人） =="
-grep -q "jarvis_essence" src/host/plugin.js && grep -q "jarvis_escalate" src/host/plugin.js && grep -q "jarvis_capability" src/host/plugin.js && grep -q "jarvis_store" src/host/plugin.js && grep -q "assessCardDepth" src/host/plugin.js && grep -q "jarvis_distill_guide" src/host/plugin.js && grep -q "jarvis_release" src/host/plugin.js && grep -q "jarvis_perf" src/host/plugin.js && echo "   IRON-RULES-OK (essence/escalate/capability/store/deep/guide/release/perf 八闸在位)" || { echo "   IRON-RULES-MISSING"; exit 1; }
+grep -rq "jarvis_essence" src/host && grep -rq "jarvis_escalate" src/host && grep -rq "jarvis_capability" src/host && grep -rq "jarvis_store" src/host && grep -rq "assessCardDepth" src/host && grep -rq "jarvis_distill_guide" src/host && grep -rq "jarvis_release" src/host && grep -rq "jarvis_perf" src/host && echo "   IRON-RULES-OK (essence/escalate/capability/store/deep/guide/release/perf 八闸在位)" || { echo "   IRON-RULES-MISSING"; exit 1; }
 
 echo "== 9.5) 安装配置正确性（persona prefix——dsh-persona schema 要求 prefix 必填，用户安装后不该手动修） =="
 grep -q "    prefix: >-" preset/agent.cordis.yml && echo "   PRESET-PREFIX-OK（preset/agent.cordis.yml persona 用 prefix 字段）" || { echo "   PRESET-PREFIX-FAIL（persona 须用 prefix 不是 text——dsh-persona schema: prefix required）"; exit 1; }
@@ -85,11 +85,17 @@ git check-ignore -q .jarvis-archive/ && echo "   ARCHIVE-GUARD-OK" || { echo "  
 if git ls-files --error-unmatch .jarvis-archive >/dev/null 2>&1; then echo "   ARCHIVE-STILL-TRACKED（跑 git rm -r --cached .jarvis-archive）"; exit 1; fi
 echo "   ARCHIVE-UNTRACKED-OK"
 
-echo "== 15) 领域内核与模块化（runtime / core / adapters / distill / protocol） =="
-for f in src/host/runtime.js src/host/gates/ownership.js src/host/state/board.js src/host/state/company.js src/host/pixoffice/index.js src/host/gates/audit.js src/host/gates/store.js src/host/gates/stage.js src/host/gates/flow.js src/host/core/model.js src/host/core/ports.js src/host/core/reasons.js src/host/core/stage.js src/host/core/tickets.js src/host/core/engine.js src/host/core/memory.js src/host/core/index.js src/host/adapters/json-tickets.js src/host/distill/index.js src/host/protocol/index.js; do
+echo "== 15) 分层与模块化（runtime / tools / gates / state / pixoffice / core / adapters / distill / protocol） =="
+for f in src/host/runtime.js src/host/gates/ownership.js src/host/gates/audit.js src/host/gates/store.js src/host/gates/stage.js src/host/gates/flow.js src/host/state/board.js src/host/state/company.js src/host/pixoffice/index.js src/host/tools/index.js src/host/tools/intake.js src/host/tools/memory.js src/host/tools/distill.js src/host/tools/review.js src/host/tools/org.js src/host/tools/deliver.js src/host/core/model.js src/host/core/ports.js src/host/core/reasons.js src/host/core/stage.js src/host/core/tickets.js src/host/core/engine.js src/host/core/memory.js src/host/core/index.js src/host/adapters/json-tickets.js src/host/distill/index.js src/host/protocol/index.js; do
   [ -f "$f" ] || { echo "   MODULE-MISSING: $f"; exit 1; }
 done
 echo "   CORE-LAYOUT-OK"
+node -e "
+import('./src/host/plugin.js').then((m) => {
+  if (!Array.isArray(m.TOOLS) || m.TOOLS.length !== 30) { console.error('TOOLS.length=' + (m.TOOLS && m.TOOLS.length)); process.exit(1) }
+  const bad = m.TOOLS.filter((t) => !t || !t.name || typeof t.handler !== 'function')
+  if (bad.length) { console.error('工具定义不完整: ' + bad.map((b) => b && b.name).join(',')); process.exit(1) }
+})" >/dev/null 2>&1 && echo "   TOOLS-COUNT-OK（30 个工具，handler 齐全）" || { echo "   TOOLS-COUNT-FAIL"; exit 1; }
 node -e "
 import('./src/host/plugin.js').then((m) => {
   const t = m.TOOLS.find((x) => x.name === 'jarvis_ticket')

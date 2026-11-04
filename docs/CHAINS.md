@@ -16,7 +16,12 @@ luke-jarvis/
 ├── preset/*.yml          预设单一事实源 ──脚本──► presets/*.patch.yml ──setup──► profile patch
 ├── skills/{jarvis.md,ponder/}   随包技能 ──setup──► ~/.dsh/skills/
 ├── src/host/
-│   ├── plugin.js         apply(ctx)：注册 30 工具 + /jarvis + 4 guard + 4 路由 + systemPrompt
+│   ├── plugin.js         647 行：apply(ctx) 注册 30 工具 + /jarvis + 4 guard + 4 路由 + systemPrompt
+│   ├── runtime.js        宿主 ctx / exec / 工作区解析 / fs 服务（单例唯一来源）
+│   ├── tools/            30 工具按域：intake/memory/distill/review/org/deliver
+│   ├── gates/            ownership（归属/状态根）/ store（gates.json+记忆）/ stage（阶段机）/ flow（流程闸）/ audit（六审计）
+│   ├── state/            board（公屏）/ company（3D 公司状态）落盘
+│   ├── pixoffice/        relay 帧/命令校验（纯函数）
 │   ├── core/             任务单领域内核（纯逻辑；不碰 DSH/fs）
 │   ├── adapters/         core 端口实现（json-tickets → .jarvis/tickets）
 │   ├── distill/          角色卡校验/深度/引导/领域判定（纯逻辑）
@@ -54,7 +59,7 @@ cordis.patch.yml
   - insert: jarvis-core        (luke-jarvis → package.json main → src/host/plugin.js)
         │
         ▼
-plugin.js  export const inject = ['tools','webServer','agents','systemPrompt']   # :5234
+plugin.js  export const inject = ['tools','webServer','agents','systemPrompt']   # plugin.js:182
            export async function apply(ctx)                                       # 见文件尾部
         │
         ├─ ctx.tools.register(TOOLS)            → 30 个 jarvis_* 工具
@@ -64,7 +69,7 @@ plugin.js  export const inject = ['tools','webServer','agents','systemPrompt']  
 ```
 
 **验证**：`node -e "import('./src/host/plugin.js').then(m=>console.log(m.TOOLS.length))"` → 30；
-`grep -n "inject =" src/host/plugin.js` → line 5234。
+`grep -n "inject =" src/host/plugin.js` → 见 plugin.js:182。
 
 ---
 
@@ -103,7 +108,7 @@ skills/ponder/         → ~/.dsh/skills/ponder/              （十阶段：sta
 模型（systemPrompt 注入的 11 步流水线）
    │  调用 jarvis_* 工具
    ▼
-TOOLS（plugin.js 内 defineTool：parameters/output.schema/render/handler）
+TOOLS（tools/*.js 内 defineTool：parameters/output.schema/render/handler；plugin.js 汇总）
    │  handler(exec) → 解析 cwd/projectDir → 业务逻辑
    ├─ 闸：jarvisStageGate / jarvisFlowGuard / captainExecutionGuard / checkMemoryFresh / checkPonderVerify
    ├─ 领域：jarvis_project/distill/review/think/board/company/coverage/…（29 个）
@@ -120,7 +125,7 @@ TOOLS（plugin.js 内 defineTool：parameters/output.schema/render/handler）
 | 环节 | 实现 | 落点 |
 |---|---|---|
 | 协议注入 | `src/host/protocol/index.js`（每请求注入，不受压缩影响） | systemPrompt section |
-| 阶段机 | `computeStage` / `renderStage`（`plugin.js`）读 `.jarvis/docs` 产物 + `gates.json` | 注入「当前第几步/缺什么/下一步」 |
+| 阶段机 | `computeStage` / `renderStage`（`gates/stage.js`）读 `.jarvis/docs` 产物 + `gates.json` | 注入「当前第几步/缺什么/下一步」 |
 | 阶段闸 | `jarvisStageGate`：`STAGE_GATE` 要求持对应闸；`STAGE_DENY` 拦越阶工具 | 模型越阶即拒 |
 | 链路闸 | `jarvisFlowGuard`：缺产物/缺闸/链路顺序 → 拒 | 派活/收口前 |
 | 队长闸 | `captainExecutionGuard`：captain 不得自己干活（禁 bash/edit/write/subagent） | 顶层会话 |
@@ -142,7 +147,7 @@ TOOLS（plugin.js 内 defineTool：parameters/output.schema/render/handler）
 | `.jarvis/tickets/*.json`、`decisions/*.json` | `jarvis_ticket` → JSON 仓储 | `jarvis_ticket list/get` |
 
 **守卫**：插件仓库（`name` 以 `luke-jarvis` 开头或存在 `src/host/plugin.js`）一律拒写 →
-`STATE_ROOT_CONFLICT`，且不建目录（见 `stateRootConflict`，plugin.js:4767）。
+`STATE_ROOT_CONFLICT`，且不建目录（见 `stateRootConflict`，gates/ownership.js:80）。
 
 ---
 

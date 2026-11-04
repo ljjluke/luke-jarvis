@@ -7,6 +7,10 @@
 import { listNames, readTextSafe, hasTeamJson } from '../runtime.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams } from './ownership.js'
 
+// ── jarvis_flowguard 辅助函数（模块级，TOOLS 数组外）──
+/** F4：在**调用方数组上原地**删除满足 pred 的缺项（`missing = missing.filter(...)` 只是参数重绑定，
+ *  pre 项永远留在 handler 的数组里 → decompose/design/build/execute 恒 BLOCKED）。
+ *  handler 侧也兼容「check 返回新数组」的写法（返回数组则整体替换）。 */
 export function _dropMissing(missing, pred) {
   for (let i = missing.length - 1; i >= 0; i -= 1) if (pred(missing[i])) missing.splice(i, 1)
   return missing
@@ -47,7 +51,7 @@ export async function hasGlob(fsSvc, dir, keyword) {
 }
 // 审计团队任务是否每个都附了开工须知（含 ponder 指引）
 // 统计群聊会议进度：已有几轮发言、还剩几轮（供成员/CEO 看会议进行到哪）
-async function countMeetingProgress(existingText, maxRounds) {
+export async function countMeetingProgress(existingText, maxRounds) {
   try {
     const lines = String(existingText || '').split(/\n/)
     const speakerCount = lines.filter((l) => l.includes('发言]')).length
