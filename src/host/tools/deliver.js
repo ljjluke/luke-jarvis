@@ -4,7 +4,6 @@
  *  不在工具内再实现判定逻辑——闸与状态只认单一事实源。
  */
 import { createRequire } from 'node:module'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
@@ -70,7 +69,7 @@ export const DELIVER_TOOLS = [
       },
       render: (r) => `【交付版本${r.version ? ' · ' + r.version : ''}】${r.status ? '状态：' + r.status + '\n' : ''}${(r.checklist || []).map((c) => '  ☐ ' + c).join('\n')}${r.log ? '\n沟通留痕：' + r.log : ''}\n判定：${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const mode = String(args.mode ?? '').trim()
       const version = String(args.version ?? '').trim()
       const requirement = String(args.requirement ?? '').trim()
@@ -260,7 +259,7 @@ export const DELIVER_TOOLS = [
       },
       render: (r) => `基线清单（${r.slug || ''}）：${r.ok ? '✅' : '❌'} 共 ${r.count} 条\n写入：${(r.written || []).join('\n')}\n样例：${(r.sample || []).slice(0, 6).join(' | ')}\n${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
       const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
@@ -468,7 +467,7 @@ export const DELIVER_TOOLS = [
       },
       render: (r) => `覆盖核查（${r.label || ''}）：${r.ok ? '✅ 可过闸' : '❌ 打回补链'} · 覆盖率 ${Math.round((r.coverage || 0) * 100)}%（${r.sourceCount ?? 0} 条源）\n未覆盖：${(r.uncovered ?? []).slice(0, 5).join('、') || '无'}\n未收口：${(r.openItems ?? []).slice(0, 5).join('、') || '无'}\n悬空：${(r.danglingRefs ?? []).slice(0, 3).join('、') || '无'}\n${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const label = String(args?.label ?? '覆盖核查')
       let source = []
       try { source = JSON.parse(String(args?.source ?? '[]')) } catch { source = [] }
@@ -645,7 +644,7 @@ export const DELIVER_TOOLS = [
       render: (r) => `【主流程守卫 · ${r.step ?? ''}】${r.ok ? '✅ 前置齐备可进入' : '⛔ BLOCKED 缺前置产物：' + (r.missing || []).join('；')}
 下一步：${r.next ?? ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const path = _require('node:path')
       const step = String(args.step ?? '').trim()
       const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(getRuntimeContext()) || '.')
@@ -915,7 +914,7 @@ export const DELIVER_TOOLS = [
       },
       render: (r) => `${r.ok ? '✅' : '⛔'} ${r.verdict}${r.text ? `\n${r.text}` : ''}${r.tickets && r.tickets.length ? `\n${r.tickets.map((t) => `${t.id} [${t.stage}] ${t.title}${t.ended ? '（已结束:' + t.ended.outcome + '）' : ''}`).join('\n')}` : ''}`,
     },
-    handler: async (args) => {
+    execute: async (args) => {
       const path = _require('node:path')
       const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || '.'
       // 状态根守卫：插件仓库不是 jarvis 状态根，不写任务单（防记忆文件污染插件项目）

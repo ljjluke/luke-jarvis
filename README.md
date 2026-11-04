@@ -1,4 +1,4 @@
-# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.10.2`
+# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.10.3`
 
 > **别再一句一句地"问 AI"了——把需求丢给一家替你干活的数字公司。**
 > 你说一句（哪怕模糊的）需求 → 它自动组建一支由**真实大佬思维驱动**的多角色 AI 团队，像真实公司一样澄清、拆解、分工、验证、返工——最后交给你**能逐条验收的成果**。
@@ -126,29 +126,30 @@
 dsh plugin --profile web add luke-jarvis            # 发布后
 dsh plugin --profile web add file:/path/to/luke-jarvis   # 本地开发
 
-# 2) 一条命令收尾：技能落位 + 预设注册 + bundle 登记（DSH 0.2+ 的三个硬约束）
+# 2) 一条命令收尾：技能落位 + bundle 登记（预设由 bundle patch 自带，无需落位）
 npx luke-jarvis setup --profile web
 
 # 3) 重启 dsh web，然后自检
 npx luke-jarvis doctor --profile web
 ```
 
-`setup` 做的三件事（都是 DSH 0.2+ 的硬约束，漏一步就是「装了但不生效」）：
+`setup` 只做两件事（剩下的由 bundle patch 与宿主自己完成）：
 
 | 步骤 | 为什么必须 | 产物 |
 |---|---|---|
 | 技能落位 | 技能发现根只有 `~/.dsh/skills`、`~/.agents/skills`、项目 `.dsh/skills`，**不扫描 node_modules** | `~/.dsh/skills/jarvis/SKILL.md`、`~/.dsh/skills/ponder/`（十阶段） |
-| 预设注册 | 0.2+ 不再自动发现 `~/.dsh/.agent-presets`，必须在 profile `cordis.patch.yml` 里 `- insert:` + `dsh-agent-preset` 行 | `presets/*.patch.yml` 生成好的注册行，写进 profile patch |
 | bundle 登记 | `dsh plugin add` 只写 dependencies，不写 `dsh.profile.bundles`——不登记就只装不挂 | profile `package.json` 的 `dsh.profile.bundles` += `luke-jarvis` |
+
+预设**不再复制到 `~/.dsh/.agent-presets/`**（DSH 0.2 前的旧机制，已废弃、不再被读取）：本包的
+`cordis.patch.yml` 直接用 `@deepseek-ai/dsh-agent-preset` 行声明 `jarvis-org` / `jarvis-captain`，
+所以「装上 bundle」= 预设自动出现在 agent 预设列表，不需要额外注册步骤。
 
 > 手工安装（等价于 `setup` 的分步执行，便于排查）：
 > ```bash
 > mkdir -p ~/.dsh/skills/jarvis && cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
 > rm -rf ~/.dsh/skills/ponder && cp -r skills/ponder ~/.dsh/skills/ponder
-> cp -r preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/jarvis-org/
-> cp -r preset/jarvis-captain.cordis.yml ~/.dsh/.agent-presets/jarvis-captain/
-> # 再把 presets/jarvis-org.patch.yml、presets/jarvis-captain.patch.yml 的 - insert: 条目
-> # 追加到 ~/.dsh/profiles/<name>/cordis.patch.yml
+> # 预设不用拷：cordis.patch.yml 已声明（jarvis-org / jarvis-captain）
+> # 若 profile 没自动登记 bundle，补一行：dsh.profile.bundles += "luke-jarvis"
 > ```
 >
 > 预设说明：`jarvis-org` = 完整公司预设（Jarvis 人设 + jarvis_* 工具 + agent-teams）；
@@ -188,8 +189,8 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 | 组件 | 位置 | 安装到（`luke-jarvis setup` 自动完成） |
 |---|---|---|
-| Agent 预设（完整） | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/` + profile patch 注册行（`presets/jarvis-org.patch.yml`） |
-| Agent 预设（严格·顶层只派发） | `preset/jarvis-captain.cordis.yml` | `~/.dsh/.agent-presets/jarvis-captain/` + profile patch 注册行 |
+| Agent 预设（完整） | `preset/agent.cordis.yml` + `preset/preset.yml` | `cordis.patch.yml` 里的 `preset-jarvis-org` 行（随 bundle 自动注册，无需落位） |
+| Agent 预设（严格·顶层只派发） | `preset/jarvis-captain.cordis.yml` | `cordis.patch.yml` 里的 `preset-jarvis-captain` 行（同上） |
 | 技能（唯一入口） | `skills/jarvis.md` | `~/.dsh/skills/jarvis/SKILL.md` |
 | ponder 满血（随包自带） | `skills/ponder/`（自包含单目录） | `~/.dsh/skills/ponder/`（整个目录） |
 | 核心插件 | `src/host/plugin.js`（bundle patch `cordis.patch.yml`） | profile `dsh.profile.bundles` += `luke-jarvis` |

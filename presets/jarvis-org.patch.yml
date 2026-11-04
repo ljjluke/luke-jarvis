@@ -2,12 +2,12 @@
 # Source: preset/agent.cordis.yml + preset/preset.yml
 # Regenerate: node scripts/build-preset-patches.mjs
 #
-# 用途：把随包分发的 agent 预设声明成 DSH 可注册的行（DSH 0.2+ 不再自动发现
-# ~/.dsh/.agent-presets，必须在 profile 的 cordis.patch.yml 里显式注册）。
+# 用途：把随包分发的 agent 预设声明成 DSH 可注册的行。DSH 0.2 起预设必须由
+#       bundle patch 用 @deepseek-ai/dsh-agent-preset 行声明（~/.dsh/.agent-presets 已废弃）。
+# 用法：①随包生效——本文件内容已同步进 cordis.patch.yml 的 presets:auto 区，装插件即注册；
+#       ②手动兜底——把下面的 - insert: 条目追加到目标 profile 的 cordis.patch.yml。
 # 去重：luke-jarvis / @nanmicoder/dsh-agent-teams 由根 patch（cordis.patch.yml）挂载，
-#       本文件不再重复挂载（否则同一插件挂两次）。需要「预设内自挂」请用手工预设文件。
-# 用法：①npx luke-jarvis setup --profile <name>（自动写入 profile patch）；
-#       ②手工把下面的 - insert: 条目追加到 profile 的 cordis.patch.yml。
+#       本文件不再重复挂载（否则同一插件挂两次）。
 - insert:
     - id: preset-jarvis-org
       name: '@deepseek-ai/dsh-agent-preset'

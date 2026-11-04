@@ -172,9 +172,9 @@ let officeSeq = 0
 
 
 
-export default {
-  inject,
-  apply(ctx) {
+export const name = 'luke-jarvis'
+
+export function apply(ctx) {
     setRuntimeContext(ctx)
     resolveWorkspace(ctx) // 预热：apply 时即解析用户工作区（首个工具调用即用对路径）
 
@@ -644,5 +644,4 @@ export default {
         }, 1500)
       } catch { /* 定时器不可用时静默（黑板 RPC 为可选能力） */ }
     }
-  },
 }

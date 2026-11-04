@@ -7,7 +7,7 @@ echo "== 1) 核心插件语法 =="
 node --check src/host/plugin.js && echo "   HOST-OK"
 
 echo "== 2) 插件可被 ESM 加载并导出 apply =="
-node -e "import('./src/host/plugin.js').then(m=>{if(!m.default||typeof m.default.apply!=='function'){console.error('BAD: host 未导出 apply');process.exit(1)};console.log('   HOST apply=OK')})"
+node -e "import('./src/host/plugin.js').then(m=>{if(typeof m.apply!=='function'){console.error('BAD: host 未导出命名 apply');process.exit(1)};if(!Array.isArray(m.inject)){console.error('BAD: 缺 inject 声明');process.exit(1)};if(m.default){console.error('BAD: 仍混用 default 导出（DSH 规范要求单一命名形式）');process.exit(1)};console.log('   HOST apply=OK（命名导出 + inject 声明，无 default 混用）')})"
 
 echo "== 3) 配置文件 JSON 合法 =="
 for f in docs/community-entry.example.json package.json; do
@@ -46,7 +46,7 @@ echo "== 10) 蒸馏深度硬闸行为实测（浅层卡须被拦） =="
 node -e "
 import('./src/host/plugin.js').then(async (m) => {
   const VOID = ['身份定位：高管。','思维模型：很强（跨域复现：有；生成力：有）。','核心方法论：方法论。','代表作品：作品——只借鉴框架，不冒充署名。','决策红线：底线。','语言风格：简洁。','我的协同：本角色位置=上游；依赖=产品给契约；给测试喂接口；升级=CEO。','证据链：著作+对话+表达+他者+决策+时间线。','保真度：一手0.6；矛盾保留。','诚实边界：信息截止；推测已标。','source：https://example.com/fake','防冒名声明：只借鉴框架，不冒充署名。'].join('\n')
-  const r = await m.TOOLS.find(t=>t.name==='jarvis_distill').handler({role:'x',card:VOID,isCeo:false})
+  const r = await m.TOOLS.find(t=>t.name==='jarvis_distill').execute({role:'x',card:VOID,isCeo:false})
   if (r.ok || (r.depthScore ?? 100) >= 60) { console.error('FAIL: 空洞卡未拦'); process.exit(1) }
   console.log('   空洞卡被深度闸拦下(深度 '+r.depthScore+'/100): OK')
 })" >/dev/null 2>&1 && echo "   DEPTH-GATE-OK" || { echo "   DEPTH-GATE-FAIL"; exit 1; }
@@ -54,7 +54,7 @@ import('./src/host/plugin.js').then(async (m) => {
 echo "== 11) 蒸馏引导实测（distill_guide 输出品味原则/来源分级/黑名单/验证锚点） =="
 node -e "
 import('./src/host/plugin.js').then(async (m) => {
-  const r = await m.TOOLS.find(t=>t.name==='jarvis_distill_guide').handler({role:'CEO',material:'x'})
+  const r = await m.TOOLS.find(t=>t.name==='jarvis_distill_guide').execute({role:'CEO',material:'x'})
   if (!r.tastePrinciples || r.tastePrinciples.length < 5 || !r.sourceBlacklist.some(x=>x.includes('知乎')) || !r.validationAnchors.includes('已知答案测试')) { console.error('FAIL: distill_guide 缺关键要素'); process.exit(1) }
   console.log('   distill_guide 完整(品味原则'+r.tastePrinciples.length+'条/黑名单/来源分级/验证锚点): OK')
 })" >/dev/null 2>&1 && echo "   GUIDE-OK" || { echo "   GUIDE-FAIL"; exit 1; }
@@ -93,15 +93,16 @@ echo "   CORE-LAYOUT-OK"
 node -e "
 import('./src/host/plugin.js').then((m) => {
   if (!Array.isArray(m.TOOLS) || m.TOOLS.length !== 30) { console.error('TOOLS.length=' + (m.TOOLS && m.TOOLS.length)); process.exit(1) }
-  const bad = m.TOOLS.filter((t) => !t || !t.name || typeof t.handler !== 'function')
+  const bad = m.TOOLS.filter((t) => !t || !t.name || typeof t.execute !== 'function' || typeof (t.output && t.output.render) !== 'function')
   if (bad.length) { console.error('工具定义不完整: ' + bad.map((b) => b && b.name).join(',')); process.exit(1) }
-})" >/dev/null 2>&1 && echo "   TOOLS-COUNT-OK（30 个工具，handler 齐全）" || { echo "   TOOLS-COUNT-FAIL"; exit 1; }
+})" >/dev/null 2>&1 && echo "   TOOLS-COUNT-OK（30 个工具，execute 齐全）" || { echo "   TOOLS-COUNT-FAIL"; exit 1; }
 node -e "
 import('./src/host/plugin.js').then((m) => {
   const t = m.TOOLS.find((x) => x.name === 'jarvis_ticket')
   if (!t) { console.error('缺 jarvis_ticket'); process.exit(1) }
 })" >/dev/null 2>&1 && echo "   TICKET-TOOL-OK" || { echo "   TICKET-TOOL-MISSING"; exit 1; }
-node --test test/core.test.js >/dev/null 2>&1 && echo "   CORE-TESTS-OK" || { echo "   CORE-TESTS-FAIL"; exit 1; }
+node --test test/core.test.js >/dev/null 2>&1 && node scripts/verify-tool-contract.mjs
+echo "   CORE-TESTS-OK" || { echo "   CORE-TESTS-FAIL"; exit 1; }
 
 echo ""
 echo "✅ 全部通过：luke-jarvis 可发布/可安装。"

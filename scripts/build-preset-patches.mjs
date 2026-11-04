@@ -8,7 +8,8 @@
  * 可生成、可校验的文件，安装时就不需要用户手工拼 YAML。
  *
  * 单一事实源 = preset/agent.cordis.yml / preset/jarvis-captain.cordis.yml。
- * 生成物 = presets/jarvis-org.patch.yml / presets/jarvis-captain.patch.yml。
+ * 生成物 = presets/jarvis-org.patch.yml / presets/jarvis-captain.patch.yml
+ *          + cordis.patch.yml 的 `presets:auto` 区（bundle 自带预设声明，装插件=装预设）。
  * 用法：node scripts/build-preset-patches.mjs [--check]
  */
 import fs from 'node:fs'
@@ -130,12 +131,12 @@ function build(spec) {
     `# Source: ${spec.src}${spec.meta ? ` + ${spec.meta}` : ''}`,
     '# Regenerate: node scripts/build-preset-patches.mjs',
     '#',
-    '# 用途：把随包分发的 agent 预设声明成 DSH 可注册的行（DSH 0.2+ 不再自动发现',
-    '# ~/.dsh/.agent-presets，必须在 profile 的 cordis.patch.yml 里显式注册）。',
+    '# 用途：把随包分发的 agent 预设声明成 DSH 可注册的行。DSH 0.2 起预设必须由',
+    '#       bundle patch 用 @deepseek-ai/dsh-agent-preset 行声明（~/.dsh/.agent-presets 已废弃）。',
+    '# 用法：①随包生效——本文件内容已同步进 cordis.patch.yml 的 presets:auto 区，装插件即注册；',
+    '#       ②手动兜底——把下面的 - insert: 条目追加到目标 profile 的 cordis.patch.yml。',
     '# 去重：luke-jarvis / @nanmicoder/dsh-agent-teams 由根 patch（cordis.patch.yml）挂载，',
-    '#       本文件不再重复挂载（否则同一插件挂两次）。需要「预设内自挂」请用手工预设文件。',
-    '# 用法：①npx luke-jarvis setup --profile <name>（自动写入 profile patch）；',
-    '#       ②手工把下面的 - insert: 条目追加到 profile 的 cordis.patch.yml。',
+    '#       本文件不再重复挂载（否则同一插件挂两次）。',
     '- insert:',
     `    - id: preset-${spec.id}`,
     "      name: '@deepseek-ai/dsh-agent-preset'",
@@ -151,11 +152,45 @@ function build(spec) {
   ].join('\n')
 }
 
+/** 从 presets/*.patch.yml 内容里取出纯 insert 块（去掉 AUTO-GENERATED 头注释）。 */
+function insertSection(content) {
+  const lines = content.split('\n')
+  const start = lines.findIndex((l) => l.startsWith('- insert:'))
+  return start === -1 ? '' : lines.slice(start).join('\n').trimEnd() + '\n'
+}
+
+const AUTO_START = '# >>> presets:auto（由 scripts/build-preset-patches.mjs 生成，勿手改）'
+const AUTO_END = '# <<< presets:auto'
+
+/** 把两组 insert 块写进 bundle patch（cordis.patch.yml）的 auto 区，保证一条
+ *  `dsh plugin add luke-jarvis` 就同时挂上插件与预设（DSH 规范：预设由 bundle patch 声明）。 */
+function syncBundlePatch(sections) {
+  const file = path.join(ROOT, 'cordis.patch.yml')
+  const body = [AUTO_START, ...sections.map((s) => s.trimEnd()), AUTO_END].join('\n') + '\n'
+  const current = fs.readFileSync(file, 'utf8')
+  const from = current.indexOf(AUTO_START)
+  const to = current.indexOf(AUTO_END)
+  if (from === -1 || to === -1 || to < from) throw new Error('cordis.patch.yml 缺少 presets:auto 标记区')
+  const next = current.slice(0, from) + body + current.slice(to + AUTO_END.length + 1)
+  return { file, current, next }
+}
+
 let failed = false
+const built = []
 for (const spec of SPECS) {
   const outPath = path.join(ROOT, spec.out)
   const content = build(spec)
-  if (CHECK) {
+  built.push({ spec, outPath, content })
+  if (!CHECK) {
+    fs.mkdirSync(path.dirname(outPath), { recursive: true })
+    fs.writeFileSync(outPath, content)
+    console.log(`written: ${spec.out} (${content.split('\n').length - 1} lines)`)
+  }
+}
+
+const { file: bundleFile, current: bundleCur, next: bundleNext } = syncBundlePatch(built.map((b) => insertSection(b.content)))
+if (CHECK) {
+  for (const { spec, outPath, content } of built) {
     let current = ''
     try { current = fs.readFileSync(outPath, 'utf8') } catch { /* missing counts as drift */ }
     if (current !== content) {
@@ -164,10 +199,15 @@ for (const spec of SPECS) {
     } else {
       console.log(`OK: ${spec.out}`)
     }
-  } else {
-    fs.mkdirSync(path.dirname(outPath), { recursive: true })
-    fs.writeFileSync(outPath, content)
-    console.log(`written: ${spec.out} (${content.split('\n').length - 1} lines)`)
   }
+  if (bundleCur !== bundleNext) {
+    console.error('DRIFT: cordis.patch.yml 的 presets:auto 区与 presets/*.patch.yml 不一致——运行 node scripts/build-preset-patches.mjs 重新生成')
+    failed = true
+  } else {
+    console.log('OK: cordis.patch.yml（presets:auto 区）')
+  }
+} else {
+  fs.writeFileSync(bundleFile, bundleNext)
+  console.log('written: cordis.patch.yml（presets:auto 区）')
 }
 process.exit(failed ? 1 : 0)

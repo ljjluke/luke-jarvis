@@ -2,6 +2,65 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.10.3] - 2026-11-04
+
+### 完全对齐 DSH 插件规范（工具契约 / 导出形式 / display 元数据 / 预设声明）
+
+本轮修的是**会让插件在真实宿主里跑不起来**的合规问题——此前 310 个测试全绿，但测试直接调
+`tool.handler(...)`，绕过了宿主的工具注册管线。
+
+**1) 工具契约（致命）**
+
+宿主 `@deepseek-ai/dsh-tools` 0.2.x 的 `ToolDefinition` 契约是 `execute(args, exec)` +
+`output.render(args, value) → ContentBlock[]`；本插件用的是旧写法 `handler(...)` + `render` 返回字符串。
+真实注册时 `execute` 不存在 → 工具一调就崩；`render` 返回值也不符合内容块协议。
+
+- 30 个工具全部改为 `execute`；`output.render` 统一经 `src/host/tools/index.js` 的适配层包装成
+  `[{ type: 'text', text }]`（契约只有一处实现，工具内保留精简写法）。
+- 注册前强校验：`assertObjectJsonSchema(parameters)` + `assertSupportedJsonSchema(output.schema)`，
+  坏定义在 `apply` 期直接抛错，而不是等模型调用才炸。
+- 新增 `scripts/verify-tool-contract.mjs`：把 30 个工具注册进**真实 ToolRuntime**，校验
+  `schemas()` 数量/参数根、真实 `execute` 一次、`render` 返回 ContentBlock[]、disposer 注销干净 —— 已接入 selfcheck 第 15 项。
+
+**2) 插件导出形式**
+
+- 去掉 `export default { inject, apply }` 的混用形式，改为官方命名导出：
+  `export const inject` / `export function apply(ctx)` / `export const name`。
+  （Loader 的 `unwrapExports` 会优先取 default，混用会让命名导出失效。）
+- selfcheck 第 2 项升级为：必须导出命名 `apply` + `inject`，且**不得**再出现 default。
+
+**3) Bundle display 元数据（Plugin Manager 可见性）**
+
+- 新增 `locale/en.json`、`locale/zh.json`（`meta.title` / `meta.description`）与 `icon.svg`；
+  `package.json` 增加 `./locale/*.json`、`./icon` 导出，`files` 纳入 `locale` 与 `icon.svg`。
+  此前安装后在插件列表里只有裸包名、无图标描述。
+
+**4) 预设声明（安装链路的规范路径）**
+
+- 预设不再复制到 `~/.dsh/.agent-presets/`（DSH 0.2 前的目录发现机制，现已不再读取）：
+  `presets/*.patch.yml` 由 `scripts/build-preset-patches.mjs` 同步进本包 `cordis.patch.yml`
+  的 `presets:auto` 区，**装上 bundle 即注册预设**；`--check` 同时校验两处，防漂移。
+- `bin/luke-jarvis.mjs`：`setup` 去掉「预设落位」与「profile patch 写预设行」两步（只保留技能落位
+  + bundle 登记），`doctor`/`status` 改为检查 bundle patch 是否声明两个预设；避免安装后重复注册。
+
+**5) 版本线**
+
+- `dsh.engines.dsh` 由 `>=0.1.1-rc.1` 提升到 `>=0.2.1-rc.1`；peer `@deepseek-ai/dsh-tools` 同步
+  （旧线没有 `execute/render` 契约，声明旧版本等于允许装出坏插件）。版本 0.10.3。
+
+**验证（实跑）**
+
+```
+node --test test/plugin.test.js test/core.test.js → 310 / 310
+node scripts/verify-tool-contract.mjs             → TOOL-CONTRACT-OK（真实 ToolRuntime）
+bash scripts/selfcheck.sh                         → 15 / 15
+node test/e2e-flow.test.mjs                       → 30 工具，链路闭环
+node scripts/build-preset-patches.mjs --check     → 3 处无漂移
+```
+
+**仍未做**：`apply` 的 4 条路由仍在 `plugin.js`（约 300 行）；`tools/*.js` 的 import 面偏宽；
+`vendor/superagent-background.ts` 仍未接线（P3 执行器）。
+
 ## [0.10.2] - 2026-11-04
 
 ### 结构整理（续）：分层收敛 / plugin.js 从 5,764 行降到 647 行

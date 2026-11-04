@@ -39,9 +39,9 @@ luke-jarvis/
 | 步骤 | 事实源 | 落点 | 验证 |
 |---|---|---|---|
 | ① 装包 | `package.json`（`dsh.bundle.patch`、`bin`） | profile `package.json` 的 `dependencies` | `dsh plugin --profile web add luke-jarvis` |
-| ② 收尾 | `bin/luke-jarvis.mjs` `setup` | 技能：`~/.dsh/skills/{jarvis,ponder}`；预设：`~/.dsh/.agent-presets/{jarvis-org,jarvis-captain}`；bundle：profile `dsh.profile.bundles`；预设注册：profile `cordis.patch.yml` 标记块 | `node bin/luke-jarvis.mjs setup --profile web --dry-run` |
+| ② 收尾 | `bin/luke-jarvis.mjs` `setup` | 技能：`~/.dsh/skills/{jarvis,ponder}`；bundle：profile `dsh.profile.bundles`（预设与插件由本包 `cordis.patch.yml` 声明，无需落位） | `node bin/luke-jarvis.mjs setup --profile web --dry-run` |
 | ③ 重启 | — | `dsh web` 重新加载 bundle | 重启后新会话出现 jarvis 工具/预设 |
-| ④ 自检 | `doctor` | 6 项检查（node/技能/预设/bundles/patch/版本一致性） | `npx luke-jarvis doctor --profile web`（0=过，2=FAIL） |
+| ④ 自检 | `doctor` | 6 项检查（node/技能/bundle 预设声明/bundles/运行副本版本） | `npx luke-jarvis doctor --profile web`（0=过，2=FAIL） |
 
 > 三个 DSH 0.2+ 硬约束（不补齐就是「装了不生效」）：bundles 不登记 → 不挂载；
 > 技能根不扫描 node_modules → 必须落位；预设不再自动发现 → 必须写进 profile patch。
@@ -108,13 +108,15 @@ skills/ponder/         → ~/.dsh/skills/ponder/              （十阶段：sta
 模型（systemPrompt 注入的 11 步流水线）
    │  调用 jarvis_* 工具
    ▼
-TOOLS（tools/*.js 内 defineTool：parameters/output.schema/render/handler；plugin.js 汇总）
+TOOLS（tools/*.js：execute(args,exec) + output{schema,render}；tools/index.js 适配成 DSH ToolDefinition）
    │  handler(exec) → 解析 cwd/projectDir → 业务逻辑
    ├─ 闸：jarvisStageGate / jarvisFlowGuard / captainExecutionGuard / checkMemoryFresh / checkPonderVerify
    ├─ 领域：jarvis_project/distill/review/think/board/company/coverage/…（29 个）
    └─ 任务单：jarvis_ticket → core/Engine → adapters/JsonTicketRepositories → .jarvis/tickets
 ```
 
+- 工具契约：`execute(args, exec)` 执行、`output.render(args, value) → ContentBlock[]` 呈现；
+  适配层在 `tools/index.js`（注册前 `assertObjectJsonSchema` / `assertSupportedJsonSchema`）。
 - 闸的拒绝形式：返回字符串（模型可见的拒绝原因）或 `{ ok:false, error:'STATE_ROOT_CONFLICT' }`。
 - 任务单语义见 [CORE.md](CORE.md)：`adjudicate→open→report→retry/stop→ended`。
 

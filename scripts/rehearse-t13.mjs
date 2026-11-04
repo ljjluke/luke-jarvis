@@ -13,7 +13,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, resolveOwnedTeams } from '../src/host/plugin.js'
+import { apply, { TOOLS, resolveOwnedTeams } from '../src/host/plugin.js'
 
 const SRC = process.env.PROJECT_DIR || '/opt/work/first'
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 't13-rehearse-'))
@@ -44,7 +44,7 @@ const realFs = () => ({
   async writeText(t, x) { fs.writeFileSync(t.path, x) },
 })
 const ctx = { get: (k) => (k === 'fs' ? realFs() : undefined), effect: (fn) => { try { fn() } catch {} }, tools: { register: () => () => {} }, webServer: { register: () => () => {} }, systemPrompt: { section: () => () => {} } }
-plugin.apply(ctx)
+apply(ctx)
 
 // 自家团队真实 captainSessionId（预演用真实会话，避免靠猜）
 let ownSid = ''

@@ -4,7 +4,6 @@
  *  不在工具内再实现判定逻辑——闸与状态只认单一事实源。
  */
 import { createRequire } from 'node:module'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
@@ -53,7 +52,7 @@ export const DISTILL_TOOLS = [
         `✅ ${r.verdict}` +
         (r.depthScore !== undefined ? `\n深度 ${r.depthScore}/100${r.depthIssues?.length ? ' 待补:' + r.depthIssues.slice(0, 3).join(';') : ''}` : ''),
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const card = String(args.card ?? '')
       const isCeo = Boolean(args.isCeo)
       if (!card.trim()) {
@@ -140,7 +139,7 @@ export const DISTILL_TOOLS = [
       render: (r) =>
         `【${r.role ?? '角色'} 蒸馏引导 · 捕捉独有 HOW】\n目的：${r.purpose}\n品味原则：${(r.tastePrinciples || []).map((x) => '  · ' + x).join('\n')}\n来源分级：${(r.sourceHierarchy || []).map((x) => '  · ' + x).join('\n')}\n黑名单源：${(r.sourceBlacklist || []).join('、')}\n推荐源：${(r.sourceRecommended || []).join('、')}\n步骤：${(r.steps || []).map((x) => '  ' + x).join('\n')}\n决策启发式：${r.decisionHeuristics}\n验证锚点：${r.validationAnchors}\n防通用：${r.antiGeneric}\n职业底线：${r.professionTrace}\n深度动作链：${r.deepAnalysisTrace}\n${r.sourceCheck}\n响应格式：${r.respondAs}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const role = String(args.role ?? '').trim()
       const material = String(args.material ?? '').trim()
       const industry = String(args.industry ?? '').trim()
@@ -173,7 +172,7 @@ export const DISTILL_TOOLS = [
       },
       render: (r) => `保真度=${r.rating}（一手占比 ${r.firstHandRatio ?? '?'}）\n${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const card = String(args.card ?? '')
       const issues = []
       // 保真度不再"出现关键词就加分"，而是吃深度评估的实质证据：
@@ -235,7 +234,7 @@ export const DISTILL_TOOLS = [
       },
       render: (r) => `【产物结构指纹】${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const crypto = _require('node:crypto')
       const mode = String(args.mode ?? 'compute').trim()
       // 结构提取：按 kind 或内容特征取"可辨识结构"（多重集），过滤内容噪音（值/文案/空白）

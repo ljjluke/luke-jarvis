@@ -12,7 +12,7 @@
  */
 import http from 'node:http'
 import path from 'node:path'
-import plugin from '../src/host/plugin.js'
+import { apply } from '../src/host/plugin.js'
 
 const PROJECT_DIR = process.env.PROJECT_DIR || '/opt/work/first'
 const WANT_EMP_ID = process.env.COMPANY_EMP_ID || 'emp-ceo-4as972'
@@ -26,7 +26,7 @@ const ctx = {
   webServer: { register: (r) => { routes.push(r); return () => {} } },
   systemPrompt: { section: () => () => {} },
 }
-plugin.apply(ctx)
+apply(ctx)
 const relayRoutes = routes.filter((r) => String(r.path || '').startsWith('/api/pixoffice'))
 if (!relayRoutes.length) { console.error('❌ 未注册任何 /api/pixoffice 路由'); process.exit(1) }
 console.log(`ℹ️  已注册 relay 路由：${relayRoutes.map((r) => r.path).join(', ')}`)

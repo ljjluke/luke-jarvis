@@ -5,7 +5,6 @@
  */
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
@@ -51,7 +50,7 @@ export const INTAKE_TOOLS = [
       },
       render: (r) => `行业=${r.industry}（置信 ${r.confidence ?? '?'}）建议=${r.suggestion}\n蒸馏方向：${r.distillDirection ?? ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const text = String(args.requirement ?? '')
       const hit = identifyIndustry(text)
       const out = {
@@ -96,7 +95,7 @@ export const INTAKE_TOOLS = [
       render: (r) =>
         `【版本检测】本地 ${r.localVersion} vs 远程 ${r.remoteVersion ?? '?'}${r.hasUpdate ? ' ⬆️ 有新版本' : ' ✅ 已是最新'}\n${r.changelog ? '变更摘要：' + r.changelog.slice(0, 120) + '\n' : ''}${r.upgradeStep ? '升级：' + r.upgradeStep + '\n' : ''}判定：${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
       const remoteUrl = String(args.remoteUrl ?? 'https://github.com/ljjluke/luke-jarvis.git')
@@ -194,7 +193,7 @@ export const INTAKE_TOOLS = [
       render: (r) =>
         `【需求澄清 · ${r.mode ?? 'analyze'}】\n本质：${r.essence ?? ''}\n模糊度：${r.vague === undefined ? '' : r.vague ? '⚠️ 模糊需澄清' : '✅ 可判定'}\n${r.candidates?.length ? '候选问题：\n  ' + r.candidates.map((c) => '· ' + c).join('\n  ') : ''}${r.trigger ? '\n触发：' + r.trigger : ''}${r.questions?.length ? '\n本轮话术：\n  ' + r.questions.map((q) => '· ' + q).join('\n  ') : ''}${r.duoCheck ? '\n双人判据：' + r.duoCheck : ''}${r.confirm ? '\n完成判定：' + r.confirm : ''}\n裁决：${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const mode = String(args.mode ?? 'analyze').trim()
       const req = String(args.requirement ?? '').trim()
       const industry = String(args.industry ?? '').trim()
@@ -350,7 +349,7 @@ export const INTAKE_TOOLS = [
         return `任务编排图：${r.ok ? '✅ 可派活' : '❌ 打回重拆'}（${r.taskCount} 任务）\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n并行建议：${(r.parallelGroups ?? []).join(' / ')}${staffLine}`
       },
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const req = String(args?.requirement ?? '')
       const issues = []
       let tasks = []

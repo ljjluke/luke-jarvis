@@ -4,7 +4,6 @@
  *  不在工具内再实现判定逻辑——闸与状态只认单一事实源。
  */
 import { createRequire } from 'node:module'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
@@ -59,7 +58,7 @@ export const REVIEW_TOOLS = [
       render: (r) =>
         `裁决：${r.ruling}\n依据：${r.basis ?? ''}${r.analysis ? '\n分析：' + r.analysis : ''}${r.essenceCheck ? '\n需求本质核对：' + r.essenceCheck : ''}${r.falsifiableGateNote ? '\n可证伪预期门禁：' + r.falsifiableGateNote : ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const issue = String(args.issue ?? '')
       const sideA = String(args.sideA ?? '')
       const sideB = String(args.sideB ?? '')
@@ -143,7 +142,7 @@ export const REVIEW_TOOLS = [
       },
       render: (r) => `真实优先提示：${r.note}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       return {
         note: `问题「${String(args.question ?? '')}」：先用该角色卡的框架如何分析（引用卡中思维模型），但结论必须回到真实情况——检查真实数据/代码/复现后再下判断，禁止为迎合角色卡而扭曲事实。`,
       }
@@ -182,7 +181,7 @@ export const REVIEW_TOOLS = [
       },
       render: (r) => `【成员开工须知（派活必带）】\n${r.brief}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const os = _require('node:os')
       const path = _require('node:path')
       const mode = String(args.mode ?? 'generate').trim()
@@ -381,7 +380,7 @@ export const REVIEW_TOOLS = [
       render: (r) =>
         `【${r.role ?? '角色'} 深度思考任务单 · stakes=${r.stakes}\n① 前提审视：${r.premises}\n② 视角展开：${r.perspective}\n③ 反方攻击：${r.counter}\n④ 失效推演：${r.failure}\n⑤ 真实优先核对：${r.realityCheck}\n⑥ 诚实边界：${r.limits}\n⑦ 收敛结论：${r.conclusion}\n响应格式：${r.respondAs}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const q = String(args.question ?? '').trim()
       const card = String(args.roleCard ?? '').trim()
       const stakes = String(args.stakes ?? 'medium')
@@ -467,7 +466,7 @@ export const REVIEW_TOOLS = [
         + `${r.evidenceMissing?.length ? '产出缺失：' + r.evidenceMissing.join('；') + '\n' : ''}`
         + `问题：${(r.issues ?? []).join(' | ') || '无'}\n处置：${r.action ?? ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
       const os = _require('node:os')

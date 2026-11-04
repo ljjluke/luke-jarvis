@@ -143,15 +143,15 @@ test('jarvis_ticket 工具：普通项目 open/list/report 全程可用并落盘
   const def = TOOLS.find((t) => t.name === 'jarvis_ticket')
   assert.ok(def, 'jarvis_ticket 工具存在')
 
-  const opened = await def.handler({ action: 'open', projectDir: dir, title: '接支付', stage: 'build', role: '研发' })
+  const opened = await def.execute({ action: 'open', projectDir: dir, title: '接支付', stage: 'build', role: '研发' })
   assert.equal(opened.ok, true)
   assert.ok(fs.existsSync(path.join(dir, '.jarvis/tickets', `${opened.ticket.id}.json`)), '任务单应落盘')
 
-  const listed = await def.handler({ action: 'list', projectDir: dir })
+  const listed = await def.execute({ action: 'list', projectDir: dir })
   assert.equal(listed.ok, true)
   assert.equal(listed.tickets.length, 1)
 
-  const ready = await def.handler({ action: 'report', projectDir: dir, ticketId: opened.ticket.id, state: 'ready', summary: '已交付' })
+  const ready = await def.execute({ action: 'report', projectDir: dir, ticketId: opened.ticket.id, state: 'ready', summary: '已交付' })
   assert.equal(ready.ok, true)
   assert.equal(ready.ticket.ended.outcome, 'completed')
 })
@@ -160,7 +160,7 @@ test('jarvis_ticket 工具：插件仓库拒写（STATE_ROOT_CONFLICT，且不�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ticket-repo-'))
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'luke-jarvis' }))
   const def = TOOLS.find((t) => t.name === 'jarvis_ticket')
-  const r = await def.handler({ action: 'open', projectDir: dir, title: 'x' })
+  const r = await def.execute({ action: 'open', projectDir: dir, title: 'x' })
   assert.equal(r.ok, false)
   assert.match(r.verdict, /STATE_ROOT_CONFLICT|状态根/)
   assert.equal(fs.existsSync(path.join(dir, '.jarvis')), false)

@@ -4,7 +4,6 @@
  *  不在工具内再实现判定逻辑——闸与状态只认单一事实源。
  */
 import { createRequire } from 'node:module'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
@@ -57,7 +56,7 @@ export const ORG_TOOLS = [
       render: (r) =>
         `问题上行：${r.ok ? '✅ 可上报' : '❌ 打回补细节：' + (r.missing || []).join('、')}\n${r.record}\n黑板条目：${r.boardEntry ?? ''}\n纪律：${r.protocol ?? ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const role = String(args.role ?? '?')
       const problem = String(args.problem ?? '').trim()
       const attempts = String(args.attempts ?? '').trim()
@@ -135,7 +134,7 @@ export const ORG_TOOLS = [
       render: (r) =>
         `【能力补足】缺口=${r.gap}\n决策=${r.decision}\n验证：${r.verifyNotes ?? ''}\n自研要求：${r.buildNote ?? ''}\n诚实边界：${r.honestNote ?? ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const task = String(args.task ?? '').trim()
       const existing = String(args.existingTools ?? '').trim()
       const market = String(args.marketSearch ?? '').trim()
@@ -193,7 +192,7 @@ export const ORG_TOOLS = [
       },
       render: (r) => `协同设计校验：${r.ok ? '✅ 可建队' : '❌ 待修'}\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const req = String(args?.requirement ?? '')
       const collab = String(args?.collabText ?? '')
       const issues = []
@@ -298,7 +297,7 @@ export const ORG_TOOLS = [
       },
       render: (r) => `【绩效评估 · ${r.role ?? '?'}】${r.action}\n${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const role = String(args.role ?? '').trim()
       const stageStatus = String(args.stageStatus ?? 'in_progress').trim()
       const stageRequirement = String(args.stageRequirement ?? '').trim()
@@ -445,7 +444,7 @@ export const ORG_TOOLS = [
       render: (r) =>
         `【${r.type} 会 · 目标】${r.goal}\n流程：${r.protocol ?? ''}\n决议记录：${r.resolutions}\n会后任务：${r.actions ?? ''}\n纪要格式：${r.respondAs ?? ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const type = String(args.meetingType ?? 'kickoff')
       const fsSvc = getFsService(exec)
       const agenda = String(args.agenda ?? '').trim()
@@ -684,7 +683,7 @@ export const ORG_TOOLS = [
       render: (r) =>
         `【公司状态】${r.verdict}\n快照文件：${r.storage || '.jarvis/company-state.json'}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const mode = String(args.mode ?? 'snapshot').trim()
       // T8：模块级工具 handler 拿不到 apply 的形参 ctx（旧写法 `ctx && ctx.get` 会 ReferenceError → fsSvc 恒 null，
       // 这正是「无 fs 未落盘」的根因之一）；改用 apply 写入的模块级 getRuntimeContext()。

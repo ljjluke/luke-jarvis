@@ -4,7 +4,6 @@
  *  不在工具内再实现判定逻辑——闸与状态只认单一事实源。
  */
 import { createRequire } from 'node:module'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
@@ -58,7 +57,7 @@ export const MEMORY_TOOLS = [
       render: (r) =>
         `【项目沉淀 · .jarvis/】\n结构：${(r.structure || []).join('\n      ')}\n复用规则：${r.reuseRule}\n本次保存：${r.savePath ?? '—'}\n判定：${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const mode = String(args.mode ?? 'scaffold').trim()
       const projectDir = String(args.projectDir ?? '<workspace>/.jarvis/').trim()
       const itemType = String(args.itemType ?? '').trim()
@@ -209,7 +208,7 @@ export const MEMORY_TOOLS = [
       render: (r) =>
         `【进度经验结构化 · ${r.mode}】\n${r.schema ? '规范：' + r.schema : ''}${r.entry ? '\n条目：\n' + r.entry : ''}${r.missing?.length ? '\n缺失：' + r.missing.join('、') : ''}\n判定：${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const mode = String(args.mode ?? 'schema').trim()
       const schemaText =
         '每条教训必须包含 6 个字段：分类(category)/主责(owner)/现场标记(scene)/修向(fix)/状态(status)/复现脚本(repro)。规范条目格式：\n' +
@@ -289,7 +288,7 @@ export const MEMORY_TOOLS = [
       render: (r) =>
         `【${r.industry || '领域由 CEO 判断'} 流程 · ⚠️ CEO 现场定制（插件无预设）\n设计清单：${r.designChecklist ?? ''}\n阶段：${r.stages.join(' → ')}\n闸门：${r.gates.map((g) => '  ⛔ ' + g).join('\n')}\n红线：${r.redlines.map((x) => '  🚫 ' + x).join('\n')}\n必须角色：${(r.mustRoles || []).join(' / ')}\n会议触点：${(r.touchpoints || []).join(' / ')}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const industry = String(args.industry ?? '').trim()
       const req = String(args.requirement ?? '').trim()
       const projectRef = String(args.projectRef ?? '').trim()
@@ -359,7 +358,7 @@ export const MEMORY_TOOLS = [
       render: (r) =>
         `【需求本质审计】本质=${r.essence}\n四查：${(r.checks ?? []).map((c) => '  🔍 ' + c).join('\n')}\n防迎合：${r.flattery ?? ''}\n防幻觉：${r.hallucination ?? ''}\n偏离检查：${r.misalignments ?? ''}\n判定：${r.verdict}\n审计格式：${r.respondAs ?? ''}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const requirement = String(args.requirement ?? '').trim()
       const decision = String(args.decision ?? '').trim()
       const rationale = String(args.rationale ?? '').trim()
@@ -422,7 +421,7 @@ export const MEMORY_TOOLS = [
           .map((i) => `  [${i.id}][${i.type}] ${i.role}: ${i.content}`)
           .join('\n') || '  （无未解决项——黑板收敛）'}\n二次会判定：${r.needsMeeting ? '⚠️ ' + r.reason : '✅ ' + r.reason}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const role = String(args.role ?? '?').trim() || '?'
       const fsSvc = (() => {
         try { return getFsService(exec) } catch { return null }
@@ -586,7 +585,7 @@ export const MEMORY_TOOLS = [
       },
       render: (r) => `会话快照：${r.written}\n记忆已 ${r.memoryAgeHours} 小时未更新 · 未完成任务 ${r.openTasks} 条\n${r.verdict}`,
     },
-    handler: async (args, exec) => {
+    execute: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
       const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'

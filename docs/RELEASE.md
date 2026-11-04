@@ -18,9 +18,9 @@
 ## 二、安装自检（发布前必做）
 
 ```bash
-# 1) 预设与技能落位
-ls ~/.dsh/.agent-presets/jarvis-org/agent.cordis.yml   # 存在
+# 1) 技能落位 + 预设声明（预设不再拷进 .agent-presets）
 ls ~/.dsh/skills/jarvis/SKILL.md                   # 存在
+grep -c "preset-jarvis-org" node_modules/luke-jarvis/cordis.patch.yml   # >= 1
 
 # 2) 核心插件代码语法自检（Node）
 node --check src/host/plugin.js && echo HOST-OK
