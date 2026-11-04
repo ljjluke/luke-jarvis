@@ -1,4 +1,4 @@
-# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.3.4`
+# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.9.2`
 
 > **别再一句一句地"问 AI"了——把需求丢给一家替你干活的数字公司。**
 > 你说一句（哪怕模糊的）需求 → 它自动组建一支由**真实大佬思维驱动**的多角色 AI 团队，像真实公司一样澄清、拆解、分工、验证、返工——最后交给你**能逐条验收的成果**。
@@ -118,34 +118,46 @@
 
 ---
 
-## 🚀 快速开始
+## 🚀 快速开始（完全插件：一条命令装全）
 
 ```bash
-# 方式 A：预设使用（推荐）
-# 1) 拷贝预设文件
-#    jarvis-org     = 完整公司预设（Jarvis 人设 + jarvis_* 工具 + agent-teams）
-#    jarvis-captain = 严格预设（顶层只派发，无 bash/edit/write/subagent —— 不能自己干活）
-cp -r preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/jarvis-org/
-cp -r preset/jarvis-captain.cordis.yml ~/.dsh/.agent-presets/jarvis-captain/
-# 2) ⚠️ dsh 0.2+ 不再自动发现 ~/.dsh/.agent-presets —— 必须在**当前 profile** 的
-#    cordis.patch.yml 里用 `- insert:` + dsh-agent-preset 行显式注册（plugins 内联对应
-#    .cordis.yml 的插件列表）；否则预设不生效——这正是"装了预设但 agent 预设里没有 jarvis"
-#    的根因。可参照 profile 里 preset-anchored-standard 的写法。
-# 3) 技能与 ponder
-mkdir -p ~/.dsh/skills/jarvis
-cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
-rm -rf ~/.dsh/skills/ponder && mkdir -p ~/.dsh/skills/ponder
-cp -r skills/ponder/* ~/.dsh/skills/ponder/
+# 1) 装包（二选一）
+dsh plugin --profile web add luke-jarvis            # 发布后
+dsh plugin --profile web add file:/path/to/luke-jarvis   # 本地开发
 
-# 方式 B：插件包安装（核心工具 + /jarvis 命令）
-pnpm add luke-jarvis   # 或本地: pnpm add file:../path/to/luke-jarvis
+# 2) 一条命令收尾：技能落位 + 预设注册 + bundle 登记（DSH 0.2+ 的三个硬约束）
+npx luke-jarvis setup --profile web
+
+# 3) 重启 dsh web，然后自检
+npx luke-jarvis doctor --profile web
 ```
+
+`setup` 做的三件事（都是 DSH 0.2+ 的硬约束，漏一步就是「装了但不生效」）：
+
+| 步骤 | 为什么必须 | 产物 |
+|---|---|---|
+| 技能落位 | 技能发现根只有 `~/.dsh/skills`、`~/.agents/skills`、项目 `.dsh/skills`，**不扫描 node_modules** | `~/.dsh/skills/jarvis/SKILL.md`、`~/.dsh/skills/ponder/`（十阶段） |
+| 预设注册 | 0.2+ 不再自动发现 `~/.dsh/.agent-presets`，必须在 profile `cordis.patch.yml` 里 `- insert:` + `dsh-agent-preset` 行 | `presets/*.patch.yml` 生成好的注册行，写进 profile patch |
+| bundle 登记 | `dsh plugin add` 只写 dependencies，不写 `dsh.profile.bundles`——不登记就只装不挂 | profile `package.json` 的 `dsh.profile.bundles` += `luke-jarvis` |
+
+> 手工安装（等价于 `setup` 的分步执行，便于排查）：
+> ```bash
+> mkdir -p ~/.dsh/skills/jarvis && cp skills/jarvis.md ~/.dsh/skills/jarvis/SKILL.md
+> rm -rf ~/.dsh/skills/ponder && cp -r skills/ponder ~/.dsh/skills/ponder
+> cp -r preset/agent.cordis.yml preset/preset.yml ~/.dsh/.agent-presets/jarvis-org/
+> cp -r preset/jarvis-captain.cordis.yml ~/.dsh/.agent-presets/jarvis-captain/
+> # 再把 presets/jarvis-org.patch.yml、presets/jarvis-captain.patch.yml 的 - insert: 条目
+> # 追加到 ~/.dsh/profiles/<name>/cordis.patch.yml
+> ```
+>
+> 预设说明：`jarvis-org` = 完整公司预设（Jarvis 人设 + jarvis_* 工具 + agent-teams）；
+> `jarvis-captain` = 严格预设（顶层只派发，无 bash/edit/write/subagent —— 不能自己干活）。
 
 ### 🖥️ 官方 UI（PixOffice）：http://<dsh>/jarvis-ui
 
 装好插件并重启 dsh web 后，公司画面就是 **PixOffice 像素办公室**（员工工位/会议室/任务看板/黑板，数据来自 `.jarvis/company-state.json`）：
 
-- **状态根唯一（T13）**：**一个工作区只有一个 `.jarvis` 状态根**；插件仓库自身不存 `.jarvis`（历史残留已归档到 `.jarvis-archive/`，见其中 README）。`jarvis_flowguard` 会拒绝向「插件仓库自身」写闸（返回 `STATE_ROOT_CONFLICT`），避免产生第二个状态根 → 假 PASS。
+- **状态根唯一（T13）**：**一个工作区只有一个 `.jarvis` 状态根**；插件仓库自身不存 `.jarvis`（历史记忆/审计文档已移出仓库、不随包分发；`.gitignore` 仍保留排除规则兜底）。`jarvis_flowguard` 会拒绝向「插件仓库自身」写闸（返回 `STATE_ROOT_CONFLICT`），避免产生第二个状态根 → 假 PASS。
 - **归属作用域（T13）**：审计（开工须知/自领/卡死/ponder 核验/岗位卡）只统计**本项目归属团队** = `.jarvis/active-team.json` 标记内团队 ∪ 与当前 captainSessionId 相同的团队（单一 `resolveOwnedTeams()` 实现；别家团队/终态任务不参与）。归属标记带 `expiresAt`（默认 7 天），过期自动回退 72h 启发式并标 `source=mtime-fallback`；标记写入与闸结论**解耦**（build/execute 即使被自家缺口拦住也会写标记）。
 - **协调豁免统一（T13）**：`COORD_TASK_RE` 单一常量，`agent_teams_create_task` 闸与 `auditTeamBriefs` 共用——纯协调任务（subject 含【协调】/会议/汇报/验收等）不要求开工须知。
 - **入口**：`http://<你的 dsh 地址>/jarvis-ui`（302 → **`/jarvis-office/jarvis.html`**：本公司数据适配页）；上游 demo 页仍在 `/jarvis-office/`（对照/素材来源）
@@ -173,13 +185,14 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ### 各组件装到哪（映射）
 
-| 组件 | 位置 | 安装到 |
+| 组件 | 位置 | 安装到（`luke-jarvis setup` 自动完成） |
 |---|---|---|
-| Agent 预设（完整） | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/`（须在 profile 的 cordis.patch.yml 显式注册） |
-| Agent 预设（严格·顶层只派发） | `preset/jarvis-captain.cordis.yml` | `~/.dsh/.agent-presets/jarvis-captain/`（须显式注册） |
+| Agent 预设（完整） | `preset/agent.cordis.yml` + `preset/preset.yml` | `~/.dsh/.agent-presets/jarvis-org/` + profile patch 注册行（`presets/jarvis-org.patch.yml`） |
+| Agent 预设（严格·顶层只派发） | `preset/jarvis-captain.cordis.yml` | `~/.dsh/.agent-presets/jarvis-captain/` + profile patch 注册行 |
 | 技能（唯一入口） | `skills/jarvis.md` | `~/.dsh/skills/jarvis/SKILL.md` |
 | ponder 满血（随包自带） | `skills/ponder/`（自包含单目录） | `~/.dsh/skills/ponder/`（整个目录） |
-| 核心插件 | `src/host/plugin.js` | 注册为核心插件 |
+| 核心插件 | `src/host/plugin.js`（bundle patch `cordis.patch.yml`） | profile `dsh.profile.bundles` += `luke-jarvis` |
+| 安装/自检 CLI | `bin/luke-jarvis.mjs` | `npx luke-jarvis setup / doctor / status` |
 
 然后对你的 AI 说：
 
@@ -207,7 +220,7 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ## 🧪 质量保证
 
-- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:295 -->`
+- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:296 -->`
 - verify_host_pipeline **48 用例 0 VIOLATION**
 - selfcheck **11 项发布前自检**
 - 部署双形态验证（仓库 + 实体部署）全链路跑通

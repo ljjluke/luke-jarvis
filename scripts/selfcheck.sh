@@ -59,5 +59,31 @@ import('./src/host/plugin.js').then(async (m) => {
   console.log('   distill_guide 完整(品味原则'+r.tastePrinciples.length+'条/黑名单/来源分级/验证锚点): OK')
 })" >/dev/null 2>&1 && echo "   GUIDE-OK" || { echo "   GUIDE-FAIL"; exit 1; }
 
+echo "== 12) 完全插件包装（CLI / 预设生成物 / 结构文档） =="
+[ -f bin/luke-jarvis.mjs ] && node bin/luke-jarvis.mjs help >/dev/null 2>&1 && echo "   CLI-OK" || { echo "   CLI-FAIL"; exit 1; }
+node bin/luke-jarvis.mjs presets >/dev/null 2>&1 && echo "   CLI-PRESETS-OK" || { echo "   CLI-PRESETS-FAIL"; exit 1; }
+node scripts/build-preset-patches.mjs --check >/dev/null 2>&1 && echo "   PRESETS-SYNC-OK" || { echo "   PRESETS-DRIFT（跑 node scripts/build-preset-patches.mjs）"; exit 1; }
+[ -f docs/STRUCTURE.md ] && echo "   STRUCTURE-DOC-OK" || { echo "   STRUCTURE-DOC-MISSING"; exit 1; }
+node -e "const p=require('./package.json'); if(!p.bin||!p.bin['luke-jarvis']||!p.exports['./presets/*']) {console.error('bad');process.exit(1)}" && echo "   PKG-EXPORTS-OK" || { echo "   PKG-EXPORTS-FAIL"; exit 1; }
+
+echo "== 13) 状态根隔离（插件仓库不得出现 jarvis 记忆文件） =="
+POLLUTED=""
+for d in .jarvis .agent-teams artifacts; do [ -e "$d" ] && POLLUTED="$POLLUTED $d"; done
+if [ -n "$POLLUTED" ]; then echo "   STATE-ROOT-POLLUTION:$POLLUTED（删除后重跑；插件仓库不是状态根）"; exit 1; fi
+git check-ignore -q .jarvis/ && git check-ignore -q .agent-teams/ && git check-ignore -q artifacts/ && echo "   GITIGNORE-OK" || { echo "   GITIGNORE-MISSING"; exit 1; }
+node -e "
+import('./src/host/plugin.js').then((m) => {
+  if (typeof m.stateRootConflict !== 'function') { console.error('FAIL: 缺 stateRootConflict'); process.exit(1) }
+  const c = m.stateRootConflict(process.cwd())
+  if (!c || c.error !== 'STATE_ROOT_CONFLICT') { console.error('FAIL: 插件仓库应返回 STATE_ROOT_CONFLICT'); process.exit(1) }
+})" >/dev/null 2>&1 && echo "   STATE-GUARD-OK" || { echo "   STATE-GUARD-FAIL"; exit 1; }
+
+echo "== 14) 本地归档隔离（记忆/审计文档不在仓库内） =="
+if [ -e .jarvis-archive ]; then echo "   ARCHIVE-IN-REPO（请移出仓库：mv .jarvis-archive 仓库外目录）"; exit 1; fi
+echo "   ARCHIVE-ABSENT-OK"
+git check-ignore -q .jarvis-archive/ && echo "   ARCHIVE-GUARD-OK" || { echo "   ARCHIVE-GUARD-MISSING（.gitignore 保留 .jarvis-archive/ 兜底）"; exit 1; }
+if git ls-files --error-unmatch .jarvis-archive >/dev/null 2>&1; then echo "   ARCHIVE-STILL-TRACKED（跑 git rm -r --cached .jarvis-archive）"; exit 1; fi
+echo "   ARCHIVE-UNTRACKED-OK"
+
 echo ""
 echo "✅ 全部通过：luke-jarvis 可发布/可安装。"

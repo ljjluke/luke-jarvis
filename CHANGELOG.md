@@ -2,6 +2,30 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.9.2] - 2026-11-03
+
+### 完全插件包装：一条命令装全（CLI + 预设生成物 + 结构文档）
+
+**背景**：DSH 0.2+ 有三个硬约束，导致「装上了」≠「生效了」——`dsh plugin add` 只写 dependencies 不写 `bundles`；技能发现根不扫描 `node_modules`；预设不再自动发现 `~/.dsh/.agent-presets`。本版把这三步收尾做成一条命令。
+
+- **新增 `bin/luke-jarvis.mjs`**（`package.json` `bin` / `exports["./cli"]`）：
+  - `setup [--profile <name>] [--home <dir>] [--dry-run] [--force]`：技能落位（`~/.dsh/skills/jarvis`、`~/.dsh/skills/ponder`）+ 预设落位（`~/.dsh/.agent-presets/{jarvis-org,jarvis-captain}`）+ profile 注册（`dsh.profile.bundles += luke-jarvis`、`cordis.patch.yml` 幂等标记块写入预设注册行）；写前备份 `*.bak-<时间戳>`。
+  - `doctor`：node 版本 / 技能完整（ponder `stages/*.json` >= 9 + `step-guard.cjs`）/ 预设落位 / profile bundles 与 patch 标记 / 运行副本版本一致性；`0`=通过，`2`=有 FAIL。
+  - `presets` / `status` / `help`。
+- **新增 `presets/*.patch.yml`（生成物）**：`preset/agent.cordis.yml`、`preset/jarvis-captain.cordis.yml` → `@deepseek-ai/dsh-agent-preset` 注册行；自动**去重**根 patch 已挂载的 `luke-jarvis` 与 `@nanmicoder/dsh-agent-teams` 行（防同一插件被根挂载 + 预设挂载两次）；手工预设文件保留完整行供「根 insert 失效」的 profile 使用。
+- **新增 `scripts/build-preset-patches.mjs`**：生成器 + `--check` 漂移检查；`npm run build:presets` / `check:presets`。
+- **`package.json`**：`bin`、`exports` 增 `./cli` / `./preset/*` / `./presets/*` / `./skills/*` / `./office/*`、`engines.node >= 22`、`files` 增 `bin`/`presets`。
+- **`docs/STRUCTURE.md`**：目标结构树、分层职责、单一事实源、安装契约、迁移台账（P0 已完成 / P1 发布卫生 / P2 拆 plugin.js / P3 执行器）。
+- **README 快速开始**改为「一条命令装全」，手工步骤保留为排障路径；组件映射表更新。
+- **状态根守卫泛化（记忆文件零污染）**：新增导出 `stateRootConflict(dir)`，把「插件仓库自身不是 jarvis 状态根」从只拦闸记录/团队标记，扩展到**所有 `.jarvis` 写入方**——会话快照、基线清单、覆盖矩阵、ponder 核验记录、公司状态（含会议/绩效自动同步）、公屏 board、问题上行登记：在插件仓库内一律拒绝（返回 `STATE_ROOT_CONFLICT` / 明确 verdict），不再生成 `.jarvis/`。`.gitignore` 增补 `artifacts/`、`.dsh/`、`*.bak-*`；`selfcheck` 第 13 项实测「仓库根无 `.jarvis`/`.agent-teams`/`artifacts` + 忽略规则生效 + 守卫函数可用」。
+- **本地归档移出仓库**：历史审计/记忆文档（原 `.jarvis-archive/`：`gates.json` + 4 份流程文档 + README）整体**移出仓库**（本机保留在仓库外目录，不随包分发、不参与提交）；`.gitignore` 保留 `.jarvis-archive/`、`.jarvis/`、`.agent-teams/` 排除规则兜底；README / `docs/安装-半插件.md` / `docs/STRUCTURE.md` 同步说明；`selfcheck` 第 14 项实测「仓库内无归档目录 + 排除规则生效 + 未被跟踪」。
+- **测试**：新增「T13 ⑥ 状态根守卫泛化」用例（插件仓库拒写快照/基线/公司状态，普通项目放行）→ **296/296**。
+- **文档对账**：README 标题 `v0.3.4 → v0.9.2`；RELEASE「22 工具 → 29 工具（以 `TOOLS` 为准）」；ARCHITECTURE 补当前基线；e2e 汇总文案改为 `TOOLS.length`（不再写死 19）；根目录过期 `MARKET-LAUNCH.md` 归档到 `docs/archive/`。
+- **selfcheck 第 12/13/14 项**：CLI 可用 / 预设生成物无漂移 / 结构文档存在 / 包导出完整；状态根隔离；本地归档隔离 → 11 项 → **14 项**。
+- 回归：`node --test test/plugin.test.js` **296/296 通过**；`bash scripts/selfcheck.sh` 14 项全过；`npx luke-jarvis setup/doctor` 在临时 HOME 实测通过（幂等、可 --dry-run）。
+
+**回滚**：`git revert <本提交>` 即可（不改 `src/host/plugin.js` 逻辑，工具/闸行为与 0.9.1 完全一致）。
+
 ## [0.9.1] - 2026-11-03
 
 ### 完全体 P2：阶段网关（工具调用前按阶段机械放行/拒绝）+ 真实缺陷修复 D5-D8
