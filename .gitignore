@@ -1,5 +1,18 @@
 node_modules/
 *.tgz
 .tmp/
+
+# jarvis 运行时状态根（记忆文件）——只属于用户项目工作区，绝不进插件仓库
 .jarvis/
 .agent-teams/
+artifacts/
+.dsh/
+
+# 安装/自检 CLI 的写前备份
+*.bak-*
+
+# 系统噪音
+.DS_Store
+
+# 本地历史归档（记忆/审计文档，只留本机，不入库）
+.jarvis-archive/

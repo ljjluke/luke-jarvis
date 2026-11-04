@@ -166,6 +166,8 @@ export async function syncCompanyState(fsSvc, action) {
   // T8：不再强依赖 fs 服务——读/写都有 node:fs 兜底（见 readCompanyState/writeCompanyState 注释）
   try {
     const projectDir = String((action && action.projectDir) || '')
+    // 状态根守卫：显式 projectDir 指向插件仓库时拒写（防记忆文件污染插件项目）
+    if (projectDir && stateRootConflict(projectDir)) return false
     const state = await readCompanyState(fsSvc, projectDir)
     const a = action || {}
     // 会议：标会议状态 + 参会员工联动（进会议室=离开工位；散会=回工位继续干）
@@ -1540,7 +1542,9 @@ export const TOOLS = [
         const dup = items.some((it) => it.type === '阻塞' && it.status === 'open' && it.content.includes(problem.slice(0, 30)))
         if (!dup) {
           items.push({ id: nextBoardId(items), role, type: '阻塞', content: boardEntry, status: 'open', essenceChecked: true, time: new Date().toISOString().slice(0, 16) })
-          const w = await writeBoardItems(fsSvc, items, disk.version)
+          // 状态根守卫：插件仓库不写 .jarvis/board.json（防记忆文件污染插件项目）
+          const escConflict = stateRootConflict(resolveWorkspace(moduleCtx, exec))
+          const w = escConflict ? { ok: false, error: escConflict.error } : await writeBoardItems(fsSvc, items, disk.version)
           boardWritten = w.ok
           boardError = w.ok ? '' : w.error
         } else {
@@ -2195,19 +2199,22 @@ export const TOOLS = [
         const taskId = String(args.taskId ?? '').trim()
         if (ok && taskId) {
           const cwd = ponderVerifyProjectDir(args, exec)
-          const dir = path.join(cwd, '.jarvis/docs/ponder-verify')
-          fs.mkdirSync(dir, { recursive: true })
-          const rec = {
-            taskId,
-            runId: state.run_id,
-            verdict: 'PASS',
-            completedCount: completed.length,
-            agentShortfalls,
-            verifiedAt: new Date().toISOString(),
+          // 状态根守卫：插件仓库不写 .jarvis（防记忆文件污染插件项目）
+          if (!stateRootConflict(cwd)) {
+            const dir = path.join(cwd, '.jarvis/docs/ponder-verify')
+            fs.mkdirSync(dir, { recursive: true })
+            const rec = {
+              taskId,
+              runId: state.run_id,
+              verdict: 'PASS',
+              completedCount: completed.length,
+              agentShortfalls,
+              verifiedAt: new Date().toISOString(),
+            }
+            wrote.path = path.join(dir, `${taskId.replace(/[^\w.:-]/g, '_')}-${String(state.run_id).replace(/[^\w.:-]/g, '_')}.json`)
+            wrote.dir = dir
+            fs.writeFileSync(wrote.path, JSON.stringify(rec, null, 2))
           }
-          wrote.path = path.join(dir, `${taskId.replace(/[^\w.:-]/g, '_')}-${String(state.run_id).replace(/[^\w.:-]/g, '_')}.json`)
-          wrote.dir = dir
-          fs.writeFileSync(wrote.path, JSON.stringify(rec, null, 2))
         }
       } catch { /* 落盘失败不改变核验结论（但 recordPath 为空，调用方可见） */ }
       return {
@@ -2695,9 +2702,11 @@ export const TOOLS = [
       // 公司状态自动同步（3D 画面显示"正在开会/会议结束"）
       try {
         const fsSvc2 = getFsService(exec)
-        if (fsSvc2) {
-          if (type === 'close') await syncCompanyState(fsSvc2, { type: 'meeting_done', meetingId: 'm' })
-          else await syncCompanyState(fsSvc2, { type: 'meeting_started', meeting: { id: 'm', type, topic: agenda || m.goal, attendees: attendees.split(',') } })
+        // 状态根守卫：显式 projectDir 指向插件仓库时不写 .jarvis（防记忆文件污染插件项目）
+        const syncDir = String(args.projectDir ?? '').trim()
+        if (fsSvc2 && !(syncDir && stateRootConflict(syncDir))) {
+          if (type === 'close') await syncCompanyState(fsSvc2, { type: 'meeting_done', meetingId: 'm', projectDir: syncDir || undefined })
+          else await syncCompanyState(fsSvc2, { type: 'meeting_started', meeting: { id: 'm', type, topic: agenda || m.goal, attendees: attendees.split(',') }, projectDir: syncDir || undefined })
         }
       } catch {}
       // ── 真会议校验（防假开会：capatin 传实际收齐的成员观点 + 三轮证据，工具判定真开会 or 假开会）──
@@ -3120,7 +3129,9 @@ export const TOOLS = [
       const essenceNote = decisions.length ? `；⚠️ ${decisions.length} 条决策条目未过 jarvis_essence 需求本质校验，定稿前必须审计（防迎合/防幻觉）` : ''
       const summary = `未决 ${openItems.length} 项；阻塞 ${blockers.length} 项${blockers.length ? '：' + blockers.map((b) => b.id + '(' + b.content.slice(0, 20) + ')').join(', ') : ''}。${reason}${essenceNote}`
       // 写回磁盘（项目级公屏持久化）。成功=真源已更新；失败=本次仅内存返回（下次调用仍以磁盘为准，不伪造持久化）
-      const persisted = await writeBoardItems(fsSvc, items, disk.version)
+      // 状态根守卫：插件仓库不写 .jarvis/board.json（防记忆文件污染插件项目）
+      const boardConflict = stateRootConflict(resolveWorkspace(moduleCtx, exec))
+      const persisted = boardConflict ? { ok: false, error: boardConflict.error } : await writeBoardItems(fsSvc, items, disk.version)
       // 资源闭环检查（代码级归一化：有 open 的资源需求 = 未闭环 = 相关任务不得标记完成——压缩不丢）
       const openResources = items.filter((i) => i.type === '资源需求' && i.status === 'open')
       const resourceBlockNote = openResources.length
@@ -3358,6 +3369,11 @@ export const TOOLS = [
       const stateFile = path.join(projectDir, '.jarvis/company-state.json')
       // 读当前快照（fs 服务优先，失败/不可用 → node:fs 兜底，见 readCompanyState）
       let state = await readCompanyState(fsSvc, projectDir)
+      // 状态根守卫：插件仓库不写 .jarvis（防记忆文件污染插件项目）；snapshot 只读放行
+      if (mode !== 'snapshot') {
+        const conflict = stateRootConflict(projectDir)
+        if (conflict) return { snapshot: state, updated: false, written: false, storage: stateFile, storageMode: 'state-root-conflict', verdict: `⛔ ${conflict.message}` }
+      }
       if (mode === 'snapshot') {
         return { snapshot: state, written: false, storage: stateFile, verdict: `公司快照：${state.employees?.length || 0} 员工 / ${state.meetings?.length || 0} 会议 / ${state.recruiting?.length || 0} 招募中（UI 轮询渲染用）` }
       }
@@ -3434,6 +3450,9 @@ export const TOOLS = [
       const path = _require('node:path')
       const fs = _require('node:fs')
       const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+      // 状态根守卫：插件仓库不写 .jarvis（防记忆文件污染插件项目）
+      const conflict = stateRootConflict(projectDir)
+      if (conflict) return { written: '', memoryAgeHours: 0, openTasks: 0, verdict: `⛔ ${conflict.message}` }
       const sid = (() => { try { return String(exec?.agent?.session?.id || 'unknown') } catch { return 'unknown' } })()
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
       const dir = path.join(projectDir, '.jarvis/sessions')
@@ -3510,6 +3529,9 @@ export const TOOLS = [
       const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
       const slug = String(args?.slug ?? 'baseline').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
       const kind = String(args?.kind ?? 'web-ui').trim()
+      // 状态根守卫：插件仓库不写 .jarvis/docs（防记忆文件污染插件项目）
+      const conflict = stateRootConflict(projectDir)
+      if (conflict) return { ok: false, count: 0, slug, written: [], sample: [], verdict: `⛔ ${conflict.message}` }
       const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.jarvis', 'archive'])
       const walk = (root, out, depth = 0) => {
         if (depth > 8 || out.length > 6000) return
@@ -3806,6 +3828,8 @@ export const TOOLS = [
           const path = _require('node:path')
           const fsm = _require('node:fs')
           const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+          // 状态根守卫：插件仓库不写 .jarvis/docs（防记忆文件污染插件项目）
+          const blocked = stateRootConflict(projectDir)
           const slug = String(args?.slug ?? 'matrix').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
           let exemptions = []
           try { const a = JSON.parse(String(args?.exemptions ?? '[]')); if (Array.isArray(a)) exemptions = a.map(String) } catch {}
@@ -3817,7 +3841,7 @@ export const TOOLS = [
           const md = ['# 覆盖矩阵 ' + slug + '（' + label + '）', '', '- 基线条数 ' + sourceIds.size + '，覆盖率 ' + Math.round(coverage * 100) + '%', '- r_plan ' + Math.round(r_plan * 100) + '% / r_verify ' + Math.round(r_verify * 100) + '%' + (r_contract === null ? '' : ' / r_contract ' + Math.round(r_contract * 100) + '%'), '- 未覆盖 ' + uncovered.length + ' 条' + (uncovered.length ? '：' + uncovered.slice(0, 20).join('、') : ''), '- 豁免 ' + exemptions.length + ' 条' + (exemptions.length ? '：' + exemptions.join('、') : ''), '', '> 收口闸规则：未覆盖（除豁免）必须为 0，且 r_verify 必须 =100% 才放行。'].join('\n')
           try { fsm.mkdirSync(docsDir, { recursive: true }) } catch {}
           let wroteM = false
-          if (fsSvc && typeof fsSvc.writeText === 'function') {
+          if (!blocked && fsSvc && typeof fsSvc.writeText === 'function') {
             try {
               await fsSvc.writeText(await fsSvc.resolve(jsonPath), JSON.stringify(payload, null, 2))
               await fsSvc.writeText(await fsSvc.resolve(mdPath), md)
@@ -3825,7 +3849,7 @@ export const TOOLS = [
               wroteM = true
             } catch { wroteM = false }
           }
-          if (!wroteM) {
+          if (!blocked && !wroteM) {
             fsm.writeFileSync(jsonPath, JSON.stringify(payload, null, 2))
             fsm.writeFileSync(mdPath, md)
             persisted.push(jsonPath, mdPath)
@@ -4611,6 +4635,20 @@ export function looksLikePluginRepo(dir) {
     if (String((pkg && pkg.name) || '').startsWith('luke-jarvis')) return true
   } catch { /* 无 package.json */ }
   try { return fs.statSync(path.join(String(dir || ''), 'src/host/plugin.js')).isFile() } catch { return false }
+}
+
+/**
+ * 状态根守卫（T13 泛化）：插件仓库自身**不是** jarvis 状态根——任何 `.jarvis/` 写入方
+ * （闸记录/团队标记/公屏/公司状态/会话快照/基线/覆盖矩阵/ponder 核验记录）统一拒绝，
+ * 防止「记忆文件污染插件项目」。状态根只属于具体项目工作区（一个工作区一个状态根）。
+ * @returns {null|{error:string,message:string}} 非插件仓库返回 null（放行）
+ */
+export function stateRootConflict(dir) {
+  if (!looksLikePluginRepo(String(dir || ''))) return null
+  return {
+    error: 'STATE_ROOT_CONFLICT',
+    message: '插件仓库自身不是 jarvis 状态根：拒绝写入 .jarvis/（记忆文件不得污染插件项目）。状态根应在具体项目工作区——一个工作区只有一个状态根。',
+  }
 }
 
 export async function auditCaptainOwnedTasks(fsSvc, projectDir, path, owned) {

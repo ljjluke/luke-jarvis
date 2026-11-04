@@ -11,7 +11,7 @@ import assert from 'node:assert'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService, resolveOwnedTeams, auditTeamBriefs, looksLikePluginRepo, COORD_TASK_RE, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand, PIXOFFICE_ACTOR_IDS } from '../src/host/plugin.js'
+import plugin, { TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService, resolveOwnedTeams, auditTeamBriefs, looksLikePluginRepo, stateRootConflict, COORD_TASK_RE, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand, PIXOFFICE_ACTOR_IDS } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -4082,6 +4082,39 @@ test('T13 ⑤ 状态根唯一化：插件仓库自身（name=luke-jarvis）拒�
   assert.ok(!fs.existsSync(path.join(proj, '.jarvis/gates.json')), '拒绝时不得写 gates.json')
   assert.strictEqual(looksLikePluginRepo(proj), true)
   assert.strictEqual(looksLikePluginRepo(os.tmpdir()), false)
+})
+
+test('T13 ⑥ 状态根守卫泛化：插件仓库拒写快照/基线/公司状态（记忆文件不污染插件项目）', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't13-sr-'))
+  fs.writeFileSync(path.join(proj, 'package.json'), JSON.stringify({ name: 'luke-jarvis' }))
+
+  const snap = TOOLS.find((t) => t.name === 'jarvis_snapshot')
+  const r1 = await snap.handler({ projectDir: proj, note: 'x' }, { agent: { session: { id: 's1' } } })
+  assert.ok(r1.verdict.includes('STATE_ROOT_CONFLICT') || r1.verdict.includes('状态根'), `快照应被状态根守卫拦下：${r1.verdict}`)
+  assert.strictEqual(r1.written, '')
+  assert.ok(!fs.existsSync(path.join(proj, '.jarvis')), '快照不得在插件仓库创建 .jarvis')
+
+  const base = TOOLS.find((t) => t.name === 'jarvis_baseline')
+  const r2 = await base.handler({ projectDir: proj, slug: 'x' })
+  assert.strictEqual(r2.ok, false)
+  assert.deepStrictEqual(r2.written, [])
+
+  const comp = TOOLS.find((t) => t.name === 'jarvis_company')
+  const r3 = await comp.handler({ mode: 'update', employees: '[]', projectDir: proj })
+  assert.strictEqual(r3.written, false)
+  assert.strictEqual(r3.storageMode, 'state-root-conflict')
+
+  assert.ok(!fs.existsSync(path.join(proj, '.jarvis')), '插件仓库不得出现 .jarvis（记忆文件零污染）')
+
+  // 普通项目（非插件仓库）照常放行：写快照 + 公司状态
+  const normal = fs.mkdtempSync(path.join(os.tmpdir(), 't13-normal-'))
+  const r4 = await snap.handler({ projectDir: normal, note: 'ok' }, { agent: { session: { id: 's2' } } })
+  assert.ok(r4.written && fs.existsSync(r4.written), '普通项目应正常写快照')
+  const r5 = await comp.handler({ mode: 'update', employees: '[]', projectDir: normal })
+  assert.strictEqual(r5.written, true)
+  assert.strictEqual(stateRootConflict(proj).error, 'STATE_ROOT_CONFLICT')
+  assert.strictEqual(stateRootConflict(normal), null)
 })
 
 test('T13 ④ 终态任务不参与审计：completed/cancelled 的缺须知/自领/claimed 都不算缺口', async () => {
