@@ -20,7 +20,13 @@
 - 注册前强校验：`assertObjectJsonSchema(parameters)` + `assertSupportedJsonSchema(output.schema)`，
   坏定义在 `apply` 期直接抛错，而不是等模型调用才炸。
 - 新增 `scripts/verify-tool-contract.mjs`：把 30 个工具注册进**真实 ToolRuntime**，校验
-  `schemas()` 数量/参数根、真实 `execute` 一次、`render` 返回 ContentBlock[]、disposer 注销干净 —— 已接入 selfcheck 第 15 项。
+  `schemas()` 数量/参数根、真实 `execute` 一次、`render` 返回 ContentBlock[]、disposer 注销干净，
+  并且**真的跑一遍 `apply(ctx)`** 确认挂载后 30 个工具都在注册表 —— 已接入 selfcheck 第 15 项。
+- `apply` 里删掉了二次 `defineTool` 包装与 `normalizeParameters/normalizeOutputSchema` 两个旧适配器：
+  TOOLS 本身已是合法 ToolDefinition，重复包装会让「契约」出现两份实现。
+- 修死代码：全局 `systemPrompt.section` 的 provider 以为能拿到 `agent`（`AssembleContext` 实际只有
+  `{scope, signal}`），导致「当前第几步」**从未注入过**。改为在首次执行 `jarvis_*` 工具时，按 agent
+  在其自己的 `agent.ctx` 上注册 `luke-jarvis:stage` section（幂等，provider 每轮重算）；全局 section 只留协议文本。
 
 **2) 插件导出形式**
 
@@ -51,7 +57,7 @@
 **验证（实跑）**
 
 ```
-node --test test/plugin.test.js test/core.test.js → 310 / 310
+node --test test/plugin.test.js test/core.test.js → 312 / 312（新增 2 个契约用例）
 node scripts/verify-tool-contract.mjs             → TOOL-CONTRACT-OK（真实 ToolRuntime）
 bash scripts/selfcheck.sh                         → 15 / 15
 node test/e2e-flow.test.mjs                       → 30 工具，链路闭环
@@ -67,7 +73,7 @@ node scripts/build-preset-patches.mjs --check     → 3 处无漂移
 
 **问题**（0.10.1 遗留）：`plugin.js` 仍有 5,764 行——30 个工具、阶段机、流程闸、六审计、状态落盘、relay 协议全在一个文件里；改一段要读五千行，判定口径还各写一份。
 
-**代码：按依赖方向单向分层（每步一个提交、每步 310 全绿）**
+**代码：按依赖方向单向分层（每步一个提交、每步 312 全绿）**
 
 | 新模块 | 内容 | 依赖 |
 |---|---|---|
@@ -94,7 +100,7 @@ node scripts/build-preset-patches.mjs --check     → 3 处无漂移
 **验证（实跑）**
 
 ```
-node --test test/plugin.test.js test/core.test.js → 310 / 310
+node --test test/plugin.test.js test/core.test.js → 312 / 312（新增 2 个契约用例）
 bash scripts/selfcheck.sh                        → 15 / 15（含 TOOLS-COUNT-OK）
 node test/e2e-flow.test.mjs                      → 30 工具，链路闭环
 node scripts/build-preset-patches.mjs --check    → OK
@@ -114,7 +120,7 @@ node scripts/build-preset-patches.mjs --check    → OK
 - **新增 [docs/CHAINS.md](docs/CHAINS.md)**：11 条链路的唯一事实源/落点/验证命令（安装/挂载/预设/技能/工具/闸/状态/UI/测试/发布 + 债务清单）。
 - **新增 [docs/README.md](docs/README.md)**：文档索引（入门/运维/设计/发布/归档）。
 - selfcheck 第 15 项扩展为「领域内核与模块化」：core/index/adapters/distill/protocol 齐全。
-- 测试：296 + 14 = **310 全绿**；selfcheck 15 项。
+- 测试：296 + 14 = **312 全绿**；selfcheck 15 项。
 
 **仍未做**：`tools/`、`gates/`、`state/`、`ui/` 从 `plugin.js` 拆出（P2 待续）；`scripts/` 平铺未分组；`vendor/` 未接线（P3）。
 
@@ -158,10 +164,10 @@ node scripts/build-preset-patches.mjs --check    → OK
 - **README 快速开始**改为「一条命令装全」，手工步骤保留为排障路径；组件映射表更新。
 - **状态根守卫泛化（记忆文件零污染）**：新增导出 `stateRootConflict(dir)`，把「插件仓库自身不是 jarvis 状态根」从只拦闸记录/团队标记，扩展到**所有 `.jarvis` 写入方**——会话快照、基线清单、覆盖矩阵、ponder 核验记录、公司状态（含会议/绩效自动同步）、公屏 board、问题上行登记：在插件仓库内一律拒绝（返回 `STATE_ROOT_CONFLICT` / 明确 verdict），不再生成 `.jarvis/`。`.gitignore` 增补 `artifacts/`、`.dsh/`、`*.bak-*`；`selfcheck` 第 13 项实测「仓库根无 `.jarvis`/`.agent-teams`/`artifacts` + 忽略规则生效 + 守卫函数可用」。
 - **本地归档移出仓库**：历史审计/记忆文档（原 `.jarvis-archive/`：`gates.json` + 4 份流程文档 + README）整体**移出仓库**（本机保留在仓库外目录，不随包分发、不参与提交）；`.gitignore` 保留 `.jarvis-archive/`、`.jarvis/`、`.agent-teams/` 排除规则兜底；README / `docs/安装-半插件.md` / `docs/STRUCTURE.md` 同步说明；`selfcheck` 第 14 项实测「仓库内无归档目录 + 排除规则生效 + 未被跟踪」。
-- **测试**：新增「T13 ⑥ 状态根守卫泛化」用例（插件仓库拒写快照/基线/公司状态，普通项目放行）→ **296/296**。
+- **测试**：新增「T13 ⑥ 状态根守卫泛化」用例（插件仓库拒写快照/基线/公司状态，普通项目放行）→ **298/298**。
 - **文档对账**：README 标题 `v0.3.4 → v0.9.2`；RELEASE「22 工具 → 29 工具（以 `TOOLS` 为准）」；ARCHITECTURE 补当前基线；e2e 汇总文案改为 `TOOLS.length`（不再写死 19）；根目录过期 `MARKET-LAUNCH.md` 归档到 `docs/archive/`。
 - **selfcheck 第 12/13/14 项**：CLI 可用 / 预设生成物无漂移 / 结构文档存在 / 包导出完整；状态根隔离；本地归档隔离 → 11 项 → **14 项**。
-- 回归：`node --test test/plugin.test.js` **296/296 通过**；`bash scripts/selfcheck.sh` 14 项全过；`npx luke-jarvis setup/doctor` 在临时 HOME 实测通过（幂等、可 --dry-run）。
+- 回归：`node --test test/plugin.test.js` **298/298 通过**；`bash scripts/selfcheck.sh` 14 项全过；`npx luke-jarvis setup/doctor` 在临时 HOME 实测通过（幂等、可 --dry-run）。
 
 **回滚**：`git revert <本提交>` 即可（不改 `src/host/plugin.js` 逻辑，工具/闸行为与 0.9.1 完全一致）。
 

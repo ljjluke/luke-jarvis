@@ -4156,3 +4156,30 @@ test('T13 ① checkTalentPreconditions：别家团队的缺卡成员不拦本项
   const wide = await checkTalentPreconditions(fsSvc, proj, path, new Set())
   assert.ok(wide.some((m) => m.includes('不存在岗位卡角色')), `不收窄时应能看到别家缺口（对照）：${JSON.stringify(wide)}`)
 })
+
+// ── DSH 工具契约（0.2.x）：execute + 按 agent 注入阶段 section ────────────────
+test('工具契约：TOOLS 全部是 execute + output.render 形式（兼容旧 handler 字段）', () => {
+  for (const t of TOOLS) {
+    assert.strictEqual(typeof t.execute, 'function', `${t.name} 缺 execute`)
+    assert.strictEqual(typeof t.output.render, 'function', `${t.name} 缺 output.render`)
+    assert.strictEqual(t.handler, undefined, `${t.name} 不应再暴露 handler（旧契约字段）`)
+    assert.strictEqual(t.parameters.type, 'object', `${t.name} parameters 根必须是 object`)
+  }
+  const blocks = TOOLS[0].output.render({}, { ok: true })
+  assert.ok(Array.isArray(blocks) && blocks[0].type === 'text' && typeof blocks[0].text === 'string', 'render 必须返回 ContentBlock[]')
+})
+
+test('阶段 section：按 agent 注册一次（全局 section 拿不到 cwd，per-agent 才能拿到）', async () => {
+  const registered = []
+  const agent = {
+    session: { id: 's-stage-1', header: { cwd: os.tmpdir() } },
+    ctx: { systemPrompt: { section: (s) => { registered.push(s); return () => {} } } },
+  }
+  const exec = { agent, callId: 'c1', name: 'jarvis_project', arguments: {}, signal: new AbortController().signal }
+  const project = TOOLS.find((t) => t.name === 'jarvis_project')
+  await project.execute({ requirement: '给我做个电商复购工具' }, exec)
+  await project.execute({ requirement: '再做一次' }, exec)
+  assert.strictEqual(registered.length, 1, '同一 agent 只注册一次（幂等）')
+  assert.strictEqual(registered[0].name, 'luke-jarvis:stage')
+  assert.strictEqual(typeof registered[0].text, 'function', '阶段 section 用 provider（每轮重算，不缓存）')
+})

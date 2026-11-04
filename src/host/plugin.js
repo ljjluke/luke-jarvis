@@ -21,7 +21,6 @@
 
 import { execSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from './office-bridge.js'
 import { Engine, reasonText } from './core/index.js'
 import { JsonTicketRepositories } from './adapters/json-tickets.js'
@@ -49,55 +48,6 @@ export { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, c
 export { TEAM_TOOLS, jarvisFlowGuard } from './gates/flow.js'
 export { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from './pixoffice/index.js'
 const _require = createRequire(import.meta.url)
-
-
-/** 归一化 output.schema：根级/嵌套 required:[...] 数组 → 逐属性 required:true（value schema DSL）。
- * 递归处理嵌套对象节点；required 已按属性内联时原样返回。 */
-function normalizeOutputSchema(node) {
-  if (!node || typeof node !== 'object' || Array.isArray(node)) return node
-  const out = { ...node }
-  if (out.type === 'object' && !Object.prototype.hasOwnProperty.call(out, 'additionalProperties')) {
-    out.additionalProperties = false
-  }
-  if (Array.isArray(out.required)) {
-    const required = out.required
-    delete out.required
-    if (out.properties && typeof out.properties === 'object') {
-      const props = {}
-      for (const [k, v] of Object.entries(out.properties)) {
-        props[k] = required.includes(k) ? { ...v, required: true } : normalizeOutputSchema(v)
-      }
-      out.properties = props
-    }
-  }
-  if (out.properties && typeof out.properties === 'object') {
-    const props = {}
-    for (const [k, v] of Object.entries(out.properties)) props[k] = normalizeOutputSchema(v)
-    out.properties = props
-  }
-  if (out.items && typeof out.items === 'object') out.items = normalizeOutputSchema(out.items)
-  return out
-}
-
-/** 归一化 parameters：完整 schema 风格 {type:'object',properties:{...},required:[...]}
- *  → dsh-tools 0.1.2 期望的隐式属性表风格 {name:{type,description,required}}。
- * 已是属性表风格（无 type:'object' 外壳）时原样返回。 */
-function normalizeParameters(spec) {
-  if (spec && typeof spec === 'object' && spec.type === 'object' && spec.properties && typeof spec.properties === 'object') {
-    const required = Array.isArray(spec.required) ? spec.required : []
-    const out = {}
-    for (const [k, v] of Object.entries(spec.properties)) {
-      const p = { ...v }
-      if (required.includes(k)) p.required = true
-      if (p.type === 'object' && !Object.prototype.hasOwnProperty.call(p, 'additionalProperties')) {
-        p.additionalProperties = false
-      }
-      out[k] = p
-    }
-    return out
-  }
-  return spec
-}
 
 
 /** 全局协作健康检查：依赖图是否闭环/孤立/有升级路径。 */
@@ -492,13 +442,9 @@ export function apply(ctx) {
           sp.section({
             name: 'luke-jarvis:protocol',
             order: 118,
-            text: ({ agent }) => {
-              try {
-                const cwd = agent && agent.session && agent.session.header && agent.session.header.cwd
-                if (cwd) return JARVIS_SYSTEM_PROTOCOL + '\n\n' + renderStage(cwd)
-              } catch {}
-              return JARVIS_SYSTEM_PROTOCOL
-            },
+            // 全局 section 的 AssembleContext 只有 { scope, signal }，拿不到会话工作区；
+            // 「当前第几步」由 tools/index.js 按 agent 注册 luke-jarvis:stage section 提供。
+            text: () => JARVIS_SYSTEM_PROTOCOL,
           })
         )
       }
@@ -508,37 +454,9 @@ export function apply(ctx) {
     const toolsSvc =
       (ctx && ctx.tools) || (typeof ctx.get === 'function' ? ctx.get('tools') : undefined)
     if (toolsSvc && typeof toolsSvc.register === 'function') {
-      for (const def of TOOLS) {
-        const { handler, ...rest } = def
-        ctx.effect(() =>
-          toolsSvc.register(
-            defineTool({
-              ...rest,
-              parameters: normalizeParameters(rest.parameters),
-              output: {
-                schema: normalizeOutputSchema(rest.output && rest.output.schema),
-                render: (args, value) => {
-                  const text =
-                    rest.output && rest.output.render ? rest.output.render(value) : JSON.stringify(value ?? {})
-                  return Array.isArray(text) ? text : [{ type: 'text', text: String(text) }]
-                },
-              },
-              execute: (args, exec) => {
-                // 把 exec（调用会话）传给 handler——修复工作区漂移（exec.agent.session.header.cwd=用户工作区）
-                try { if (!getRuntimeContext() && exec && exec.ctx) setRuntimeContext(exec.ctx); rememberExec(exec) } catch {}
-                // 打标：该会话进入 jarvis 模式（流程闸后续据此强制蒸馏/须知）
-                try {
-                  if (String(rest.name || '').startsWith('jarvis_')) {
-                    const sid = exec && exec.agent && exec.agent.session && exec.agent.session.id
-                    markJarvisSession(sid)
-                  }
-                } catch {}
-                return handler(args, exec)
-              },
-            }),
-          ),
-        )
-      }
+      // TOOLS 已在 tools/index.js 规范成 DSH ToolDefinition（execute + output{schema,render}），
+      // 这里直接注册，不再二次包装（包装会让「契约」出现两份实现）。
+      for (const def of TOOLS) ctx.effect(() => toolsSvc.register(def))
     } else {
       console.error('[luke-jarvis] tools 服务不可用，模型工具未注册')
     }
