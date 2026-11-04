@@ -49,10 +49,26 @@
 - `bin/luke-jarvis.mjs`：`setup` 去掉「预设落位」与「profile patch 写预设行」两步（只保留技能落位
   + bundle 登记），`doctor`/`status` 改为检查 bundle patch 是否声明两个预设；避免安装后重复注册。
 
-**5) 版本线**
+**5) 版本线与依赖兼容（真机装出来的问题）**
 
 - `dsh.engines.dsh` 由 `>=0.1.1-rc.1` 提升到 `>=0.2.1-rc.1`；peer `@deepseek-ai/dsh-tools` 同步
-  （旧线没有 `execute/render` 契约，声明旧版本等于允许装出坏插件）。版本 0.10.3。
+  （旧线没有 `execute/render` 契约，声明旧版本等于允许装出坏插件）。
+- `@nanmicoder/dsh-agent-teams` 依赖由 `0.1.20` 提到 `^0.1.28`：0.1.20 的 peer 精确钉在
+  `dsh 0.1.x`，在 dsh 0.2.1-rc.5 上会被安装器直接判定「incompatible」并回滚整次安装——
+  真机 `dsh plugin add` 实测复现。0.1.28 的 peer 是 `*`、`engines.dsh >= 0.1.2-alpha.2`，
+  且 `compatibility.json` 覆盖 0.2.1-rc.1~rc.3、仍保留 `memberMaxDepth` 配置键。
+- 版本 0.10.3。
+
+**6) 真机安装验证（临时 profile，不动 web）**
+
+```
+dsh plugin --profile ljtest add file:/opt/work/luke-jarvis   # 装成功：dependency + bundles 登记
+dsh --profile ljtest --dump-config                            # 组合出 4 行：
+  agent-teams-patch(memberMaxDepth:2) / jarvis-core(luke-jarvis) /
+  preset-jarvis-org / preset-jarvis-captain
+dsh --profile ljtest --port 0 --no-open                       # 真实启动 45s：无插件挂载错误
+```
+验证后已删除临时 profile（`~/.dsh/profiles/ljtest`）。
 
 **验证（实跑）**
 

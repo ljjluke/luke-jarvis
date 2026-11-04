@@ -176,7 +176,8 @@ npx luke-jarvis doctor --profile web
 
 jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmicoder/dsh-agent-teams` 插件提供的 `agent_teams_*` 工具：
 
-- **luke-jarvis 已声明依赖**（package.json `dependencies`），但**部分 pnpm 配置（`autoInstallPeers: false`）不会自动装传递依赖**；
+- **luke-jarvis 已声明依赖**（package.json `dependencies`，`@nanmicoder/dsh-agent-teams ^0.1.28`），但**部分 pnpm 配置（`autoInstallPeers: false`）不会自动装传递依赖**；
+- **版本下限别退**：agent-teams `0.1.20` 的 peer 钉在 dsh `0.1.x`，在 dsh 0.2.1 上会被安装器判定不兼容并回滚整次安装（真机复现）；`0.1.28` 起才兼容 0.2.x。
 - **干净环境请手动确认**（缺了团队功能不可用）：
   ```bash
   pnpm add @nanmicoder/dsh-agent-teams

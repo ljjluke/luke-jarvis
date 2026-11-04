@@ -42,6 +42,18 @@ grep -q "    prefix: >-" preset/agent.cordis.yml && echo "   PRESET-PREFIX-OK（
 echo "== 9.6) agent-teams 成员委托深度（memberMaxDepth——ponder 在成员环境起子 agent 必需，默认0会拦） =="
 grep -q "memberMaxDepth: 2" cordis.patch.yml && echo "   MEMBER-DEPTH-OK（patch 含 memberMaxDepth: 2，用户安装自动带上）" || { echo "   MEMBER-DEPTH-FAIL（缺 memberMaxDepth——成员跑 ponder 八卦镜会 delegation limit 0 卡死）"; exit 1; }
 
+echo "== 9.7) agent-teams 依赖兼容（0.1.20 钉死 dsh 0.1.x，会让 0.2.x 安装器回滚） =="
+node -e "
+const p = require('./package.json')
+const spec = String((p.dependencies || {})['@nanmicoder/dsh-agent-teams'] || '')
+const m = spec.match(/(\\d+)\\.(\\d+)\\.(\\d+)/)
+if (!m) { console.error('BAD: package.json 缺 @nanmicoder/dsh-agent-teams 依赖'); process.exit(1) }
+const [maj, min, pat] = [+m[1], +m[2], +m[3]]
+const ok = maj > 0 || min > 1 || (min === 1 && pat >= 28)
+if (!ok) { console.error('BAD: ' + spec + ' 的 peer 钉在 dsh 0.1.x，0.2.x 安装会被回滚（需要 >= 0.1.28）'); process.exit(1) }
+console.log('   AGENT-TEAMS-COMPAT-OK（' + spec + '）')
+" || exit 1
+
 echo "== 10) 蒸馏深度硬闸行为实测（浅层卡须被拦） =="
 node -e "
 import('./src/host/plugin.js').then(async (m) => {
