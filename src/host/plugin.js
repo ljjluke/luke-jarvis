@@ -21,7 +21,7 @@
 /** 公屏（统一黑板）持久化路径：<workspace>/.jarvis/board.json（项目级，与 RPC/HTTP 读取同一约定）
  * 工作区优先取当前会话 header.cwd（用户工作区），process.cwd 仅兜底——修复"写到服务目录非项目目录" */
 function boardFilePath() {
-  const cwd = resolveWorkspace(moduleCtx, latestExec) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
+  const cwd = resolveWorkspace(getRuntimeContext(), getLatestExec()) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
   return (cwd ? cwd + '/' : '') + '.jarvis/board.json'
 }
 
@@ -79,7 +79,7 @@ export function nextBoardId(items) {
  * projectDir 显式传入优先（T8：修「依赖进程级单例 → 写到 profile 目录」的落盘漂移）。 */
 function companyStateFile(projectDir) {
   const explicit = String(projectDir || '').trim()
-  const cwd = explicit || resolveWorkspace(moduleCtx, latestExec) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
+  const cwd = explicit || resolveWorkspace(getRuntimeContext(), getLatestExec()) || (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
   return (cwd ? cwd + '/' : '') + '.jarvis/company-state.json'
 }
 
@@ -240,67 +240,12 @@ import { Engine, reasonText } from './core/index.js'
 import { JsonTicketRepositories } from './adapters/json-tickets.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from './distill/index.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from './protocol/index.js'
+import { setRuntimeContext, rememberExec, getRuntimeContext, getLatestExec, getResolvedWorkspace, resolveWorkspace, ponderVerifyProjectDir, getFsService, listNames, readTextSafe, hasTeamJson } from './runtime.js'
 // 保持对外导入面不变（test/plugin.test.js 等直接 import 这些名字）
 export { checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry } from './distill/index.js'
 export { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from './protocol/index.js'
+export { resolveWorkspace, ponderVerifyProjectDir, getFsService, listNames, readTextSafe, hasTeamJson } from './runtime.js'
 const _require = createRequire(import.meta.url)
-/**
- * F4b-p1：统一「列目录名」——支持 list(dir) 与 DSH FileSystem 的 resolve(dir)+listDir(target) 两种形态。
- * 返回 string[]（空数组=目录存在但为空）；返回 null=查不了（服务缺失/后端异常）→ 调用方按各自语义降级。
- * 为什么必须统一：六个审计函数原来都以 typeof fsSvc.list === 'function' 为前置，真实 FileSystem 没有 list
- * → 它们在 GUI 环境恒走「良性默认」分支（开工须知/人才层/自领/卡死/ponder核验/覆盖六闸形同不存在）。
- */
-async function listNames(fsSvc, dir) {
-  if (!fsSvc) return null
-  try {
-    if (typeof fsSvc.list === 'function') {
-      const n = await fsSvc.list(dir)
-      return Array.isArray(n) ? n.map(String) : []
-    }
-    if (typeof fsSvc.resolve === 'function' && typeof fsSvc.listDir === 'function') {
-      let target
-      try { target = await fsSvc.resolve(dir) } catch { return null }
-      if (!target) return []
-      const entries = await fsSvc.listDir(target)
-      return (Array.isArray(entries) ? entries : []).map((e) => String(e && e.name !== undefined ? e.name : e))
-    }
-    return null
-  } catch { return null }
-}
-/**
- * F4b-p2：安全读文本——真实 FileSystem 的 readText 需要 FsTarget（先 resolve），
- * 旧代码直接传字符串路径 → 抛错被 catch 吞 → 审计函数「什么都没查」却返回良性结果（同 fail-open 家族缺陷）。
- * 兼容 mock（readText 直接吃字符串）：先试 resolve 后的 target，失败再回退原字符串。
- */
-async function readTextSafe(fsSvc, absPath) {
-  if (!fsSvc || typeof fsSvc.readText !== 'function') return null
-  let first = absPath
-  if (typeof fsSvc.resolve === 'function') {
-    try { const t = await fsSvc.resolve(absPath); if (t) first = t } catch { /* 保留字符串再试 */ }
-  }
-  try {
-    const text = await fsSvc.readText(first)
-    if (text) return text
-  } catch { /* 再试原字符串（mock 形态） */ }
-  if (first !== absPath) {
-    try {
-      const text = await fsSvc.readText(absPath)
-      if (text) return text
-    } catch { /* 放弃 */ }
-  }
-  return null
-}
-/** 判断 .agent-teams 下是否有 team.json（真实布局 .agent-teams/<团队>/team.json，不是平铺；平铺兼容） */
-async function hasTeamJson(fsSvc, teamsDir) {
-  const names = await listNames(fsSvc, teamsDir)
-  if (names === null) return null // 查不了 → 调用方按 fail-open 处理
-  if (names.includes('team.json')) return true
-  for (const name of names) {
-    const inner = await listNames(fsSvc, teamsDir + '/' + name)
-    if (inner && inner.includes('team.json')) return true
-  }
-  return false
-}
 // ══════════════════════════════════════════════════════════════════════════════════
 // T11：PixOffice relay 协议（方案B）——把 company-state 投影成「场景快照帧 + 命令」
 //
@@ -442,30 +387,6 @@ export function validatePixOfficeCommand(command) {
   return { ok: true, command: c }
 }
 
-/**
- * F4b：统一取 fs 服务。**模块级工具 handler 拿不到 apply 的形参 ctx**（裸 `ctx` 会 ReferenceError 被 catch 吞掉 →
- * fsSvc 恒 null → hasGlob fail-open → 闸变空壳）。优先级：exec.ctx.fs > moduleCtx.fs > moduleCtx.get('fs')。
- * 取不到返回 null（由 hasGlob/各审计函数按各自语义降级，绝不静默抛错）。
- */
-export function getFsService(exec) {
-  const pick = (holder) => {
-    if (!holder) return null
-    try {
-      const direct = typeof holder.fs === 'object' && holder.fs ? holder.fs : null
-      if (direct && typeof direct.resolve === 'function') return direct
-    } catch { /* 继续 */ }
-    try {
-      const viaGet = typeof holder.get === 'function' ? holder.get('fs') : null
-      if (viaGet && typeof viaGet.resolve === 'function') return viaGet
-    } catch { /* 继续 */ }
-    return null
-  }
-  try {
-    const fromExec = pick(exec && exec.ctx)
-    if (fromExec) return fromExec
-  } catch { /* 继续 */ }
-  try { return pick(moduleCtx) } catch { return null }
-}
 
 /** 归一化 output.schema：根级/嵌套 required:[...] 数组 → 逐属性 required:true（value schema DSL）。
  * 递归处理嵌套对象节点；required 已按属性内联时原样返回。 */
@@ -1204,7 +1125,7 @@ export const TOOLS = [
         if (!dup) {
           items.push({ id: nextBoardId(items), role, type: '阻塞', content: boardEntry, status: 'open', essenceChecked: true, time: new Date().toISOString().slice(0, 16) })
           // 状态根守卫：插件仓库不写 .jarvis/board.json（防记忆文件污染插件项目）
-          const escConflict = stateRootConflict(resolveWorkspace(moduleCtx, exec))
+          const escConflict = stateRootConflict(resolveWorkspace(getRuntimeContext(), exec))
           const w = escConflict ? { ok: false, error: escConflict.error } : await writeBoardItems(fsSvc, items, disk.version)
           boardWritten = w.ok
           boardError = w.ok ? '' : w.error
@@ -1463,7 +1384,7 @@ export const TOOLS = [
       //   captain 只对"验证 ponder 的方法测试任务"附了须知，真实任务(实现/修复/验收)没附 → 成员没跑 ponder
       if (mode === 'audit') {
         const fsSvc = getFsService(exec)
-        const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
+        const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(getRuntimeContext()) || '.')
         const teamDir = String(args.teamDir ?? '').trim()
         const tasksJson = String(args.tasksJson ?? '').trim()
         let tasks = []
@@ -1500,7 +1421,7 @@ export const TOOLS = [
       const task = String(args.task ?? '').trim()
       const stakes = String(args.stakes ?? 'medium').trim()
       const home = os.homedir ? os.homedir() : '/root'
-      const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
+      const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(getRuntimeContext()) || '.')
       const ponderDir = String(args.ponderDir ?? '').trim() || path.join(home, '.dsh/skills/ponder')
       const dataDirHint = projectDir + '/.jarvis/ponder-runs/<你的 run_id>/'
       const sg = ponderDir + '/scripts/step-guard.cjs'
@@ -1852,9 +1773,9 @@ export const TOOLS = [
 
       // 核验留痕：PASS 且有 taskId → 写 .jarvis/docs/ponder-verify/<taskId>-<runId>.json
       // 收口闸据此强制"每个成员任务都经过 ponder 真核验"（scan 实证：jarvis_ponder_check 从未被调用）
-      // D7：落盘目录必须来自「本次调用的事实」，不能用进程级单例 resolveWorkspace(moduleCtx)——
+      // D7：落盘目录必须来自「本次调用的事实」，不能用进程级单例 resolveWorkspace(getRuntimeContext())——
       // 实证漂移：成员会话里记录写到了 /root/.dsh/profiles/web/.jarvis（收口闸读的是项目目录 → 读不到记录）。
-      // 来源优先级：args.projectDir > exec.agent.session.header.cwd > resolveWorkspace(moduleCtx) > '.'
+      // 来源优先级：args.projectDir > exec.agent.session.header.cwd > resolveWorkspace(getRuntimeContext()) > '.'
       const wrote = { path: '', dir: '' }
       try {
         const taskId = String(args.taskId ?? '').trim()
@@ -2271,7 +2192,7 @@ export const TOOLS = [
       if (args.groupchat === true) {
         const path = _require('node:path')
         const fsSvc3 = getFsService(exec)
-        const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
+        const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(getRuntimeContext()) || '.')
         const topic = String(args.topic ?? args.agenda ?? '未命名议题').trim()
         const attendees = String(args.attendees ?? '全员').trim().split(',').map((x) => x.trim()).filter(Boolean)
         const order = String(args.order ?? attendees.join('→')).trim() // 排队发言顺序
@@ -2581,7 +2502,7 @@ export const TOOLS = [
         })()
         if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
           try {
-            const cwd = resolveWorkspace(moduleCtx)
+            const cwd = resolveWorkspace(getRuntimeContext())
             const pPath = (cwd ? cwd + '/' : '') + '.jarvis/project.md'
             const target = await fsSvc.resolve(pPath)
             if (target) {
@@ -2791,7 +2712,7 @@ export const TOOLS = [
       const summary = `未决 ${openItems.length} 项；阻塞 ${blockers.length} 项${blockers.length ? '：' + blockers.map((b) => b.id + '(' + b.content.slice(0, 20) + ')').join(', ') : ''}。${reason}${essenceNote}`
       // 写回磁盘（项目级公屏持久化）。成功=真源已更新；失败=本次仅内存返回（下次调用仍以磁盘为准，不伪造持久化）
       // 状态根守卫：插件仓库不写 .jarvis/board.json（防记忆文件污染插件项目）
-      const boardConflict = stateRootConflict(resolveWorkspace(moduleCtx, exec))
+      const boardConflict = stateRootConflict(resolveWorkspace(getRuntimeContext(), exec))
       const persisted = boardConflict ? { ok: false, error: boardConflict.error } : await writeBoardItems(fsSvc, items, disk.version)
       // 资源闭环检查（代码级归一化：有 open 的资源需求 = 未闭环 = 相关任务不得标记完成——压缩不丢）
       const openResources = items.filter((i) => i.type === '资源需求' && i.status === 'open')
@@ -3017,16 +2938,16 @@ export const TOOLS = [
     handler: async (args, exec) => {
       const mode = String(args.mode ?? 'snapshot').trim()
       // T8：模块级工具 handler 拿不到 apply 的形参 ctx（旧写法 `ctx && ctx.get` 会 ReferenceError → fsSvc 恒 null，
-      // 这正是「无 fs 未落盘」的根因之一）；改用 apply 写入的模块级 moduleCtx。
+      // 这正是「无 fs 未落盘」的根因之一）；改用 apply 写入的模块级 getRuntimeContext()。
       const fsSvc = (() => {
-        try { return (moduleCtx && moduleCtx.get && moduleCtx.get('fs')) || null } catch { return null }
+        try { return (getRuntimeContext() && getRuntimeContext().get && getRuntimeContext().get('fs')) || null } catch { return null }
       })()
       const path = _require('node:path')
       // T8：落盘目录取「本次调用的事实」——args.projectDir > 调用会话 cwd > 进程兜底；
       // 并用**绝对路径**（旧实现用相对 '.jarvis/company-state.json'，依赖进程 cwd → GUI 侧永远读不到数据）。
       const projectDir = String(args.projectDir ?? '').trim()
         || String((exec && exec.agent && exec.agent.session && exec.agent.session.header && exec.agent.session.header.cwd) || '').trim()
-        || resolveWorkspace(moduleCtx) || '.'
+        || resolveWorkspace(getRuntimeContext()) || '.'
       const stateFile = path.join(projectDir, '.jarvis/company-state.json')
       // 读当前快照（fs 服务优先，失败/不可用 → node:fs 兜底，见 readCompanyState）
       let state = await readCompanyState(fsSvc, projectDir)
@@ -3110,7 +3031,7 @@ export const TOOLS = [
     handler: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
-      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
       // 状态根守卫：插件仓库不写 .jarvis（防记忆文件污染插件项目）
       const conflict = stateRootConflict(projectDir)
       if (conflict) return { written: '', memoryAgeHours: 0, openTasks: 0, verdict: `⛔ ${conflict.message}` }
@@ -3187,7 +3108,7 @@ export const TOOLS = [
     handler: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
-      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
       const slug = String(args?.slug ?? 'baseline').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
       const kind = String(args?.kind ?? 'web-ui').trim()
       // 状态根守卫：插件仓库不写 .jarvis/docs（防记忆文件污染插件项目）
@@ -3320,7 +3241,7 @@ export const TOOLS = [
       const written = []
       let ok = items.length > 0
       try {
-        const fsSvc = (() => { try { return moduleCtx && typeof moduleCtx.get === 'function' ? moduleCtx.get('fs') : null } catch { return null } })()
+        const fsSvc = (() => { try { return getRuntimeContext() && typeof getRuntimeContext().get === 'function' ? getRuntimeContext().get('fs') : null } catch { return null } })()
         try { fs.mkdirSync(docsDir, { recursive: true }) } catch {}
         const payload = { slug, kind, generatedAt: new Date().toISOString(), count: items.length, items }
         const md = ['# 基线清单 ' + slug + '（' + kind + '）', '', '共 ' + items.length + ' 条 —— **改造/替换类任务必须逐条覆盖**（用 jarvis_coverage persist=true slug=' + slug + ' 生成覆盖矩阵，收口闸强制覆盖率）', '', '| id | 标题 | 来源 | 类别 |', '|---|---|---|---|']
@@ -3488,13 +3409,13 @@ export const TOOLS = [
         if (want === 'true' || want === '1') {
           const path = _require('node:path')
           const fsm = _require('node:fs')
-          const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx, exec) || '.'
+          const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
           // 状态根守卫：插件仓库不写 .jarvis/docs（防记忆文件污染插件项目）
           const blocked = stateRootConflict(projectDir)
           const slug = String(args?.slug ?? 'matrix').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
           let exemptions = []
           try { const a = JSON.parse(String(args?.exemptions ?? '[]')); if (Array.isArray(a)) exemptions = a.map(String) } catch {}
-          const fsSvc = (() => { try { return moduleCtx && typeof moduleCtx.get === 'function' ? moduleCtx.get('fs') : null } catch { return null } })()
+          const fsSvc = (() => { try { return getRuntimeContext() && typeof getRuntimeContext().get === 'function' ? getRuntimeContext().get('fs') : null } catch { return null } })()
           const docsDir = path.join(projectDir, '.jarvis/docs')
           const jsonPath = path.join(docsDir, '覆盖矩阵-' + slug + '.json')
           const mdPath = path.join(docsDir, '覆盖矩阵-' + slug + '.md')
@@ -3770,7 +3691,7 @@ export const TOOLS = [
     handler: async (args, exec) => {
       const path = _require('node:path')
       const step = String(args.step ?? '').trim()
-      const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(moduleCtx) || '.')
+      const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(getRuntimeContext()) || '.')
       const fsSvc = getFsService(exec)
       const exists = async (rel) => {
         if (!fsSvc || typeof fsSvc.readText !== 'function') return false
@@ -4148,7 +4069,7 @@ export const TOOLS = [
     },
     handler: async (args) => {
       const path = _require('node:path')
-      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx) || '.'
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || '.'
       // 状态根守卫：插件仓库不是 jarvis 状态根，不写任务单（防记忆文件污染插件项目）
       const conflict = stateRootConflict(projectDir)
       const action = String(args?.action ?? 'list').trim()
@@ -5236,63 +5157,12 @@ let officeSeq = 0
 /** 记录"调用过 jarvis_* 工具的会话"——流程闸据此判定 jarvis 模式（不依赖 .jarvis 目录是否已建） */
 const _jarvisSessions = new Set()
 
-// ── 用户工作区解析（修复：插件原用 process.cwd()=服务进程目录，不是用户工作区
-//    ——导致 jarvis_board/company-state/记忆写到 /root/.dsh/profiles/web/.jarvis/
-//    而非项目 <workspace>/.jarvis/（用户实测"交付了但文件不存在"=路径漂移）；
-//    正确方式=从当前会话 header.cwd 拿用户工作区（agent-teams 同款），process.cwd 仅兜底）──
-let _resolvedWorkspace = null
-let moduleCtx = null
-let latestExec = null // 最近一次工具调用的 exec（供全局路径函数取会话 cwd）
-export function resolveWorkspace(ctx, exec) {
-  if (exec) {
-    try {
-      // 工具调用标准：exec.agent = 调用工具的会话 agent（agent-teams 同款：
-      //   agent.session.header.cwd = 用户工作区，process.cwd 仅兜底）
-      const agent = exec.agent || (exec.session && { session: exec.session })
-      const w = agent && agent.session && agent.session.header && agent.session.header.cwd
-      if (w && typeof w === 'string' && w.length > 0) return w
-    } catch { /* 拿不到则继续 */ }
-  }
-  if (_resolvedWorkspace) return _resolvedWorkspace
-  try {
-    const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
-    const me = agents && typeof agents.get === 'function'
-      ? (agents.get(ctx.scope?.sessionId) || agents.get(ctx.sessionId) || (agents.list && agents.list()?.[0]))
-      : undefined
-    const w = me && me.session && me.session.header && me.session.header.cwd
-    if (w && typeof w === 'string' && w.length > 0) { _resolvedWorkspace = w; return w }
-  } catch { /* 拿不到会话则用兜底 */ }
-  _resolvedWorkspace = (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
-  return _resolvedWorkspace
-}
 
-/**
- * D7：jarvis_ponder_check 核验记录的落盘项目目录（纯函数，可单测）。
- * 来源优先级（显式 > 会话 > 进程兜底）：
- *   ① args.projectDir（调用方显式指定，最可信）
- *   ② exec.agent.session.header.cwd（本次调用的会话工作区=用户真实工作区）
- *   ③ resolveWorkspace(moduleCtx)（进程级单例兜底——**已知会漂移**：成员会话曾把记录写到 profile 目录）
- *   ④ '.'（最后一档，保证不抛错）
- * 缺陷实证（D7）：原实现直接用 ③，记录落到 /root/.dsh/profiles/web/.jarvis/docs/ponder-verify，
- * 而收口闸/flowguard 读的是「会话 cwd 下的 .jarvis/docs/ponder-verify」→ 读不到记录 → 交活被误拒。
- */
-export function ponderVerifyProjectDir(args, exec) {
-  try {
-    const explicit = String((args && args.projectDir) || '').trim()
-    if (explicit) return explicit
-  } catch { /* 继续下一档 */ }
-  try {
-    const agent = exec && (exec.agent || (exec.session && { session: exec.session }))
-    const w = agent && agent.session && agent.session.header && agent.session.header.cwd
-    if (w && typeof w === 'string' && w.length > 0) return w
-  } catch { /* 继续下一档 */ }
-  return resolveWorkspace(moduleCtx) || '.'
-}
 
 export default {
   inject,
   apply(ctx) {
-    moduleCtx = ctx
+    setRuntimeContext(ctx)
     resolveWorkspace(ctx) // 预热：apply 时即解析用户工作区（首个工具调用即用对路径）
 
     // ── T11：PixOffice relay 路由（方案B）──
@@ -5313,7 +5183,7 @@ export default {
               if (v && (v.startsWith('/') || v.includes('/'))) return v
             }
           } catch { /* 忽略 */ }
-          return resolveWorkspace(moduleCtx) || process.cwd()
+          return resolveWorkspace(getRuntimeContext()) || process.cwd()
         }
         const relayReadState = async (req) => {
           const cwd = relayDir(req)
@@ -5477,7 +5347,7 @@ export default {
               }
               if (!req || req.method !== 'GET') return send(405, { items: [], error: 'method-not-allowed' })
               try {
-                const cwd = resolveWorkspace(moduleCtx)
+                const cwd = resolveWorkspace(getRuntimeContext())
                 const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
                 let fsSvc = null
                 try { fsSvc = ctx.get('fs') } catch { fsSvc = null }
@@ -5560,11 +5430,11 @@ export default {
                 } catch {}
                 if (!cwd) {
                   try {
-                    const ag = latestExec && latestExec.agent
+                    const ag = getLatestExec() && getLatestExec().agent
                     cwd = (ag && ag.session && ag.session.header && ag.session.header.cwd) || ''
                   } catch {}
                 }
-                if (!cwd) cwd = _resolvedWorkspace || process.cwd()
+                if (!cwd) cwd = getResolvedWorkspace() || process.cwd()
                 const target = path.join(cwd, '.jarvis/company-state.json')
                 let state = null
                 try { state = JSON.parse(fsm.readFileSync(target, 'utf8')) } catch { state = null }
@@ -5642,7 +5512,7 @@ export default {
               },
               execute: (args, exec) => {
                 // 把 exec（调用会话）传给 handler——修复工作区漂移（exec.agent.session.header.cwd=用户工作区）
-                try { moduleCtx = moduleCtx || (exec && exec.ctx); latestExec = latestExec || exec } catch {}
+                try { if (!getRuntimeContext() && exec && exec.ctx) setRuntimeContext(exec.ctx); rememberExec(exec) } catch {}
                 // 打标：该会话进入 jarvis 模式（流程闸后续据此强制蒸馏/须知）
                 try {
                   if (String(rest.name || '').startsWith('jarvis_')) {
@@ -5707,7 +5577,7 @@ export default {
             globalThis.harness.handle('jarvis/board', async (args) => {
               const sessionId = args && args.sessionId ? String(args.sessionId) : ''
               try {
-                const cwd = resolveWorkspace(moduleCtx)
+                const cwd = resolveWorkspace(getRuntimeContext())
                 const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
                 let fsSvc = null
                 try { fsSvc = ctx.get('fs') } catch { fsSvc = null }

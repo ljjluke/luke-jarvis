@@ -85,8 +85,8 @@ git check-ignore -q .jarvis-archive/ && echo "   ARCHIVE-GUARD-OK" || { echo "  
 if git ls-files --error-unmatch .jarvis-archive >/dev/null 2>&1; then echo "   ARCHIVE-STILL-TRACKED（跑 git rm -r --cached .jarvis-archive）"; exit 1; fi
 echo "   ARCHIVE-UNTRACKED-OK"
 
-echo "== 15) 领域内核与模块化（core / adapters / distill / protocol） =="
-for f in src/host/core/model.js src/host/core/ports.js src/host/core/reasons.js src/host/core/stage.js src/host/core/tickets.js src/host/core/engine.js src/host/core/memory.js src/host/core/index.js src/host/adapters/json-tickets.js src/host/distill/index.js src/host/protocol/index.js; do
+echo "== 15) 领域内核与模块化（runtime / core / adapters / distill / protocol） =="
+for f in src/host/runtime.js src/host/core/model.js src/host/core/ports.js src/host/core/reasons.js src/host/core/stage.js src/host/core/tickets.js src/host/core/engine.js src/host/core/memory.js src/host/core/index.js src/host/adapters/json-tickets.js src/host/distill/index.js src/host/protocol/index.js; do
   [ -f "$f" ] || { echo "   MODULE-MISSING: $f"; exit 1; }
 done
 echo "   CORE-LAYOUT-OK"
