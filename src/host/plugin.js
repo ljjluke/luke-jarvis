@@ -252,6 +252,8 @@ import { execSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { toPixOfficeSnapshot } from './office-bridge.js'
+import { Engine, reasonText } from './core/index.js'
+import { JsonTicketRepositories } from './adapters/json-tickets.js'
 const _require = createRequire(import.meta.url)
 /**
  * F4b-p1：统一「列目录名」——支持 list(dir) 与 DSH FileSystem 的 resolve(dir)+listDir(target) 两种形态。
@@ -4445,6 +4447,125 @@ export const TOOLS = [
         }
       }
       return { verdict: '⚠️ 未知 mode（应为 compute/compare）', ok: false }
+    },
+  },
+
+  {
+    name: 'jarvis_ticket',
+    description:
+      '任务单内核（移植 dsh-superagent-prototype 的 Ticket/Assignment 领域模型）：把「需求裁决→开单→派单→汇报→重试/停止→阶段判定」变成可持久化状态机，落在 <项目>/.jarvis/tickets + decisions。动作：adjudicate=过闸裁决并开单（闸不过则只记 decision）；open=直接开单；list=列任务单；get=看单（阶段/是否可重试/派单）；report=成员汇报（progress/waiting/ready/blocked/failed/dropped，ready/dropped 结束任务单）；retry=卡住重试（仅 blocked/failed）；stop=人工停止。汇报语义对齐 prototype（ready→completed、dropped→dropped、blocked/failed→等人工且可重试），领域是数字公司；插件仓库拒写（STATE_ROOT_CONFLICT），普通项目正常落盘。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'adjudicate / open / list / get / report / retry / stop（默认 list）' },
+        projectDir: { type: 'string', description: '项目工作区（默认当前会话 cwd）' },
+        title: { type: 'string', description: '任务单标题（open/adjudicate）' },
+        stage: { type: 'string', description: '所属阶段 clarify/decompose/design/build/verify/close（默认 build）' },
+        role: { type: 'string', description: '承接角色（默认 captain）' },
+        ticketId: { type: 'string', description: '任务单 id（get/report/retry/stop）' },
+        assignmentId: { type: 'string', description: '派单 id（report 默认取最近派单）' },
+        state: { type: 'string', description: '汇报状态 progress/waiting/ready/blocked/failed/dropped' },
+        summary: { type: 'string', description: '汇报摘要' },
+        mandate: { type: 'string', description: '授权 JSON：{strength:"explicit"|"inferred", basis, by, gate}' },
+        reason: { type: 'string', description: 'stop 原因' },
+      },
+      required: ['action'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          action: { type: 'string' },
+          verdict: { type: 'string' },
+          text: { type: 'string' },
+          ticket: { type: 'object' },
+          decision: { type: 'object' },
+          tickets: { type: 'array', items: { type: 'object' } },
+        },
+        required: ['ok', 'verdict'],
+      },
+      render: (r) => `${r.ok ? '✅' : '⛔'} ${r.verdict}${r.text ? `\n${r.text}` : ''}${r.tickets && r.tickets.length ? `\n${r.tickets.map((t) => `${t.id} [${t.stage}] ${t.title}${t.ended ? '（已结束:' + t.ended.outcome + '）' : ''}`).join('\n')}` : ''}`,
+    },
+    handler: async (args) => {
+      const path = _require('node:path')
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(moduleCtx) || '.'
+      // 状态根守卫：插件仓库不是 jarvis 状态根，不写任务单（防记忆文件污染插件项目）
+      const conflict = stateRootConflict(projectDir)
+      const action = String(args?.action ?? 'list').trim()
+      if (conflict) return { ok: false, action, verdict: `⛔ ${conflict.message}` }
+      const repo = new JsonTicketRepositories(path.join(projectDir, '.jarvis'))
+      const engine = new Engine({ repo })
+      try {
+        if (action === 'list') {
+          const rows = engine.list()
+          const open = engine.open()
+          return {
+            ok: true,
+            action,
+            tickets: rows,
+            text: rows.slice(0, 50).map((t) => `${t.id} [${t.stage}] ${t.title} —— ${engine.view(t.id)?.text || ''}`).join('\n'),
+            verdict: `共 ${rows.length} 张任务单（未结束 ${open.length}）`,
+          }
+        }
+        if (action === 'get') {
+          const view = engine.view(String(args?.ticketId ?? ''))
+          if (!view) return { ok: false, action, verdict: `⛔ 任务单不存在：${args?.ticketId || '(空)'}` }
+          return {
+            ok: true,
+            action,
+            ticket: view.ticket,
+            text: `${view.ticket.id} [${view.ticket.stage}] ${view.ticket.title}\n状态：${view.text}${view.retryable ? '（可重试）' : ''}\n派单：${(view.ticket.assignments || []).map((a) => `${a.id}→${a.role}:${a.state}`).join(', ') || '无'}`,
+            verdict: `任务单 ${view.ticket.id}`,
+          }
+        }
+        if (action === 'open' || action === 'adjudicate') {
+          let mandate
+          try { mandate = args?.mandate ? JSON.parse(String(args.mandate)) : undefined } catch { mandate = undefined }
+          const input = {
+            title: String(args?.title ?? '').trim() || '未命名任务',
+            project: projectDir,
+            stage: String(args?.stage ?? 'build').trim() || 'build',
+            role: String(args?.role ?? 'captain').trim() || 'captain',
+            mandate,
+            origin: { triggerId: String(args?.triggerId ?? 'manual') },
+          }
+          const out = action === 'adjudicate' ? engine.adjudicate(input) : { ticket: engine.tickets.open(input) }
+          if (!out.ticket) {
+            return { ok: false, action, decision: out.decision, verdict: `⛔ 闸未通过：${reasonText(out.decision && out.decision.reason)}` }
+          }
+          const first = (out.ticket.assignments || [])[0] || {}
+          return {
+            ok: true,
+            action,
+            ticket: out.ticket,
+            text: `${out.ticket.id} [${out.ticket.stage}] ${out.ticket.title}\n派单：${first.id}→${first.role}（${first.state}）`,
+            verdict: `已开单 ${out.ticket.id}（${out.ticket.mandate.strength}：${out.ticket.mandate.basis}）`,
+          }
+        }
+        if (action === 'report') {
+          const ticket = engine.report(String(args?.ticketId ?? ''), {
+            assignmentId: String(args?.assignmentId ?? '').trim() || undefined,
+            state: String(args?.state ?? 'progress').trim(),
+            summary: String(args?.summary ?? ''),
+          })
+          const view = engine.view(ticket.id)
+          return { ok: true, action, ticket, text: view ? view.text : '', verdict: `汇报已记录（${args?.state}）→ ${view ? view.text : ''}` }
+        }
+        if (action === 'retry') {
+          const ticket = engine.retry(String(args?.ticketId ?? ''))
+          const view = engine.view(ticket.id)
+          return { ok: true, action, ticket, text: view ? view.text : '', verdict: `已重试 → ${view ? view.text : ''}` }
+        }
+        if (action === 'stop') {
+          const ticket = engine.stop(String(args?.ticketId ?? ''), String(args?.reason ?? ''))
+          return { ok: true, action, ticket, text: `已结束（${ticket.ended?.outcome}）`, verdict: `已停止 ${ticket.id}` }
+        }
+        return { ok: false, action, verdict: `⛔ 未知 action：${action}（adjudicate/open/list/get/report/retry/stop）` }
+      } catch (error) {
+        const code = error && error.code ? String(error.code) : ''
+        return { ok: false, action, verdict: `⛔ ${String((error && error.message) || error)}${code ? `（${code}）` : ''}` }
+      }
     },
   },
 ]

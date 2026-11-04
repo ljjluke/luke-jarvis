@@ -2,6 +2,29 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.10.0] - 2026-11-04
+
+### 领域内核：把 dsh-superagent-prototype 的核心架构搬进 luke-jarvis
+
+**背景**：此前「任务」只是模型自述 + 工具字符串，没有领域对象、没有生命周期、无法持久化与单测。本版引入 prototype 的分层：`core`（纯领域 + 端口）→ `adapters`（持久化/执行）→ 工具入口，`plugin.js` 不再包办一切。
+
+- **新增 `src/host/core/`**（移植自 prototype `core/`）：
+  - `model.js`：Ticket / Assignment / Report / Mandate / Stage / Outcome + 纯函数（liveTicket/latestAssignment/latestReport/waitsForPerson）
+  - `ports.js`：`Repositories` / `Executor` / `Clock` / `Policy` / `Outbox` 端口 + 默认实现（noopExecutor/systemClock/allowAllPolicy）
+  - `reasons.js`：结构化 reason 码 + 中文模板 + `reasonText()`
+  - `stage.js`：`ticketStage()`（ended / person(review|blocked|failed) / working(queued) / idle）+ `canRetry()` + 中文描述
+  - `tickets.js`：开单/派单/汇报/重试/停止/结束 + `TicketError(code)`，事务走 `repo.atomic`
+  - `engine.js`：唯一入口 `adjudicate()`（过闸→记 decision→开单）+ report/retry/stop/get/list/view + 事件回调
+  - `memory.js`：内存仓储（测试/预演，快照回滚）
+- **新增 `src/host/adapters/json-tickets.js`**：`Repositories` 的 JSON 实现，原子写（tmp+rename）到 `<项目>/.jarvis/tickets/*.json` 与 `decisions/*.json`。
+- **新增工具 `jarvis_ticket`**（第 30 个工具）：`adjudicate / open / list / get / report / retry / stop`；汇报语义对齐 prototype（ready→completed、dropped→dropped、blocked/failed→等人工且可 retry、stop→stopped）；插件仓库拒写（`STATE_ROOT_CONFLICT`，不建 `.jarvis/`）。
+- **测试**：新增 `test/core.test.js` **14 用例**（原子回滚/开单/汇报结束/阻塞可重试/重试换派单/停止/非法汇报/阶段判定/裁决过闸与拦截/JSON 仓储跨实例/工具全流程/插件仓库拒写/reasonText）→ 主套 **296** + core **14** = **310** 全绿。
+- **selfcheck** 第 15 项：core 布局齐全 + `jarvis_ticket` 已注册 + core 用例通过 → **15 项**。
+- `package.json`：新增 `exports["./core"]`、`exports["./adapters/*"]`，`test` 脚本纳入 core 用例；版本 0.10.0。
+- 文档：新增 [docs/CORE.md](docs/CORE.md)（分层对照/状态机/端口/台账）；STRUCTURE 与 README 同步（30 工具）。
+
+**仍未做**：`adapters/dsh-executor.js`（`ctx.jobs`/`ctx.subagents` 真执行）与自动推进（P3）、`plugin.js` 其余纯逻辑拆分（P2 待续）。
+
 ## [0.9.2] - 2026-11-03
 
 ### 完全插件包装：一条命令装全（CLI + 预设生成物 + 结构文档）

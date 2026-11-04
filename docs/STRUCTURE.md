@@ -48,10 +48,12 @@ luke-jarvis/
 │   ├── jarvis.md             # 唯一入口技能
 │   └── ponder/               # 十阶段（stages/ engine/ scripts/ resources/）
 ├── src/host/
-│   ├── plugin.js             # 6011 行：29 工具 + 闸 + 命令 + 路由 + systemPrompt
+│   ├── plugin.js             # 6170 行：30 工具 + 闸 + 命令 + 路由 + systemPrompt
+│   ├── core/                 # ★ 领域内核（移植自 dsh-superagent-prototype）：model/ports/reasons/stage/tickets/engine/memory
+│   ├── adapters/             # ★ 端口适配：json-tickets（.jarvis/tickets 持久化）
 │   └── vendor/               # superagent background.ts（P3 执行器预留，尚未接线）
 ├── office/                   # PixOffice 静态页（24MB，含 characters/assets）
-├── test/                     # plugin 296 用例 + e2e + bagua
+├── test/                     # plugin 296 用例 + core 14 用例 + e2e + bagua
 ├── scripts/                  # selfcheck / build-preset-patches / 一致性 / 预演
 ├── docs/                     # 架构、方案、安装、发布（含 archive/）
 ├── CHANGELOG.md              # 版本记录（0.9.2 及以前）
@@ -74,7 +76,9 @@ luke-jarvis/
 | 层 | 入口/文件 | 职责 | 不该做什么 |
 |---|---|---|---|
 | 挂载层 | `cordis.patch.yml` | 唯一根挂载：插件 + agent-teams（`memberMaxDepth: 2`） | 不写业务逻辑 |
-| 插件层 | `src/host/plugin.js` | 注册 29 工具、`/jarvis` 命令、4 条 guard、systemPrompt 注入、webServer 路由 | 不做领域模板/静态角色卡 |
+| 插件层 | `src/host/plugin.js` | 注册 30 工具、`/jarvis` 命令、4 条 guard、systemPrompt 注入、webServer 路由 | 不做领域模板/静态角色卡 |
+| 领域内核层 | `src/host/core/` | 任务单/派单/汇报/阶段/裁决（纯逻辑，端口注入，不碰 DSH） | 不读写文件、不发事件给宿主（由适配层做） |
+| 端口适配层 | `src/host/adapters/` | `json-tickets`：`.jarvis/tickets` 持久化；后续 `dsh-executor`：`ctx.jobs/subagents` 执行 | 不含业务判定 |
 | 预设层 | `preset/*.yml` → `presets/*.patch.yml` | agent-plane 组合（persona/工具/技能/ponder） | 不重复根挂载的插件行 |
 | 技能层 | `skills/jarvis.md`、`skills/ponder/` | 工作方式 + 十阶段思维器（随包） | 不写死流程分支（流程在插件机械闸） |
 | 状态层 | `<工作区>/.jarvis/` | board/gates/active-team/company-state（项目级状态根） | 不写插件仓库自身（`STATE_ROOT_CONFLICT`） |
@@ -157,24 +161,27 @@ jarvis 的**记忆文件**只属于用户项目工作区，插件仓库自身永
 4. 最小 CI：`node --test test/plugin.test.js` + `selfcheck` + `build-preset-patches --check` + `npm pack --dry-run`。
 5. `jarvis_update` 修包根路径 + semver tag 过滤（现在会把 `localVersion` 兜底成 `0.2.0`）。
 
-### ⏳ P2 · 代码结构（待做，需单独评审）
+### 🟡 P2 · 代码结构（进行中：core 内核已落，plugin.js 拆分待续）
 
-把 6011 行 `plugin.js` 拆成模块，`plugin.js` 保留为兼容 barrel（测试与老 import 不动）：
+**已完成（0.10.0）**：`src/host/core/` 领域内核 + `src/host/adapters/json-tickets.js` + `jarvis_ticket` 工具（见 [CORE.md](CORE.md)）——任务单/派单/汇报/阶段/裁决已是独立、可测、带端口的模块，`plugin.js` 只做工具注册与守卫。
+
+**待续**：把 6011 行 `plugin.js` 里剩余的纯逻辑拆出，`plugin.js` 保留为兼容 barrel（测试与老 import 不动）：
 
 ```
 src/host/
 ├── index.js        # apply / inject / 命令注册 / 路由（原文件尾部）
 ├── plugin.js       # 兼容入口：re-export（test/plugin.test.js 的 100+ 具名 import 不破）
+├── core/           # ✅ 已落：任务单/派单/汇报/阶段/裁决（本文件集）
+├── adapters/       # ✅ 已落 json-tickets；待落 dsh-executor
 ├── tools/          # 按域：memory / distill / review / planning / exec / company
 ├── gates/          # stageGate / flowGuard / captainGuard / memoryFresh / ponderCheck
-├── stage/          # computeStage / renderStage
 ├── state/          # board / gates.json / active-team / 原子写
 ├── distill/        # validateCardShape / assessCardDepth / distillGuide / fidelity
 ├── protocol/       # systemPrompt 11 步 + 企业文化
 └── ui/             # pixoffice relay + 路由 + adapter
 ```
 
-验收：每拆一个模块 = 一次提交 + `node --test` 保持 296 绿 + 公开导出集合不变（用脚本对比 `Object.keys`）。
+验收：每拆一个模块 = 一次提交 + `node --test` 保持全绿（296 + core 14）+ 公开导出集合不变（用脚本对比 `Object.keys`）。
 
 ### ⏳ P3 · 执行器 / 自动推进（R4，待做）
 
@@ -190,7 +197,8 @@ src/host/
 node scripts/build-preset-patches.mjs --check     # 预设生成物无漂移
 node bin/luke-jarvis.mjs help                     # CLI 可用
 node --test test/plugin.test.js                   # 296 pass（需宿主 dsh-tools 在场）
-bash scripts/selfcheck.sh                         # 14 项全过
+node --test test/core.test.js                     # 14 pass（领域内核：任务单/派单/汇报/裁决/仓储）
+bash scripts/selfcheck.sh                         # 15 项全过
 npm pack --dry-run                                # 包内含 bin/ presets/ skills/ office/
 ```
 
