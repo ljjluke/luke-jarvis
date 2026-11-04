@@ -41,7 +41,7 @@ node test/e2e-flow.test.mjs                      → 30 工具，链路闭环
 node scripts/build-preset-patches.mjs --check    → OK
 ```
 
-**仍未做**（诚实债务，非遗漏）：`scripts/` 仍平铺；`vendor/superagent-background.ts` 未接线（P3 执行器）；`plugin.js` 里 apply 的 4 条路由仍在（约 300 行，可再拆 `ui/`，但收益低于风险，留作下一步）。
+**仍未做**（诚实债务，非遗漏）：`scripts/` 仍平铺；`vendor/superagent-background.ts` 未接线（P3 执行器）；`plugin.js` 里 apply 的 4 条路由仍在（约 300 行，可再拆 `ui/`，但收益低于风险，留作下一步）；`tools/*.js` 的 import 面偏宽（每文件带齐各层依赖，未做按需收敛——不影响运行，只影响可读性）。
 
 ## [0.10.1] - 2026-11-04
 
