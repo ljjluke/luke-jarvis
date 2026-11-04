@@ -17,6 +17,7 @@ const _require = createRequire(import.meta.url)
 let _resolvedWorkspace = null
 let moduleCtx = null
 let latestExec = null // 最近一次工具调用的 exec（供全局路径函数取会话 cwd）
+const jarvisSessions = new Set()
 
 /** apply 时注入宿主 ctx（= 拆分前的 `moduleCtx = ctx`）。 */
 export function setRuntimeContext(ctx) { moduleCtx = ctx }
@@ -26,6 +27,9 @@ export function rememberExec(exec) { latestExec = latestExec || exec || null }
 export function getRuntimeContext() { return moduleCtx }
 /** 最近一次工具 exec（= 拆分前的 latestExec）。 */
 export function getLatestExec() { return latestExec }
+/** 该会话是否用过 jarvis_* 工具（流程闸据此判定「jarvis 模式」，不依赖 .jarvis 目录是否已建）。 */
+export function markJarvisSession(sid) { if (sid) jarvisSessions.add(String(sid)) }
+export function isJarvisSession(sid) { return jarvisSessions.has(String(sid)) }
 /** 已解析（含预热）的工作区（= 拆分前的 _resolvedWorkspace，仅供兜底读）。 */
 export function getResolvedWorkspace() { return _resolvedWorkspace }
 
