@@ -2,6 +2,20 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.10.6] - 2026-11-05
+
+### 阶段机与收口闸去掉 ponder 要求 + 执行流程文档/可跑演示
+
+- `computeStage`：execute 阶段不再要求 ponder 核验记录；close 阶段 next 文案去掉 ponder 核验；
+  注入文本里 `ponder核验=N` 改为 `ponder记录（可选，不作闸）=N`（与"不考核步骤"一致，避免误导）。
+- `jarvis_flowguard(step="close")`：去掉 `checkPonderVerify` 缺口（收口判据仍是三产物闭环 + 覆盖矩阵 + 黑板归拢）。
+- 新增 `docs/执行流程.md`：六阶段状态机、一次真实任务时序（23 步）、三条子流、闸清单（留什么/不再考核什么）、
+  状态目录、观察命令、诚实边界。
+- 新增 `scripts/demo-flow.mjs`：真跑一遍阶段机（造真实产物 + 打插件判定），`node scripts/demo-flow.mjs` 可见
+  1/6 → 6/6 的推进与越阶段拒绝，作为流程说明的可复现证据。
+
+验证：`node --test` 317/317；`node scripts/demo-flow.mjs` 六阶段推进正常（含越阶段拒绝）。
+
 ## [0.10.5] - 2026-11-05
 
 ### 把「基本工作流程」固化进插件，而不是考核「有没有用过某个步骤」

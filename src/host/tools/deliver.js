@@ -786,11 +786,7 @@ export const DELIVER_TOOLS = [
               const covMissing = await checkCoverageGate(fsSvc, projectDir, path)
               missing.push(...covMissing)
             } catch {}
-            // 成员任务 ponder 核验硬闸（防"裸干交付"）
-            try {
-              const povMissing = await checkPonderVerify(fsSvc, projectDir, path, ownedSet)
-              missing.push(...povMissing)
-            } catch {}
+            // ponder 核验：不再是收口硬闸（用户定调：流程固化，不考核步骤）——核验记录仍可用 jarvis_ponder_check 生成并查
           },
           next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',
         },

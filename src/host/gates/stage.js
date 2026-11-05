@@ -104,12 +104,12 @@ export function computeStage(cwd, opts = {}) {
     { id: 'decompose', ok: taskmap && gateOk('decompose'), missing: [...(taskmap ? [] : ['.jarvis/docs/任务编排-*.md（先跑 jarvis_taskgraph）']), ...(gateOk('decompose') ? [] : ['jarvis_flowguard(step="decompose")'])], next: 'jarvis_taskgraph 出任务编排 → jarvis_flowguard(step="decompose")' },
     { id: 'design', ok: designDoc && gateOk('design'), missing: [...(designDoc ? [] : ['.jarvis/docs/方案设计-*.md']), ...(gateOk('design') ? [] : ['jarvis_flowguard(step="design")'])], next: '产出方案设计（每条需求→实现落点）→ jarvis_flowguard(step="design")' },
     { id: 'build', ok: cards >= 2 && teams > 0 && gateOk('build'), missing: [...(cards >= 2 ? [] : [`.jarvis/cards/ 角色卡（当前 ${cards} 张，需≥2：带队卡+岗位卡）`]), ...(teams > 0 ? [] : ['建队（agent_teams_create）']), ...(gateOk('build') ? [] : ['jarvis_flowguard(step="build")'])], next: 'jarvis_distill 蒸馏角色卡 → jarvis_flowguard(step="build") → agent_teams_create → add_member' },
-    { id: 'execute', ok: openTasks === 0 && teams > 0, missing: [...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个`]), ...(verify > 0 ? [] : ['ponder 核验记录（成员交活前必须 jarvis_ponder_check(taskId=…) 拿 PASS）'])], next: '派活(带开工须知) → 盯控(agent_teams_status) → 每个成员任务 dismount 前过 ponder 核验' },
+    { id: 'execute', ok: openTasks === 0 && teams > 0, missing: [...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个`])], next: 'jarvis_dispatch_task 派活（自动带卡+须知）→ 盯控(agent_teams_status) → 交付物/证据验收' },
     // R1/②：close.ok 不再恒 false——由「收口闸」真实判定（gateOk('close')），过了才算收口完成。
     // 否则过了 flowguard(step="close") 阶段也永远停在 6/6「收口未完成」，`done` 永不包含 close（T3 报告 §三 边界 5）。
     // 纵深防御：再加 openTasks===0（闸是「历史上跑过一次」，任务可能被重新打开；闸过期不能授予「完成」）。
     // 诚实边界：close.ok 只表示「闸已过 + 当前无未完成任务」，不等于收口质量——质量由 flowguard(step="close") 的 9 条检查决定。
-    { id: 'close', ok: gateOk('close') && openTasks === 0, missing: [...(gateOk('close') ? [] : ['jarvis_flowguard(step="close")（覆盖矩阵+ponder核验+三产物闭环）']), ...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个（收口闸过期或被重开任务，需重跑 flowguard(step="close")）`])], next: 'jarvis_coverage(persist) → jarvis_essence → jarvis_flowguard(step="close") → jarvis_snapshot' },
+    { id: 'close', ok: gateOk('close') && openTasks === 0, missing: [...(gateOk('close') ? [] : ['jarvis_flowguard(step="close")（三产物闭环+覆盖矩阵+黑板归拢）']), ...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个（收口闸过期或被重开任务，需重跑 flowguard(step="close")）`])], next: 'jarvis_coverage(persist) → jarvis_essence → jarvis_flowguard(step="close") → jarvis_snapshot' },
   ]
   const firstOpen = states.findIndex((x) => !x.ok)
   const allOk = firstOpen === -1
@@ -144,7 +144,7 @@ export function renderStage(cwd, opts = {}) {
     r.missing.length ? `当前缺口：${r.missing.join('；')}` : '当前缺口：无',
     `下一步：${r.next}`,
     r.stage === 'build' ? '本阶段固化用法：jarvis_dispatch_task(assignee, subject, description, acceptance) 一步完成「角色卡+须知+建任务」，再用 agent_teams_reassign_task 唤醒成员。' : '',
-    `事实快照：需求规格=${r.artifacts.reqDoc ? '有' : '无'} 任务编排=${r.artifacts.taskmap ? '有' : '无'} 方案设计=${r.artifacts.designDoc ? '有' : '无'} 角色卡=${r.artifacts.cards} 团队=${r.artifacts.teams} 未完成任务=${r.artifacts.openTasks} ponder核验=${r.artifacts.verify}`,
+    `事实快照：需求规格=${r.artifacts.reqDoc ? '有' : '无'} 任务编排=${r.artifacts.taskmap ? '有' : '无'} 方案设计=${r.artifacts.designDoc ? '有' : '无'} 角色卡=${r.artifacts.cards} 团队=${r.artifacts.teams} 未完成任务=${r.artifacts.openTasks} ponder记录（可选，不作闸）=${r.artifacts.verify}`,
     '规则：只做当前阶段允许的动作；下游动作（建队/派活）在阶段未过时会被机械闸拒绝。',
   ]
   return lines.join('\n')
