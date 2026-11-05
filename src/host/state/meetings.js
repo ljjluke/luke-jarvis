@@ -259,5 +259,9 @@ export function checkMinutesShape(m) {
   if (!resolutions.length && !String(m.conclusion || '').trim()) missing.push('resolutions/conclusion（会议结论——开了会没结论等于没开）')
   const actions = Array.isArray(m.actions) ? m.actions : []
   if (!actions.length) missing.push('actions（会后谁负责什么）')
+  // 真会议：纪要里必须有 ≥2 个不同发言人的观点（一个人自说自话不算开会——这不是格式要求，是"会开了"的证据）
+  const content = Array.isArray(m.content) ? m.content : []
+  const speakers = [...new Set(content.map((c) => String((c && (c.who || c.speaker)) || '')).filter(Boolean))]
+  if (speakers.length < 2) missing.push('content（至少 2 个不同发言人的观点：谁说了什么——没有多人发言=自说自话，不算开会）')
   return missing
 }

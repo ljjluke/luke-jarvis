@@ -69,6 +69,7 @@ fs.writeFileSync(path.join(proj, '.jarvis/meetings/m0-minutes.json'), JSON.strin
   type: 'kickoff', topic: '开工对齐：会员复购增长', date: '2026-11-05', attendees: ['CEO', '产品增长', '猎头'],
   agenda: ['目标与验收', '接口契约', '依赖与分工'],
   resolutions: ['R1 目标：30 天复购率 +5%，可判定', 'R2 接口：产品给分层规则，数据给口径，增长给触达方案'],
+  content: [{ who: 'CEO', what: '目标与验收标准' }, { who: '产品增长', what: '复购策略假设：先做最小可分发单元' }],
   actions: [{ who: '产品增长', what: '出分层模型' }],
 }, null, 2))
 show('5b. 写完开工对齐会纪要之后（必开会已消除）')
@@ -83,6 +84,7 @@ show('6a. 任务全交完、还没开收口会（注意「会议：必开 收口
 fs.writeFileSync(path.join(proj, '.jarvis/meetings/m1-minutes.json'), JSON.stringify({
   type: 'close', topic: '收口验收', date: '2026-11-05', attendees: ['CEO', '产品增长'],
   resolutions: ['R1 验收：三档策略+成本/预期/风险齐备，通过', 'R2 遗留：触达渠道细化 → 下轮'],
+  content: [{ who: '产品增长', what: '三档策略已交付' }, { who: 'CEO', what: '验收通过，遗留项下轮' }],
   actions: [{ who: 'CEO', what: '交付方案给用户' }],
 }, null, 2))
 recordGate(proj, 'close', true)
