@@ -227,7 +227,7 @@ export function meetingPolicy(projectDir, path = _require('node:path'), opts = {
 export function renderMeetingStatus(projectDir, path = _require('node:path'), opts = {}) {
   const p = meetingPolicy(projectDir, path, opts)
   if (p.required.length) {
-    return `会议：必开 ${p.required.map((r) => `${MEETING_LABELS[r.type] || r.type}（${r.why}）`).join('；')} → 用 jarvis_meeting(meetingType=…) 开会并把纪要写进 .jarvis/meetings/`
+    return `会议：必开 ${p.required.map((r) => `${MEETING_LABELS[r.type] || r.type}（${r.why}）`).join('；')} → 纪要落 .jarvis/meetings/<id>-minutes.json（没有纪要=这场会不算开过，build/execute/close 闸会拦）`
   }
   if (p.suggested.length) return `会议：建议 ${p.suggested.map((s) => `${MEETING_LABELS[s.type] || s.type}（${s.why}）`).join('；')}`
   return `会议：${p.noMeetingReason || '暂不需要开会'}`

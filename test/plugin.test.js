@@ -4481,7 +4481,7 @@ test('flowguard(build)：有团队有任务却没开工对齐纪要 → 缺口�
 })
 
 // ── 上下文压缩/新会话：流程不靠记忆，靠每轮从磁盘重算 + 首轮提醒 ──────────────
-test('压缩/新会话：agent 创建即挂「当前阶段」段，compact 来源额外提醒先读回项目记忆', async () => {
+test('压缩/新会话：agent 创建即挂「当前阶段 + 续接事实」段（事实来自磁盘，不用提示词命令模型）', async () => {
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'compact-'))
   fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
   fs.writeFileSync(path.join(proj, '.jarvis/project.md'), '# 记忆\n当前进度：x')
@@ -4504,8 +4504,10 @@ test('压缩/新会话：agent 创建即挂「当前阶段」段，compact 来�
   assert.strictEqual(sections[0].name, 'luke-jarvis:stage')
   const txt = sections[0].text()
   assert.ok(txt.includes('jarvis 当前阶段'), `首个请求就要有阶段（不依赖先调 jarvis 工具）：${txt.slice(0, 80)}`)
-  assert.ok(txt.includes('上下文压缩'), 'compact 来源必须明确提示')
-  assert.ok(txt.includes('jarvis_store(check)'), '要给具体动作：读回项目记忆')
+  // 关键：不靠"必须先去读记忆"的提示词——插件自己把磁盘事实放进上下文
+  assert.ok(txt.includes('续接事实'), `要直接给出磁盘事实：${txt.slice(-200)}`)
+  assert.ok(txt.includes('进度：'), '进度来自 project.md，不是模型记忆')
+  assert.ok(!/必须(先|要)|不要凭记忆/.test(txt), '不允许用提示词命令模型做事（流程要固化）')
   // 幂等：重复创建事件不重复挂
   handlers['agent/created']({ agent, source: 'compact' })
   assert.strictEqual(sections.length, 1, '同一 agent 只挂一次 section')
@@ -4513,5 +4515,26 @@ test('压缩/新会话：agent 创建即挂「当前阶段」段，compact 来�
   const s2 = []
   const agent2 = { session: { header: { cwd: proj } }, ctx: { systemPrompt: { section: (x) => { s2.push(x); return () => {} } } } }
   handlers['agent/created']({ agent: agent2, source: 'startup' })
-  assert.ok(!s2[0].text().includes('上下文压缩'), 'startup 不做压缩提示')
+  assert.ok(s2[0].text().includes('续接事实'), 'startup 也给事实（同样来自磁盘）')
+})
+
+// ── 续接事实：插件自己把磁盘事实放进上下文（不靠"必须先去读记忆"的提示词）────────
+test('续接事实：进度/下一步/未决/团队/决策 从 project.md 读出，标签不重复、不被别行抢', async () => {
+  const r = await import('../src/host/state/resume.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'resume-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/project.md'), [
+    '# 项目',
+    '- 当前进度：做到方案设计，等 CEO 拍板分层口径',
+    '- 下一步：拆任务派给产品增长',
+    '- 未决项：复购口径未定（B2）',
+    '- 团队：CEO/产品增长/猎头',
+    '- 关键决策：先做最小可分发单元（否决大而全）',
+  ].join('\n'))
+  fs.writeFileSync(path.join(proj, '.jarvis/board.json'), JSON.stringify({ items: [{ id: 'B1', type: '阻塞', content: 'x', status: 'open' }] }))
+  const txt = r.renderResumeFacts(proj)
+  assert.ok(txt.includes('进度：做到方案设计'), `进度要去掉重复前缀：${txt}`)
+  assert.ok(txt.includes('决策：先做最小可分发单元'), `决策行不能被"拍板"那行抢走：${txt}`)
+  assert.ok(txt.includes('黑板未决：1 项'), '黑板未决来自磁盘')
+  assert.ok(!/必须|不许|务必/.test(txt), '续接事实只陈述事实，不下命令')
 })

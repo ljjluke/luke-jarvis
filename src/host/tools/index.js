@@ -10,6 +10,7 @@
 import { assertObjectJsonSchema, assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import { getRuntimeContext, setRuntimeContext, rememberExec, markJarvisSession } from '../runtime.js'
 import { renderStage } from '../gates/stage.js'
+import { renderResumeFacts } from '../state/resume.js'
 import { INTAKE_TOOLS } from './intake.js'
 import { MEMORY_TOOLS } from './memory.js'
 import { DISTILL_TOOLS } from './distill.js'
@@ -26,43 +27,6 @@ function agentCwd(agent) {
   } catch {
     return ''
   }
-}
-
-/** 每个 agent 的启动来源（agent/created 的 source：startup/resume/clear/compact）。 */
-const AGENT_START = new WeakMap()
-
-/**
- * 记录 agent 是怎么起来的（由 apply 里的 agent/created 监听调用）。
- * 'compact'（上下文压缩后重建）/ 'resume'/'clear' 都要在首轮提醒"以磁盘事实为准、先把记忆读回来"——
- * 压缩丢的是对话记忆，不是流程；流程从 .jarvis/ 重新算得出来。
- */
-export function noteAgentStart(agent, source) {
-  try {
-    if (agent && typeof agent === 'object') AGENT_START.set(agent, String(source || 'startup'))
-  } catch {
-    /* WeakMap 写入失败不影响主流程 */
-  }
-}
-
-function agentStart(agent) {
-  try {
-    return AGENT_START.get(agent) || ''
-  } catch {
-    return ''
-  }
-}
-
-/** 压缩/恢复后的首轮提醒（确定性文本，不依赖模型记忆）。 */
-export function continuationNotice(agent) {
-  const src = agentStart(agent)
-  if (src !== 'compact' && src !== 'resume' && src !== 'clear') return ''
-  const label = src === 'compact' ? '上下文压缩后重建' : src === 'clear' ? '会话清空重建' : '会话恢复'
-  return [
-    `⚠️ 本会话是「${label}」：你之前的对话记忆可能不完整。**以磁盘事实为准，不要凭记忆假设**：`,
-    '- 先 jarvis_store(check) 读回 .jarvis/project.md（当前进度/下一步/未决项/团队清单/关键决策与依据）+ 需求规格/方案/黑板，再继续；',
-    '- 当前第几步、缺什么、下一步做什么，以本段「jarvis 当前阶段」实时计算为准（它是每次请求从磁盘重算的）；',
-    '- 用户原始需求细节如果记不全 → 从 .jarvis/docs/需求规格-*.md 读，不要凭印象补。',
-  ].join('\n')
 }
 
 /**
@@ -82,9 +46,17 @@ export function ensureAgentStageSection(agent) {
       order: 119,
       text: () => {
         try {
-          const stage = renderStage(agentCwd(agent))
-          const notice = continuationNotice(agent)
-          return notice ? stage + '\n\n' + notice : stage
+          const cwd = agentCwd(agent)
+          const stage = renderStage(cwd)
+          // 续接事实：插件自己把磁盘事实（进度/下一步/未决/团队/已过闸）读出来放进上下文，
+          // 不用提示词要求模型"先去读记忆"——压缩后提示词会掉精度，事实不会。
+          let facts = ''
+          try {
+            facts = renderResumeFacts(cwd)
+          } catch {
+            facts = ''
+          }
+          return facts ? stage + '\n\n' + facts : stage
         } catch {
           return ''
         }

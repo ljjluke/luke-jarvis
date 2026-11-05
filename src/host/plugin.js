@@ -51,7 +51,7 @@ const _require = createRequire(import.meta.url)
 
 
 /** 全局协作健康检查：依赖图是否闭环/孤立/有升级路径。 */
-import { TOOLS, ensureAgentStageSection, noteAgentStart } from './tools/index.js'
+import { TOOLS, ensureAgentStageSection } from './tools/index.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
 export { TOOLS }
@@ -508,9 +508,7 @@ export function apply(ctx) {
           ctx.on('agent/created', (payload) => {
             const agent = payload && payload.agent
             if (!agent) return undefined
-            try {
-              noteAgentStart(agent, payload.source)
-            } catch {}
+            // 阶段段 + 续接事实都在 section 的 text() 里每轮从磁盘重算——不需要记录 source
             ensureAgentStageSection(agent)
             return undefined
           }),
