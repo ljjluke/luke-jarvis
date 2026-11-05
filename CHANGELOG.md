@@ -2,6 +2,36 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.14.0] - 2026-11-05
+
+### 能力台（31 工具全接入）+ 员工协作空间换回开源 PixOffice（不自己画）
+
+用户要求：① 31 个能力全部接进 webui，没接完不能结束；② 员工协作空间用 `github.com/workbzw/pixoffice` 源码，
+基于原项目结果取可用部分来改，不许自己新写。
+
+**1) 能力台：UI → 31 个 jarvis 工具的真实执行通道**
+- `state/command.js`：从真实 `TOOLS` 派生 `toolSpecs()`（name/description/parameters/required/group），
+  `TOOL_GROUPS` 覆盖全部 31 个工具（单测断言漏一个就红）；
+- `POST /api/jarvis/command`：只允许 `jarvis_*`；走宿主 `tools.execute`（透传真实 agent）→
+  **captain 闸/阶段闸/流程闸照常生效**，UI 不是绕闸后门；被闸拒绝时回 `denied:true` + 原文原因；
+- `GET /api/jarvis/tools`、`GET /api/jarvis/sessions`（按工作区匹配活动会话，也可手选）；
+- 参数规整（数字/布尔/数组/对象/必填），schema 有 `projectDir` 时自动注入工作区；
+- 每次执行落 `command` 事件；界面「能力台 · 31 个工具」：分组列表 + 自动表单 + JSON 模式 + 结果 + 最近执行。
+
+**2) 协作空间：删掉手写 3D，改用开源 PixOffice 场景**
+- 删除 `office/v2/scene3d.js` 与手写 3D 的 `vendor/three.module.js`（用户明确不许自己发挥）；
+- 团队页改为同源 `<iframe src="/jarvis-office/jarvis-scene.html">`——即 `workbzw/pixoffice`（MIT）的办公室构建产物
+  （`office/assets/*`、`office/characters/*` 随包发布），画面/布局/交互一律是上游原样；
+- 数据经既有 relay `/api/pixoffice/events`（读 `.jarvis/company-state.json` → 上游协议帧，SSE + 单调 seq + 断线续传）；
+- 主题适配只加一层：注入 `#jarvis-theme` CSS（背景 `#02070d` + `canvas{filter:saturate(.92) contrast(1.04) brightness(.98) hue-rotate(-8deg)}`）
+  + 页面叠 `.team-scene-veil`（青光/渐变）与 `.team-scene-frame`（青色内描边+扫描线），**不动像素素材与布局**；
+- 色温参数集中在 `SCENE.theme` 一处可调；`window.__JARVIS_UI__.scene` 暴露注入状态。
+
+**3) 诚实边界**：帧结构/relay/静态托管/iframe 接线/主题注入都有单测与静态断言；
+本环境无浏览器，**像素级画面需重启后目视确认一次**（偏冷/偏亮改 `SCENE.theme.grade`）。
+
+验证：plugin 329 + core 14 = **343** 全绿；selfcheck / 工具契约 31 / e2e 全过；版本 0.14.0。
+
 ## [0.13.0] - 2026-11-05
 
 ### 增强 UI v2：真接 DSH（动态浮动块 + 3D 协作空间 + 语音大模型设置）

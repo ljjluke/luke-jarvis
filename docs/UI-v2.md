@@ -39,17 +39,49 @@
 
 **情感怎么来**：OpenAI `gpt-4o-mini-tts` 支持 `instructions`（"用平静克制的语气"），CosyVoice/IndexTTS 支持情感指令与参考音频。当前代理透传 `model/voice/speed`；要加 `instructions`/参考音频，改 `/api/jarvis/tts` 的请求体映射即可（P1 项）。
 
-## 三、3D 员工协作空间
+## 三、员工协作空间 = 开源 PixOffice 场景（不自己画）
 
-- 渲染：**Three.js（MIT，已 vendored 到 `office/v2/vendor/three.module.js`，不走 CDN）**，真 WebGL，不是 CSS 假 3D；
-- 场景：环形 6 工位 + 中心全息白板 + 平台网格 + 三色动态光；角色 = 胶囊身体 + 球头 + 状态环 + 名牌；
-- 交互：拖拽旋转、滚轮缩放、点击成员 → 会话里播报该成员状态；
-- 主题：颜色取自页面 CSS 变量（`--cyan/--green/--amber/--dim`），与全息 HUD 同一套，**不破坏原开源画面风格**；
-- 数据：`state.tasks.byAssignee` → 每个 assignee 一个工位；状态色：`in_progress/working` 青、`meeting` 琥珀、`idle/pending` 灰、`completed` 绿。
+**来源**：`https://github.com/workbzw/pixoffice`（PixOffice，MIT，Vite + React + PixiJS 的像素办公室）。
+仓库是 monorepo：`packages/renderer-pixi`（PixiJS 渲染）、`packages/protocol`（relay/协议）、`packages/assets-office`（像素素材）、
+`example/office-web`（完整办公室页面）。**画面一律来自它的源码/构建产物，jarvis 侧不重画场景。**
 
-**换用你提供的开源 3D 办公室**：只需替换 `office/v2/scene3d.js`，保持两个接口不变——
-`createOffice3D(canvas)` 返回 `{ setMembers(list), onPick(fn), dispose() }`；`setMembers` 收 `[{name, role, status, task}]`。
-页面与数据层不用动。
+**接入方式（同源 iframe + 数据 relay）**
+
+| 环节 | 做法 |
+|---|---|
+| 场景页 | `/jarvis-office/jarvis-scene.html` = 上游 office 页的构建产物（`office/assets/*`、`office/characters/*`，随插件包一起发） |
+| 配置 | `office/jarvis-scene-config.js` 里 `globalThis.__PIXOFFICE_CONFIG__ = { relayUrl: '' }` → 场景请求同源 `/api/pixoffice/events` |
+| 数据 relay | 插件路由 `/api/pixoffice/{events,messages,ui,reply}`：把 `.jarvis/company-state.json` 投影成上游协议帧（SSE，4s 心跳、跨连接单调 seq、`Last-Event-ID` 续传）；命令走白名单校验 |
+| 页面内嵌 | v2 团队页 `<iframe id="teamScene" src="/jarvis-office/jarvis-scene.html">`，与左侧成员/黑板/决策条同页 |
+
+**主题适配（改颜色但保原效果）**
+
+用户要求"主体风格颜色改成主题风格，但画面必须符合原来开源的效果"，所以只加适配层，**不动像素素材、布局与交互**：
+
+1. iframe 内注入一段 `#jarvis-theme` CSS（同源可注入）：`html,body{background:#02070d}`、`canvas{filter:saturate(.92) contrast(1.04) brightness(.98) hue-rotate(-8deg)}` —— 只压色温到冷青；
+2. 页面上叠两层不动交互的装饰：`.team-scene-veil`（径向青光 + 顶部青蓝渐变，`mix-blend-mode:screen`）、
+   `.team-scene-frame`（1px 青色内描边 + 内阴影 + 细扫描线），与全息 HUD 同一套视觉语言；
+3. 色温参数集中在 `office/v2/jarvis-v2.js` 的 `SCENE.theme`，一处可调；页面暴露 `window.__JARVIS_UI__.scene` 供核验是否注入成功。
+
+**升级上游**：`npm ci && npm run build`（`example/office-web`）→ 用新的 `dist` 覆盖 `office/{assets,characters,office}` 与 `jarvis-scene.html` 的资源清单即可；
+relay 协议若变，先跑 `test/` 里的帧校验用例（`buildPixOfficeFrame`/`validatePixOfficeFrame`）。
+
+**已核验 / 未核验（诚实边界）**：帧结构、relay 路由、静态托管、iframe 接线、主题注入代码均有单测/静态断言；
+**画面像素级效果本环境没有浏览器，无法截图验收**——重启后需要你在浏览器里目视确认一次（若色温偏冷/偏亮，改 `SCENE.theme.grade` 一处即可）。
+
+
+## 三之二、能力台（31 个工具全部可从界面执行）
+
+| 环节 | 做法 |
+|---|---|
+| 清单 | `GET /api/jarvis/tools`：从真实 `TOOLS` 派生 31 条（name/description/parameters/required/group），界面据此**自动生成表单** |
+| 执行 | `POST /api/jarvis/command {tool,args,agent?}`：只允许 `jarvis_*`，走宿主 `tools.execute` → **captain 闸/阶段闸/流程闸照常生效**（UI 不能当绕闸后门） |
+| 会话绑定 | `GET /api/jarvis/sessions`：按工作区自动匹配活动会话，也可在界面里手选（闸按该会话判定、文件按该 cwd 落盘） |
+| 结果 | 返回工具渲染文本 + 结构化 `value` + `elapsedMs`；被闸拒绝时 `denied:true` + 原文原因，界面明确提示"是硬流程，不是页面故障" |
+| 事件 | 每次执行落一条 `command` 事件（`.jarvis/events.jsonl`），时间轴/审计可见 |
+| 界面 | 光球菜单 →「能力台 · 31 个工具」：左侧按域分组（需求规划/人才角色/记忆知识/流程闸/交付验收/运行协作/深度思考），右侧表单 + JSON 模式 + 执行结果 + 最近执行记录 |
+
+覆盖校验：单测断言 `TOOL_GROUPS` 必须恰好覆盖全部 31 个工具（漏一个就红）。
 
 ## 四、与 DSH 的真实对接
 
@@ -59,7 +91,9 @@
 | 事件流 | `/api/jarvis/events?since=`（`.jarvis/events.jsonl`，闸/黑板/会议/派活写入） |
 | 语音设置 | `/api/jarvis/voice` GET/PUT（`state/voice.js`） |
 | 语音合成 | `/api/jarvis/tts`（OpenAI 兼容代理，key 不出服务端） |
-| 静态托管 | `/jarvis-office/*`（`office/` 目录），`/jarvis-ui` 302 到 v2 |
+| 能力台 | `/api/jarvis/tools`、`/api/jarvis/sessions`、`/api/jarvis/command` |
+| 公司场景 relay | `/api/pixoffice/{events,messages,ui,reply}`（读 `.jarvis/company-state.json`） |
+| 静态托管 | `/jarvis-office/*`（`office/` 目录，含开源场景构建产物），`/jarvis-ui` 302 到 v2 |
 | 工作区解析 | `?workspace=/abs/path`，缺省取最近会话 cwd |
 
 ## 五、验收

@@ -4737,15 +4737,17 @@ test('TTS 代理：未配置语音模型 → 400 + fallback=browser（前端据�
   }
 })
 
-test('v2 增强 UI：静态资产齐备、接真实接口、3D 画布与语音设置存在、无写死的演示文案', () => {
+test('v2 增强 UI：静态资产齐备、接真实接口、开源场景接入、语音设置存在、无写死的演示文案', () => {
   const repo = path.dirname(new URL(import.meta.url).pathname)
   const dir = path.join(repo, '../office/v2')
-  for (const f of ['index.html', 'jarvis-v2.js', 'scene3d.js', 'vendor/three.module.js']) {
+  for (const f of ['index.html', 'jarvis-v2.js']) {
     assert.ok(fs.existsSync(path.join(dir, f)), `缺少 v2 资产：${f}`)
   }
+  // 不许再自己手写 3D 场景（用户要求：基于开源源码，不自己发挥）
+  assert.ok(!fs.existsSync(path.join(dir, 'scene3d.js')), '不能保留手写 3D 场景模块')
+  assert.ok(!fs.existsSync(path.join(dir, 'vendor/three.module.js')), '不能保留手写 3D 的 three.js 依赖')
   const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8')
   const js = fs.readFileSync(path.join(dir, 'jarvis-v2.js'), 'utf8')
-  const scene = fs.readFileSync(path.join(dir, 'scene3d.js'), 'utf8')
   // 真实数据接入
   assert.ok(js.includes('/api/jarvis/state') && js.includes('/api/jarvis/events'), '必须接快照与事件流')
   assert.ok(js.includes('/api/jarvis/voice') && js.includes('/api/jarvis/tts'), '必须接语音设置与 TTS')
@@ -4753,11 +4755,11 @@ test('v2 增强 UI：静态资产齐备、接真实接口、3D 画布与语音�
   for (const id of ['mMissionTitle', 'mMissionCopy', 'mEventTitle', 'mNextTitle', 'mSay', 'pTitle', 'stageChain', 'tMembers', 'tBoard']) {
     assert.ok(html.includes(`id="${id}"`), `浮动块/面板缺少动态 id：${id}`)
   }
-  // 3D 协作空间
-  assert.ok(html.includes('id="team3d"'), '必须有 3D 画布')
-  assert.ok(/import \* as THREE from '\.\/vendor\/three\.module\.js'/.test(scene), '3D 用本地 vendored three.js（不依赖 CDN）')
-  assert.ok(scene.includes('setMembers'), '3D 必须有数据驱动接口 setMembers')
-  assert.ok(/WebGLRenderer/.test(scene), '必须是真 3D（WebGL）')
+  // 员工协作空间 = 开源 PixOffice 场景（iframe 同源托管 + 主题适配层）
+  assert.ok(/id="teamScene"[^>]*src="\/jarvis-office\/jarvis-scene\.html"/.test(html), '协作空间必须嵌开源 PixOffice 场景页')
+  assert.ok(html.includes('team-scene-veil') && html.includes('team-scene-frame'), '需要主题适配层（色温/描边/光晕）')
+  assert.ok(js.includes('jarvis-theme') && /hue-rotate|saturate\(/.test(js), '主题适配要注入 iframe（只压色温，不改画面结构）')
+  assert.ok(js.includes('workbzw/pixoffice'), '要标注场景来源（开源仓库），别当自己画的')
   // 语音设置面板
   assert.ok(html.includes('id="voiceSettings"') && html.includes('id="vProvider"') && html.includes('id="vVoice"'), '语音设置要有引擎/音色可选')
   // 不能再是写死的演示数据
@@ -4783,4 +4785,210 @@ test('v2 静态托管：/jarvis-office/v2/index.html 能取到（prefix 路由�
   assert.strictEqual(res.code, 200)
   assert.ok(/text\/html/.test(res.headers['content-type']))
   assert.ok(String(res.body).includes('JARVIS 全息任务中枢 v2'), '返回的确实是 v2 页面')
+})
+
+test('v2 会话输入不伪造执行（未接指令通道必须明说，而不是假装回复"收到/我会推进"）', () => {
+  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const js = fs.readFileSync(path.join(repo, '../office/v2/jarvis-v2.js'), 'utf8')
+  assert.ok(!/我会按流程推进/.test(js), '不能出现假的执行承诺')
+  assert.ok(/没有发出去|还没接|只做只读/.test(js), '必须明确告诉用户消息没发出去')
+  assert.ok(/只是?只读|只读数据面/.test(js), '必须写明当前只接了只读数据面')
+})
+
+// ── 能力台：31 个工具全部接入（清单/校验/执行/闸拒绝/界面覆盖）──────────────
+test('能力台：toolSpecs 覆盖全部 31 个工具，且每个工具都在界面的分组里（无遗漏）', async () => {
+  const { TOOL_GROUPS, toolSpecs } = await import('../src/host/state/command.js')
+  const { TOOLS } = await import('../src/host/tools/index.js')
+  const specs = toolSpecs()
+  assert.strictEqual(specs.length, TOOLS.length, 'spec 数必须等于真实工具数')
+  assert.strictEqual(TOOLS.length, 31)
+  const names = new Set(TOOLS.map((t) => t.name))
+  const grouped = new Set()
+  for (const [g, list] of Object.entries(TOOL_GROUPS)) {
+    for (const n of list) {
+      assert.ok(names.has(n), `分组 ${g} 里的 ${n} 不存在于真实工具`)
+      assert.ok(!grouped.has(n), `${n} 被分到多个组`)
+      grouped.add(n)
+    }
+  }
+  assert.strictEqual(grouped.size, TOOLS.length, `界面分组必须覆盖全部 ${TOOLS.length} 个工具，实际 ${grouped.size}`)
+  for (const s of specs) {
+    assert.ok(s.name && s.description, `${s.name} 缺描述`)
+    assert.ok(s.parameters && s.parameters.type === 'object', `${s.name} 参数 schema 必须是 object`)
+    assert.deepStrictEqual(s.required, Array.isArray(s.parameters.required) ? s.parameters.required : [])
+    assert.strictEqual(s.invokable, true)
+  }
+})
+
+test('能力台：参数规整（数字/布尔/数组/对象/必填缺失）', async () => {
+  const { normalizeArgs } = await import('../src/host/state/command.js')
+  const spec = {
+    parameters: {
+      type: 'object',
+      properties: {
+        count: { type: 'integer' },
+        flag: { type: 'boolean' },
+        tags: { type: 'array', items: { type: 'string' } },
+        meta: { type: 'object' },
+        text: { type: 'string' },
+      },
+      required: ['count', 'text'],
+    },
+    required: ['count', 'text'],
+  }
+  const r1 = normalizeArgs(spec, { count: '3', flag: 'true', tags: 'a\nb', meta: '{"x":1}', text: 'hi' })
+  assert.deepStrictEqual(r1.errors, [])
+  assert.strictEqual(r1.args.count, 3)
+  assert.strictEqual(r1.args.flag, true)
+  assert.deepStrictEqual(r1.args.tags, ['a', 'b'])
+  assert.deepStrictEqual(r1.args.meta, { x: 1 })
+  assert.strictEqual(r1.args.text, 'hi')
+  const r2 = normalizeArgs(spec, { text: '  ' })
+  assert.ok(r2.errors.some((e) => e.includes('count')), '缺必填要报出来')
+  assert.ok(r2.errors.some((e) => e.includes('text')), '空白字符串算没填')
+  const r3 = normalizeArgs(spec, { count: 'abc', text: 'x' })
+  assert.ok(r3.errors.some((e) => e.includes('count')))
+})
+
+test('能力台：执行只允许 jarvis_*，未知/越权/无会话都明确拒绝', async () => {
+  const { runCommand } = await import('../src/host/state/command.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'cmd-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const ctx = { get: () => ({ execute: async () => ({ isError: false, content: [{ text: 'ok' }], value: {} }) }) }
+  const r1 = await runCommand({ ctx, projectDir: proj, tool: 'bash', args: {}, agent: { session: { id: 's', header: { cwd: proj } } } })
+  assert.strictEqual(r1.ok, false)
+  assert.ok(/只允许调用 jarvis_/.test(r1.error))
+  const r2 = await runCommand({ ctx, projectDir: proj, tool: 'jarvis_not_exist', args: {}, agent: { session: { id: 's', header: { cwd: proj } } } })
+  assert.strictEqual(r2.ok, false)
+  assert.ok(/未知工具/.test(r2.error))
+  const r3 = await runCommand({ ctx, projectDir: proj, tool: 'jarvis_snapshot', args: {}, agent: null })
+  assert.strictEqual(r3.ok, false)
+  assert.ok(/活动会话/.test(r3.error))
+})
+
+test('能力台：真实走 tools.execute（透传 agent + 自动补 projectDir + 落 command 事件）', async () => {
+  const { runCommand } = await import('../src/host/state/command.js')
+  const ev = await import('../src/host/state/events.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'cmd2-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const calls = []
+  const ctx = {
+    get: () => ({
+      execute: async (exec) => {
+        calls.push(exec)
+        return { isError: false, content: [{ type: 'text', text: '阶段=build 缺口=0' }], value: { stage: 'build', missing: [] } }
+      },
+    }),
+  }
+  const agent = { session: { id: 'sess-1', header: { cwd: proj } } }
+  const out = await runCommand({ ctx, projectDir: proj, tool: 'jarvis_flowguard', args: { step: 'build' }, agent })
+  assert.strictEqual(out.ok, true)
+  assert.strictEqual(out.tool, 'jarvis_flowguard')
+  assert.ok(out.result.includes('阶段=build'))
+  assert.deepStrictEqual(out.value, { stage: 'build', missing: [] })
+  assert.strictEqual(calls.length, 1)
+  assert.strictEqual(calls[0].name, 'jarvis_flowguard')
+  assert.strictEqual(calls[0].agent, agent, '必须透传真实 agent（闸按该会话判定）')
+  assert.strictEqual(calls[0].arguments.step, 'build')
+  assert.strictEqual(calls[0].arguments.projectDir, proj, 'schema 有 projectDir 时自动补工作区')
+  const evs = ev.readEvents(proj)
+  assert.ok(evs.events.some((e) => e.type === 'command' && e.data.tool === 'jarvis_flowguard'), '执行要落 command 事件')
+})
+
+test('能力台：闸拒绝要如实回传（denied=true），不能被界面吞掉', async () => {
+  const { runCommand } = await import('../src/host/state/command.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'cmd3-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const ctx = {
+    get: () => ({
+      execute: async () => ({
+        isError: true,
+        content: [{ type: 'text', text: '【jarvis 流程闸】建队前必须先跑 jarvis_flowguard(step="clarify") 通过。' }],
+      }),
+    }),
+  }
+  const out = await runCommand({ ctx, projectDir: proj, tool: 'jarvis_meeting', args: { meetingType: 'kickoff' }, agent: { session: { id: 's', header: { cwd: proj } } } })
+  assert.strictEqual(out.ok, false)
+  assert.strictEqual(out.denied, true)
+  assert.ok(out.error.includes('流程闸'))
+})
+
+test('能力台路由：/api/jarvis/tools 返回 31 条；/api/jarvis/command 拒绝缺 tool / 缺工作区', async () => {
+  const routes = []
+  const ctx = {
+    get: (k) => (k === 'agents' ? { list: () => [] } : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const toolsRoute = routes.find((r) => r.path === '/api/jarvis/tools')
+  assert.ok(toolsRoute, '应注册 /api/jarvis/tools')
+  const r1 = fakeRes()
+  await toolsRoute.handler({ url: '/api/jarvis/tools', method: 'GET', headers: {} }, r1)
+  const b1 = JSON.parse(r1.body)
+  assert.strictEqual(b1.ok, true)
+  assert.strictEqual(b1.tools.length, 31, `能力台必须暴露 31 个工具，实际 ${b1.tools.length}`)
+
+  const cmdRoute = routes.find((r) => r.path === '/api/jarvis/command')
+  assert.ok(cmdRoute, '应注册 /api/jarvis/command')
+  const r2 = fakeRes()
+  await cmdRoute.handler(fakeReq('POST', {}), r2)
+  assert.strictEqual(JSON.parse(r2.body).ok, false)
+  const r3 = fakeRes()
+  await cmdRoute.handler({ ...fakeReq('POST', { tool: 'jarvis_snapshot' }), method: 'POST', url: '/api/jarvis/command' }, r3)
+  const b3 = JSON.parse(r3.body)
+  assert.strictEqual(b3.ok, false)
+  assert.ok(/工作区/.test(b3.error), `缺工作区要明确说：${b3.error}`)
+  const r4 = fakeRes()
+  await cmdRoute.handler({ ...fakeReq('GET', null), method: 'GET', url: '/api/jarvis/command' }, r4)
+  assert.strictEqual(r4.code, 405)
+})
+
+test('v2 能力台界面：31 工具列表 + 表单 + 执行入口都在页面里', () => {
+  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const html = fs.readFileSync(path.join(repo, '../office/v2/index.html'), 'utf8')
+  const js = fs.readFileSync(path.join(repo, '../office/v2/jarvis-v2.js'), 'utf8')
+  for (const id of ['consoleView', 'cToolList', 'cForm', 'cRun', 'cResult', 'cSession', 'cSearch']) {
+    assert.ok(html.includes(`id="${id}"`), `能力台缺少 ${id}`)
+  }
+  assert.ok(html.includes('能力台'), '菜单/标题要有能力台入口')
+  assert.ok(js.includes('/api/jarvis/tools'), '要拉工具清单')
+  assert.ok(js.includes('/api/jarvis/command'), '要调执行入口')
+  assert.ok(/闸拦住|被闸拦住/.test(js), '闸拒绝要显示给用户，不能静默')
+})
+
+test('v2 协作空间静态托管：场景页 + 上游构建资源都能取到（iframe 真实依赖）', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const prefix = routes.find((r) => r.kind === 'prefix' && r.path === '/jarvis-office')
+  assert.ok(prefix, '静态路由存在')
+  const get = async (url) => {
+    const res = { writeHead(c, h) { this.code = c; this.headers = h }, end(b) { this.body = b } }
+    await prefix.handler({ url, method: 'GET', headers: {} }, res)
+    return res
+  }
+  const scene = await get('/jarvis-office/jarvis-scene.html')
+  assert.strictEqual(scene.code, 200)
+  assert.ok(/text\/html/.test(scene.headers['content-type']))
+  const sceneHtml = String(scene.body)
+  assert.ok(sceneHtml.includes('/jarvis-office/assets/'), '场景页必须引用上游构建产物')
+  assert.ok(sceneHtml.includes('/jarvis-office/jarvis-scene-config.js'), '场景页必须加载 relay 配置')
+  // 取它真正引用的第一个 js 资源
+  const m = sceneHtml.match(/\/jarvis-office\/assets\/[A-Za-z0-9_-]+\.js/)
+  assert.ok(m, '场景页应有脚本资源')
+  const asset = await get(m[0])
+  assert.strictEqual(asset.code, 200, `资源必须可取：${m[0]}`)
+  assert.ok(/javascript/.test(asset.headers['content-type']))
+  // 配置里 relay 指向同源（否则场景会去跑上游 demo 假数据）
+  const cfgRes = await get('/jarvis-office/jarvis-scene-config.js')
+  assert.ok(/relayUrl:\s*''/.test(String(cfgRes.body)), 'relayUrl 必须为空字符串（同源 → /api/pixoffice/events）')
 })

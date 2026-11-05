@@ -55,6 +55,7 @@ import { TOOLS, ensureAgentStageSection } from './tools/index.js'
 import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
 import { readEvents } from './state/events.js'
 import { VOICE_PRESETS, publicVoiceConfig, readVoiceConfig, saveVoiceConfig, speechEndpoint } from './state/voice.js'
+import { pickAgent, runCommand, sessionFacts, toolSpecs } from './state/command.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
 export { TOOLS }
@@ -489,6 +490,73 @@ export function apply(ctx) {
                 tools: TOOLS.map((t) => ({ name: t.name, description: String(t.description || '').slice(0, 160) })),
                 panels: ['stage', 'tasks', 'board', 'meetings', 'cards', 'memory', 'company'],
               })
+            },
+          })
+        )
+
+        // 0.94) 能力台：UI → 31 个 jarvis 工具的真实执行通道（走宿主 tools.execute，闸照常生效）
+        //   GET  /api/jarvis/tools     → 工具清单 + 参数 schema（界面据此渲染表单）
+        //   GET  /api/jarvis/sessions  → 可绑定的活动会话
+        //   POST /api/jarvis/command   → {tool, args} 执行；拒绝时如实返回原因
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/tools',
+            handler: async (req, res) => {
+              try {
+                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, tools: toolSpecs() })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, tools: [], error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/sessions',
+            handler: async (req, res) => {
+              try {
+                const agents = ctx.get('agents')
+                return sendJson(res, 200, { ok: true, sessions: sessionFacts(agents) })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, sessions: [], error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/command',
+            handler: async (req, res) => {
+              if (String(req.method || 'GET').toUpperCase() !== 'POST') {
+                return sendJson(res, 405, { ok: false, error: '只接受 POST' })
+              }
+              const body = await readJsonBody(req).catch((e) => ({ __error: String(e.message || e) }))
+              if (body && body.__error) return sendJson(res, 400, { ok: false, error: body.__error })
+              const tool = String((body && body.tool) || '').trim()
+              if (!tool) return sendJson(res, 400, { ok: false, error: '缺少 tool' })
+              let projectDir = ''
+              try { projectDir = requestWorkspace(ctx, req) } catch { projectDir = '' }
+              if (!projectDir) return sendJson(res, 200, { ok: false, tool, error: '没有解析到工作区（带 ?workspace=<项目绝对路径>）' })
+              let agent = null
+              try {
+                const agents = ctx.get('agents')
+                const wanted = String((body && body.agent) || '').trim()
+                const list = sessionFacts(agents)
+                const hit = wanted ? list.find((s) => s.id === wanted) : null
+                agent = hit ? (agents.list() || []).find((a) => a && a.session && a.session.id === hit.id) : pickAgent(agents, projectDir)
+              } catch { agent = null }
+              const out = await runCommand({
+                ctx,
+                projectDir,
+                tool,
+                args: (body && body.args) || {},
+                agent,
+                signal: AbortSignal.timeout(120000),
+              })
+              return sendJson(res, 200, out)
             },
           })
         )

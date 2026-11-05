@@ -7,7 +7,6 @@
  *   /api/jarvis/tts          语音合成代理（OpenAI 兼容 /v1/audio/speech）
  *  每 5 秒刷新快照，每 3 秒拉事件；主界面浮动块全部由数据驱动，只有右下角光球是鼠标菜单。
  */
-import { createOffice3D } from './scene3d.js'
 
 const $ = (id) => document.getElementById(id)
 const fmtPct = (n) => `${Math.round(n)}%`
@@ -155,24 +154,63 @@ function renderProgress(snap) {
   }
 }
 
-// ── 团队页（含 3D）────────────────────────────────────────────────
-let office3d = null
-function init3d() {
-  const canvas = $('team3d')
-  if (!canvas || office3d) return
+// ── 团队页（含开源 PixOffice 场景）────────────────────────────────
+//  场景层 = 开源 PixOffice（github.com/workbzw/pixoffice，MIT）的构建产物，托管在同源 /jarvis-office/；
+//  数据经 relay（/api/pixoffice/events，读 .jarvis/company-state.json）喂给它。
+//  我们**不自己画场景**，只做两件事：① 主题适配（往 iframe 里注入 CSS：色温/描边/背景）② 与本页数据面板联动。
+const SCENE = { ready: false, iframe: null, theme: { grade: 'saturate(0.92) contrast(1.04) brightness(0.98) hue-rotate(-8deg)', bg: '#02070d' } }
+
+function sceneDoc() {
+  const f = SCENE.iframe
+  try { return f && f.contentDocument ? f.contentDocument : null } catch { return null }
+}
+
+/** 主题适配：只改色温/背景/描边，不动 pixoffice 的布局、像素素材与交互。 */
+function applySceneTheme() {
+  const doc = sceneDoc()
+  if (!doc || !doc.head) return false
   try {
-    office3d = createOffice3D(canvas)
-    office3d.onPick((m) => {
-      addChat('Jarvis', `${m.name}（${m.role || '成员'}）当前状态：${m.status || '未知'}${m.task ? ' · ' + m.task : ''}`)
-      if (STATE.voiceEnabled) speak(`${m.name}，${m.role || '成员'}，当前${m.status || '状态未知'}`)
-    })
-  } catch (e) {
-    canvas.insertAdjacentHTML('afterend', `<div class="empty-hint">3D 场景初始化失败：${esc(e.message)}（可能是浏览器不支持 WebGL）</div>`)
+    let el = doc.getElementById('jarvis-theme')
+    if (!el) {
+      el = doc.createElement('style')
+      el.id = 'jarvis-theme'
+      doc.head.appendChild(el)
+    }
+    el.textContent = [
+      ':root{color-scheme:dark}',
+      `html,body{background:${SCENE.theme.bg}!important}`,
+      // 画面整体压一点色温到冷青，像素素材与布局一字不动
+      `canvas{filter:${SCENE.theme.grade}}`,
+      // 上游自带的浅色面板/文字，统一压到暗色主题（只动颜色，不动尺寸与位置）
+      'body{color:#bfe3ee}',
+      '#root{background:transparent!important}',
+    ].join('\n')
+    return true
+  } catch { return false }
+}
+
+function initScene() {
+  if (SCENE.iframe) return
+  const f = $('teamScene')
+  if (!f) return
+  SCENE.iframe = f
+  const hint = $('teamSceneHint')
+  const done = () => {
+    SCENE.ready = true
+    applySceneTheme()
+    // 上游场景启动后会自己挂 canvas；延迟再刷一次主题（避免注入早于渲染）
+    setTimeout(applySceneTheme, 800)
+    setTimeout(applySceneTheme, 2200)
+    if (hint) hint.textContent = 'SOURCE: github.com/workbzw/pixoffice · RELAY: /api/pixoffice'
   }
+  if (f.contentDocument && f.contentDocument.readyState === 'complete') done()
+  f.addEventListener('load', done)
+  // 兜底：3.5s 后若没 load 事件，也尝试注入（同源 iframe 常见）
+  setTimeout(() => { if (!SCENE.ready) done() }, 3500)
 }
 
 function renderTeam(snap) {
-  init3d()
+  initScene()
   const tasks = snap.tasks || { byAssignee: [], teams: [] }
   const board = snap.board || { open: [], blockers: [] }
   const meetings = snap.meetings || { required: [] }
@@ -196,7 +234,6 @@ function renderTeam(snap) {
         }).join('')
       : '<div class="empty-hint">还没有团队数据：建队后这里会出现真实成员与任务。</div>'
   }
-  if (office3d) office3d.setMembers(members)
 
   const boardEl = $('tBoard')
   if (boardEl) {
@@ -254,11 +291,11 @@ async function loadEvents() {
 }
 
 // ── 视图切换 ──────────────────────────────────────────────────────
-const views = { main: $('mainView'), progress: $('progressView'), team: $('teamView') }
+const views = { main: $('mainView'), progress: $('progressView'), team: $('teamView'), console: $('consoleView') }
 function activate(name, hash = '') {
   for (const [k, el] of Object.entries(views)) el?.classList.toggle('active', k === name)
   if (hash && location.hash !== hash) history.replaceState(null, '', hash)
-  if (name === 'team') init3d()
+  if (name === 'team') initScene()
 }
 function showMain(announce = true) {
   activate('main', '')
@@ -574,6 +611,7 @@ function addChat(who, text) {
   log.appendChild(div)
   log.scrollTop = log.scrollHeight
 }
+// 注意：这里**不伪造回复**。指令面（写操作/驱动会话）还没接，页面明说，别让用户以为发出去了。
 $('teamChatForm')?.addEventListener('submit', (e) => {
   e.preventDefault()
   const input = $('teamChatInput')
@@ -581,12 +619,8 @@ $('teamChatForm')?.addEventListener('submit', (e) => {
   if (!text) return
   addChat('你', text)
   input.value = ''
-  const snap = STATE.snapshot
-  const s = snap?.stage
-  const reply = s && s.index
-    ? `收到。当前在${s.label}阶段，缺口 ${(s.missing || []).length} 项；我会按流程推进。`
-    : '收到。还没有接入需求，先在对话里把需求给我。'
-  setTimeout(() => { addChat('Jarvis', reply); if (STATE.voiceEnabled) speak(reply) }, 400)
+  addChat('Jarvis', '这条消息没有发出去：当前页面只接了只读数据面（快照/事件）+ 语音，指令通道（写板/派活/驱动会话）还没接。请到原生 DSH 会话里下指令；这里不会假装执行。')
+  if (STATE.voiceEnabled) speak('这条消息没有发出去。当前页面只做只读展示和语音，指令请到原生会话里下达。')
 })
 setText('tChatTime', new Date().toLocaleTimeString('zh-CN'))
 
@@ -645,6 +679,211 @@ if (coreWave) {
   loop()
 }
 
+
+// ── 能力台：31 个 jarvis 工具（UI 真实执行通道）────────────────────
+const CONSOLE = { tools: [], sessions: [], current: null, jsonMode: false, history: [] }
+
+async function loadTools() {
+  try {
+    const r = await fetch('/api/jarvis/tools', { cache: 'no-store' })
+    const body = await r.json()
+    if (body.ok && Array.isArray(body.tools)) {
+      CONSOLE.tools = body.tools
+      renderToolList('')
+    } else {
+      $('cToolList').innerHTML = `<div class="empty-hint">读取工具清单失败：${esc(body.error || '未知错误')}</div>`
+    }
+  } catch (e) {
+    $('cToolList').innerHTML = `<div class="empty-hint">读取工具清单失败：${esc(e.message)}</div>`
+  }
+}
+
+function renderToolList(filter) {
+  const list = $('cToolList')
+  if (!list) return
+  const kw = String(filter || '').trim().toLowerCase()
+  const match = (t) => !kw || t.name.includes(kw) || t.description.toLowerCase().includes(kw)
+  const groups = new Map()
+  for (const t of CONSOLE.tools) {
+    if (!match(t)) continue
+    const g = t.group || 'other'
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g).push(t)
+  }
+  if (!groups.size) { list.innerHTML = '<div class="empty-hint">没有匹配的工具。</div>'; return }
+  const cls = (t) => (CONSOLE.current && CONSOLE.current.name === t.name ? 'tool-item active' : 'tool-item')
+  list.innerHTML = [...groups.entries()].map(([g, items]) => `<div class="tool-group-title">${esc(g)} · ${items.length}</div>` + items.map((t) => {
+    const one = t.description.replace(/\s+/g, ' ').slice(0, 34)
+    return `<button class="${cls(t)}" data-tool="${esc(t.name)}">${esc(t.name)}<small>${esc(one)}</small></button>`
+  }).join('')).join('')
+  for (const btn of list.querySelectorAll('[data-tool]')) {
+    btn.addEventListener('click', () => selectTool(btn.dataset.tool))
+  }
+}
+
+const TEXTAREA_KEYS = new Set(['content', 'text', 'requirement', 'decision', 'card', 'rationale', 'material', 'source', 'minutes', 'tasksJson', 'items', 'rolesJson', 'collabText', 'description', 'board', 'lesson', 'args', 'suspects', 'agenda', 'context', 'verify', 'inScope', 'acceptance', 'objective', 'problem', 'risk', 'attempts', 'decisionNeeded'])
+
+function fieldFor(key, schema, required) {
+  const type = String((schema && schema.type) || 'string')
+  const desc = String((schema && schema.description) || '')
+  const label = `<label>${esc(key)}${required ? ' <b>*</b>' : ''}${desc ? `<div class="cf-hint">${esc(desc.slice(0, 90))}</div>` : ''}</label>`
+  const id = `cf_${key}`
+  if (Array.isArray(schema.enum)) {
+    return `<div class="cf">${label}<select id="${id}" data-key="${esc(key)}" data-type="string">${schema.enum.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('')}</select></div>`
+  }
+  if (type === 'boolean') return `<div class="cf">${label}<label style="padding-top:6px"><input id="${id}" data-key="${esc(key)}" data-type="boolean" type="checkbox" style="width:auto"> 是</label></div>`
+  if (type === 'number' || type === 'integer') return `<div class="cf">${label}<input id="${id}" data-key="${esc(key)}" data-type="${type}" type="number" step="${type === 'integer' ? '1' : 'any'}"></div>`
+  if (type === 'array') {
+    const itemType = String((schema.items && schema.items.type) || '')
+    const hint = Array.isArray(schema.items && schema.items.enum) ? schema.items.enum.join(' / ') : ''
+    return `<div class="cf">${label}<textarea id="${id}" data-key="${esc(key)}" data-type="array" placeholder="一行一个${itemType ? ' · ' + itemType : ''}${hint ? '（' + hint + '）' : ''}"></textarea></div>`
+  }
+  if (type === 'object') return `<div class="cf">${label}<textarea id="${id}" data-key="${esc(key)}" data-type="object" placeholder='{"...":"..."}'></textarea></div>`
+  const long = desc.length > 60 || TEXTAREA_KEYS.has(key) || /JSON|文本|全文|内容/.test(desc)
+  return long
+    ? `<div class="cf">${label}<textarea id="${id}" data-key="${esc(key)}" data-type="string"></textarea></div>`
+    : `<div class="cf">${label}<input id="${id}" data-key="${esc(key)}" data-type="string" type="text"></div>`
+}
+
+function selectTool(name) {
+  const t = CONSOLE.tools.find((x) => x.name === name)
+  if (!t) return
+  CONSOLE.current = t
+  setText('cTitle', t.name)
+  setText('cDesc', t.description.replace(/\s+/g, ' ').slice(0, 300))
+  const props = (t.parameters && t.parameters.properties) || {}
+  const required = new Set(t.required || [])
+  const form = $('cForm')
+  form.innerHTML = Object.keys(props).length
+    ? Object.keys(props).map((k) => fieldFor(k, props[k], required.has(k))).join('')
+    : '<div class="empty-hint">这个工具没有参数，直接执行即可。</div>'
+  $('cJsonWrap').style.display = CONSOLE.jsonMode ? 'block' : 'none'
+  $('cArgsJson').value = JSON.stringify(defaultArgs(t), null, 2)
+  $('cRun').disabled = false
+  $('cResult').className = ''
+  $('cResult').textContent = `已选择 ${t.name}，填好参数后点「执行」。`
+  $('cResultJson').textContent = ''
+  renderToolList($('cSearch').value)
+}
+
+function defaultArgs(t) {
+  const args = {}
+  const props = (t.parameters && t.parameters.properties) || {}
+  for (const k of t.required || []) {
+    if (props[k] && Array.isArray(props[k].enum)) args[k] = props[k].enum[0]
+  }
+  return args
+}
+
+function collectArgs() {
+  if (CONSOLE.jsonMode) {
+    const raw = $('cArgsJson').value.trim()
+    if (!raw) return {}
+    return JSON.parse(raw)
+  }
+  const args = {}
+  for (const el of document.querySelectorAll('#cForm [data-key]')) {
+    const key = el.dataset.key
+    const type = el.dataset.type
+    if (el.type === 'checkbox') { args[key] = el.checked; continue }
+    const v = el.value.trim()
+    if (v === '') continue
+    if (type === 'number' || type === 'integer') args[key] = Number(v)
+    else if (type === 'array') args[key] = v.split('\n').map((x) => x.trim()).filter(Boolean)
+    else if (type === 'object') args[key] = JSON.parse(v)
+    else args[key] = v
+  }
+  return args
+}
+
+async function runTool() {
+  if (!CONSOLE.current) return
+  const resultEl = $('cResult')
+  const jsonEl = $('cResultJson')
+  const btn = $('cRun')
+  let args = {}
+  try { args = collectArgs() } catch (e) {
+    resultEl.className = 'err'
+    resultEl.textContent = `参数不是合法 JSON：${e.message}`
+    return
+  }
+  btn.disabled = true
+  resultEl.className = ''
+  resultEl.textContent = `正在执行 ${CONSOLE.current.name}…（会走真实工具与闸）`
+  jsonEl.textContent = ''
+  const started = Date.now()
+  try {
+    const r = await fetch('/api/jarvis/command', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tool: CONSOLE.current.name, args, agent: $('cSession').value || undefined }),
+    })
+    const body = await r.json()
+    const ms = body.elapsedMs ?? (Date.now() - started)
+    if (body.ok) {
+      resultEl.className = 'ok'
+      resultEl.textContent = String(body.result || '（无文本输出）')
+      if (STATE.voiceEnabled) speak(`${CONSOLE.current.name} 执行完成`)
+    } else {
+      resultEl.className = 'err'
+      resultEl.textContent = `⛔ ${body.error || '执行失败'}${body.denied ? '\n\n（被闸拦住：这是插件的硬流程，不是页面故障——按提示先补齐前置步骤）' : ''}`
+    }
+    jsonEl.textContent = body.value ? JSON.stringify(body.value, null, 2) : ''
+    CONSOLE.history.unshift({ tool: CONSOLE.current.name, ok: body.ok, ms, at: Date.now() })
+    CONSOLE.history = CONSOLE.history.slice(0, 8)
+    renderConsoleHistory()
+    loadState()
+    loadEvents()
+  } catch (e) {
+    resultEl.className = 'err'
+    resultEl.textContent = `请求失败：${e.message}`
+  } finally {
+    btn.disabled = false
+  }
+}
+
+function renderConsoleHistory() {
+  const el = $('cHistory')
+  if (!el) return
+  el.innerHTML = CONSOLE.history.length
+    ? '<div style="color:#4b6b7e">最近执行</div>' + CONSOLE.history.map((h) => `<div>${h.ok ? '✅' : '⛔'} <b>${esc(h.tool)}</b> · ${h.ms}ms · ${new Date(h.at).toLocaleTimeString('zh-CN')}</div>`).join('')
+    : ''
+}
+
+async function loadSessions() {
+  try {
+    const r = await fetch('/api/jarvis/sessions', { cache: 'no-store' })
+    const body = await r.json()
+    if (body.ok && Array.isArray(body.sessions)) {
+      CONSOLE.sessions = body.sessions
+      const sel = $('cSession')
+      if (sel) {
+        const cur = sel.value
+        sel.innerHTML = '<option value="">自动（按工作区匹配）</option>' + body.sessions.map((s) => `<option value="${esc(s.id)}">${esc(s.cwd || '(无 cwd)')} · ${esc(s.status)}</option>`).join('')
+        if (cur) sel.value = cur
+      }
+    }
+  } catch { /* 会话列表失败不阻塞 */ }
+}
+
+function showConsole(announce = true) {
+  activate('console', '#console')
+  loadTools()
+  loadSessions()
+  if (announce && STATE.voiceEnabled) speak('能力台已打开。三十一个工具都可以在这里执行，被闸拦住会显示原因。')
+}
+
+$('cSearch')?.addEventListener('input', (e) => renderToolList(e.target.value))
+$('cRun')?.addEventListener('click', runTool)
+$('cJsonToggle')?.addEventListener('click', () => {
+  CONSOLE.jsonMode = !CONSOLE.jsonMode
+  $('cJsonWrap').style.display = CONSOLE.jsonMode ? 'block' : 'none'
+  $('cForm').style.display = CONSOLE.jsonMode ? 'none' : 'block'
+  $('cJsonToggle').textContent = CONSOLE.jsonMode ? '表单模式' : 'JSON 模式'
+  if (CONSOLE.current) $('cArgsJson').value = JSON.stringify(CONSOLE.jsonMode ? defaultArgs(CONSOLE.current) : defaultArgs(CONSOLE.current), null, 2)
+})
+document.querySelectorAll('[data-open-console]').forEach((b) => b.addEventListener('click', () => showConsole()))
+
 // ── 时钟 + 启动 ──────────────────────────────────────────────────
 function tickClock() {
   const now = new Date()
@@ -664,7 +903,9 @@ setInterval(loadEvents, 3000)
 // 供机械校验/调试：暴露真实数据入口
 window.__JARVIS_UI__ = {
   version: 'jarvis-ui-v2',
-  api: { state: '/api/jarvis/state', events: '/api/jarvis/events', voice: '/api/jarvis/voice', tts: '/api/jarvis/tts' },
+  api: { state: '/api/jarvis/state', events: '/api/jarvis/events', voice: '/api/jarvis/voice', tts: '/api/jarvis/tts', tools: '/api/jarvis/tools', command: '/api/jarvis/command', sessions: '/api/jarvis/sessions' },
   get snapshot() { return STATE.snapshot },
-  showMain, showProgress, showTeam, speak,
+  showMain, showProgress, showTeam, showConsole, speak,
+  get consoleTools() { return CONSOLE.tools },
+  get scene() { return { ready: SCENE.ready, source: 'github.com/workbzw/pixoffice', themeApplied: Boolean(sceneDoc() && sceneDoc().getElementById('jarvis-theme')) } },
 }

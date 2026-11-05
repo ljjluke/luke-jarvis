@@ -184,7 +184,9 @@ export function buildSnapshot(projectDir, meta = {}) {
     capabilities: {
       toolCount: Number(meta.tools || 0),
       version: String(meta.version || ''),
-      panels: ['stage', 'tasks', 'board', 'meetings', 'cards', 'memory', 'company'],
+      panels: ['stage', 'tasks', 'board', 'meetings', 'cards', 'memory', 'company', 'console', 'events', 'voice'],
+      // 能力台契约：工具清单/参数 schema 由 /api/jarvis/tools 提供，执行入口 /api/jarvis/command
+      console: { toolsEndpoint: '/api/jarvis/tools', commandEndpoint: '/api/jarvis/command', sessionsEndpoint: '/api/jarvis/sessions' },
     },
   }
 }
