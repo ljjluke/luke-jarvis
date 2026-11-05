@@ -4339,3 +4339,12 @@ test('角色卡：jarvis_dispatch_task 一步完成「卡+须知+建任务」（
   assert.ok(created.description.includes('每档含成本/预期/风险'), '原有验收标准不能丢')
 })
 
+
+test('成员须知：交付格式要求「反方攻击/失效边界/置信度」——用产物证明思考（不查步骤）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await def.execute({ roleName: '产品增长' })
+  for (const k of ['反方攻击', '失效边界', '置信度']) {
+    assert.ok(r.brief.includes(k), `回报格式必须要求「${k}」——这是 ponder 级思考在产物里的痕迹`)
+  }
+  assert.ok(/不是必填门槛|可溯源/.test(r.brief), 'ponder run_id 应标注为可选溯源，不是门槛（与「不考核步骤」一致）')
+})
