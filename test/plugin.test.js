@@ -1631,7 +1631,7 @@ test('jarvis_member_brief：生成含 ponder 十阶段执行路径的成员须�
   const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
   assert.ok(def, 'jarvis_member_brief 工具应存在')
   const r = await def.execute({ roleName: '猎头', projectDir: '/tmp/proj', task: 'T4 专家寻访' })
-  assert.strictEqual(r.mustRunPonder, true, '每个成员都必须跑 ponder')
+  assert.strictEqual(r.mustRunPonder, false, '插件不校验步骤：ponder 是资源不是闸（不谎称必须）')
   // 十阶段固定顺序
   for (const s of ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']) {
     assert.ok(r.brief.includes(s), `须知应含阶段 ${s}`)
@@ -1954,23 +1954,20 @@ test('jarvis_meeting groupchat：发言须对前面发言给评价（用户要�
 
 // ── 思考必 ponder（用户：不限于第一次分析需求——会议讨论/方案决策/分歧/收口等所有"需要思考"的动作都要 ponder）──
 
-test('jarvis_member_brief：须知含"思考必 ponder"场景清单（不限于第一次）', async () => {
+test('jarvis_member_brief：ponder 给成可用资源（不下"必须跑"的命令），硬要求落在可验证的交付物', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
   const r = await def.execute({ roleName: '开发A', task: '实现登录页' })
-  assert.ok(r.brief.includes('思考必 ponder'), '须知应含思考必ponder')
-  assert.ok(r.brief.includes('会议发言/给观点前'), '会议发言也要ponder')
-  assert.ok(r.brief.includes('方案选择/决策'), '方案决策也要ponder')
-  assert.ok(r.brief.includes('难点定位/返工根因'), '返工根因也要ponder')
-  assert.ok(r.brief.includes('分歧判断'), '分歧判断也要ponder')
-  assert.ok(r.brief.includes('回应/质疑别人的观点'), '回应质疑也要ponder')
-  assert.ok(r.brief.includes('要产生判断'), '判据：要产生判断→先ponder')
+  assert.ok(r.brief.includes('ponder 十阶段'), '须知应介绍 ponder 十阶段这个资源')
+  assert.ok(r.brief.includes('不是流程闸') || r.brief.includes('插件不校验'), '要如实说插件不校验步骤')
+  assert.ok(r.brief.includes('反方攻击') && r.brief.includes('失效边界') && r.brief.includes('置信度'), '硬要求落在交付物（可验证）')
+  assert.ok(!/必须先跑 ponder|恒为 true/.test(r.brief), '不再用提示词命令成员跑步骤')
 })
 
 test('jarvis_member_brief：执行场景不强制 ponder（按任务做/汇报/查资料）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
   const r = await def.execute({ roleName: '开发A', task: '实现' })
-  assert.ok(r.brief.includes('执行场景可不 ponder'), '执行场景不强制')
-  assert.ok(r.brief.includes('执行已定方案'), '按任务描述做不重新决策')
+  assert.ok(r.brief.includes('执行已定方案'), '说明执行场景不需要重新决策')
+  assert.ok(!/必须先跑 ponder/.test(r.brief), '执行场景不能用命令口吻')
 })
 
 // ── 子代理只有角色卡不跑 ponder 的根治：member_brief 输出 executionPrompt（注入成员系统 prompt）──
@@ -1979,8 +1976,8 @@ test('jarvis_member_brief：输出 executionPrompt 版（add_member 注入成员
   const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
   const r = await def.execute({ roleName: '开发A', task: '实现' })
   assert.ok(r.executionPrompt, '应输出 executionPrompt（供 add_member 注入）')
-  assert.ok(r.executionPrompt.includes('思考必 ponder'), 'executionPrompt 含思考必ponder')
-  assert.ok(r.executionPrompt.includes('固定顺序一个不能少'), '含十阶段固定顺序')
+  assert.ok(r.executionPrompt.includes('ponder 十阶段'), 'executionPrompt 介绍 ponder 资源')
+  assert.ok(r.executionPrompt.includes('interview') && r.executionPrompt.includes('synthesis'), '含十阶段顺序')
   assert.ok(r.executionPrompt.includes('run_id'), '含 run_id 回报')
   assert.ok(r.executionPrompt.includes('黑板即真相'), '含黑板协议')
   assert.ok(r.executionPrompt.includes('问题上行'), '含问题上行')
@@ -1995,8 +1992,8 @@ test('jarvis_member_brief broadcast：生成协议刷新消息（含思考必pon
   const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
   const r = await def.execute({ mode: 'broadcast', members: '领域专家-A,领域专家-B' })
   assert.ok(r.protocolRefresh, '应生成协议刷新消息')
-  assert.ok(r.protocolRefresh.includes('思考必 ponder'), '含思考必ponder')
-  assert.ok(r.protocolRefresh.includes('固定顺序一个不能少'), '含十阶段')
+  assert.ok(r.protocolRefresh.includes('ponder 十阶段'), '含 ponder 资源说明')
+  assert.ok(r.protocolRefresh.includes('插件不校验') || r.protocolRefresh.includes('交付里体现得出思考'), '如实说明不校验步骤')
   assert.ok(r.protocolRefresh.includes('黑板即真相'), '含黑板')
   assert.ok(r.protocolRefresh.includes('问题上行'), '含问题上行')
   assert.ok(r.protocolRefresh.includes('卡住限时上报'), '含卡住上报')
