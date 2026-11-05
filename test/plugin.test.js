@@ -3553,7 +3553,7 @@ test('T8 /jarvis-ui：apply 注册 exact 路由 → 302 到 /jarvis-office/（�
   const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
   assert.strictEqual(res.code, 302, `应 302 跳转：${res.code}`)
-  assert.strictEqual(res.headers.location, '/jarvis-office/jarvis.html', 'Location 必须指向本公司数据适配页（T9 起）')
+  assert.strictEqual(res.headers.location, '/jarvis-office/v2/index.html', 'Location 指向 v2 增强 UI（真接 DSH）')
 })
 
 // ── t9：PixOffice 数据接上画面（适配页 + 机械可判定断言）──
@@ -3579,7 +3579,7 @@ test('T9 适配页：office/jarvis.html 真实引用快照接口 + DOM 面板钩
   assert.ok(fs.existsSync(path.join(repo, '../office/office/index.html')), '原 PixOffice demo 页必须保留')
 })
 
-test('T9 适配页：/jarvis-ui 302 指向 jarvis.html（而不是仍指向 demo 目录）', async () => {
+test('T9 适配页：/jarvis-ui 302 指向 v2 增强 UI（真接 DSH 快照/语音）', async () => {
   const routes = []
   const ctx = {
     get: () => undefined,
@@ -3593,7 +3593,7 @@ test('T9 适配页：/jarvis-ui 302 指向 jarvis.html（而不是仍指向 demo
   const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
   assert.strictEqual(res.code, 302)
-  assert.strictEqual(res.headers.location, '/jarvis-office/jarvis.html')
+  assert.strictEqual(res.headers.location, '/jarvis-office/v2/index.html')
 })
 
 // ── t10：F4 flowguard 真检查 / F4b fs 取值与 hasGlob 语义 / F5 首建队标记 ──
@@ -4641,4 +4641,146 @@ test('事件流路由：/api/jarvis/events 返回 {ok, events, lastSeq}', async 
   assert.strictEqual(body.events.length, 1)
   assert.strictEqual(body.events[0].type, 'gate')
   assert.strictEqual(body.lastSeq, 1)
+})
+
+// ── 语音设置（全局）+ TTS 代理：配置落盘、key 掩码、未配置时回退浏览器 ──────────
+function fakeReq(method, body) {
+  const handlers = {}
+  const req = {
+    method,
+    on: (ev, fn) => { handlers[ev] = fn; return req },
+    destroy: () => {},
+  }
+  setTimeout(() => {
+    if (body !== null && body !== undefined) handlers.data?.(Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)))
+    handlers.end?.()
+  }, 0)
+  return req
+}
+function fakeRes() {
+  return {
+    writeHead(code, headers) { this.code = code; this.headers = headers },
+    end(b) { this.body = b },
+  }
+}
+
+test('语音设置：GET 返回预设+掩码配置；PUT 保存后 configured=true 且 key 不回显明文', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'voicehome-'))
+  const oldHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const routes = []
+    const ctx = {
+      get: () => undefined,
+      effect: (fn) => { try { fn() } catch {} },
+      tools: { register: () => () => {} },
+      webServer: { register: (r) => { routes.push(r); return () => {} } },
+      systemPrompt: { section: () => () => {} },
+    }
+    apply(ctx)
+    const voice = routes.find((r) => r.path === '/api/jarvis/voice')
+    assert.ok(voice, '应注册 /api/jarvis/voice')
+    const r1 = fakeRes()
+    await voice.handler(fakeReq('GET', null), r1)
+    const b1 = JSON.parse(r1.body)
+    assert.strictEqual(b1.ok, true)
+    assert.strictEqual(b1.config.provider, 'browser', '默认浏览器语音（零依赖）')
+    assert.ok(b1.presets.voices.length >= 5, '要有多音色可选')
+    assert.ok(b1.presets.models.length >= 3, '要有多模型可选')
+    // 保存语音模型配置
+    const r2 = fakeRes()
+    await voice.handler(fakeReq('PUT', { provider: 'openai', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test-123456789', model: 'cosyvoice-v2', voice: 'longxiaochun', speed: 0.9 }), r2)
+    const b2 = JSON.parse(r2.body)
+    assert.strictEqual(b2.ok, true)
+    assert.strictEqual(b2.config.configured, true)
+    assert.ok(!String(b2.config.apiKeyMasked).includes('123456789'), `key 必须掩码：${b2.config.apiKeyMasked}`)
+    assert.ok(fs.existsSync(path.join(home, '.dsh/luke-jarvis/voice.json')), '配置落盘到全局路径')
+    // 再次 GET：仍掩码
+    const r3 = fakeRes()
+    await voice.handler(fakeReq('GET', null), r3)
+    const b3 = JSON.parse(r3.body)
+    assert.strictEqual(b3.config.voice, 'longxiaochun')
+    assert.ok(b3.config.apiKeyMasked.includes('…'), '掩码形态')
+  } finally {
+    process.env.HOME = oldHome
+  }
+})
+
+test('TTS 代理：未配置语音模型 → 400 + fallback=browser（前端据此回退浏览器语音）', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'voicehome2-'))
+  const oldHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const routes = []
+    const ctx = {
+      get: () => undefined,
+      effect: (fn) => { try { fn() } catch {} },
+      tools: { register: () => () => {} },
+      webServer: { register: (r) => { routes.push(r); return () => {} } },
+      systemPrompt: { section: () => () => {} },
+    }
+    apply(ctx)
+    const tts = routes.find((r) => r.path === '/api/jarvis/tts')
+    assert.ok(tts, '应注册 /api/jarvis/tts')
+    const res = fakeRes()
+    await tts.handler(fakeReq('POST', { text: '你好' }), res)
+    const body = JSON.parse(res.body)
+    assert.strictEqual(res.code, 400)
+    assert.strictEqual(body.fallback, 'browser')
+    assert.ok(/未配置/.test(body.error))
+    // 缺 text 也要明确拒绝
+    const res2 = fakeRes()
+    await tts.handler(fakeReq('POST', {}), res2)
+    assert.strictEqual(res2.code, 400)
+  } finally {
+    process.env.HOME = oldHome
+  }
+})
+
+test('v2 增强 UI：静态资产齐备、接真实接口、3D 画布与语音设置存在、无写死的演示文案', () => {
+  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const dir = path.join(repo, '../office/v2')
+  for (const f of ['index.html', 'jarvis-v2.js', 'scene3d.js', 'vendor/three.module.js']) {
+    assert.ok(fs.existsSync(path.join(dir, f)), `缺少 v2 资产：${f}`)
+  }
+  const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8')
+  const js = fs.readFileSync(path.join(dir, 'jarvis-v2.js'), 'utf8')
+  const scene = fs.readFileSync(path.join(dir, 'scene3d.js'), 'utf8')
+  // 真实数据接入
+  assert.ok(js.includes('/api/jarvis/state') && js.includes('/api/jarvis/events'), '必须接快照与事件流')
+  assert.ok(js.includes('/api/jarvis/voice') && js.includes('/api/jarvis/tts'), '必须接语音设置与 TTS')
+  // 动态节点（有 id 钩子，内容由 JS 填）
+  for (const id of ['mMissionTitle', 'mMissionCopy', 'mEventTitle', 'mNextTitle', 'mSay', 'pTitle', 'stageChain', 'tMembers', 'tBoard']) {
+    assert.ok(html.includes(`id="${id}"`), `浮动块/面板缺少动态 id：${id}`)
+  }
+  // 3D 协作空间
+  assert.ok(html.includes('id="team3d"'), '必须有 3D 画布')
+  assert.ok(/import \* as THREE from '\.\/vendor\/three\.module\.js'/.test(scene), '3D 用本地 vendored three.js（不依赖 CDN）')
+  assert.ok(scene.includes('setMembers'), '3D 必须有数据驱动接口 setMembers')
+  assert.ok(/WebGLRenderer/.test(scene), '必须是真 3D（WebGL）')
+  // 语音设置面板
+  assert.ok(html.includes('id="voiceSettings"') && html.includes('id="vProvider"') && html.includes('id="vVoice"'), '语音设置要有引擎/音色可选')
+  // 不能再是写死的演示数据
+  assert.ok(!html.includes('全局服务巡检与优化'), '不能写死演示任务名')
+  assert.ok(!html.includes('5 人在线'), '不能写死成员在线数')
+  assert.ok(!html.includes('09:55'), '时钟不能写死')
+})
+
+test('v2 静态托管：/jarvis-office/v2/index.html 能取到（prefix 路由真实读文件）', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const prefix = routes.find((r) => r.kind === 'prefix' && r.path === '/jarvis-office')
+  assert.ok(prefix, '静态路由存在')
+  const res = { writeHead(c, h) { this.code = c; this.headers = h }, end(b) { this.body = b } }
+  await prefix.handler({ url: '/jarvis-office/v2/index.html', method: 'GET' }, res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(/text\/html/.test(res.headers['content-type']))
+  assert.ok(String(res.body).includes('JARVIS 全息任务中枢 v2'), '返回的确实是 v2 页面')
 })

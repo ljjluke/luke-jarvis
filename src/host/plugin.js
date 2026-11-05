@@ -54,6 +54,7 @@ const _require = createRequire(import.meta.url)
 import { TOOLS, ensureAgentStageSection } from './tools/index.js'
 import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
 import { readEvents } from './state/events.js'
+import { VOICE_PRESETS, publicVoiceConfig, readVoiceConfig, saveVoiceConfig, speechEndpoint } from './state/voice.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
 export { TOOLS }
@@ -140,6 +141,28 @@ function firstSessionCwd(ctx) {
     }
   } catch { /* 无 agents 服务：继续降级 */ }
   return ''
+}
+
+/** 读请求体（限 256KB，超时 10s）：语音配置/TTS 都走它，统一错误。 */
+function readJsonBody(req, limit = 256 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0
+    const chunks = []
+    const timer = setTimeout(() => reject(new Error('读取请求体超时')), 10000)
+    try { timer.unref?.() } catch {}
+    req.on('data', (c) => {
+      size += c.length
+      if (size > limit) { clearTimeout(timer); reject(new Error('请求体过大')); try { req.destroy() } catch {} ; return }
+      chunks.push(c)
+    })
+    req.on('end', () => {
+      clearTimeout(timer)
+      const raw = Buffer.concat(chunks).toString('utf8').trim()
+      if (!raw) return resolve(null)
+      try { resolve(JSON.parse(raw)) } catch (e) { reject(new Error('JSON 解析失败: ' + e.message)) }
+    })
+    req.on('error', (e) => { clearTimeout(timer); reject(e) })
+  })
 }
 
 function requestWorkspace(ctx, req) {
@@ -492,6 +515,81 @@ export function apply(ctx) {
           })
         )
 
+        // 0.96) 语音设置（全局）+ TTS 代理：
+        //   GET  /api/jarvis/voice  → 配置（apiKey 掩码）+ 音色/模型预设
+        //   PUT  /api/jarvis/voice  → 保存（apiKey 空字符串 = 保留原值）
+        //   POST /api/jarvis/tts    → 代理到 OpenAI 兼容 /audio/speech（key 不出本机）
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/voice',
+            handler: async (req, res) => {
+              try {
+                if (String(req.method || 'GET').toUpperCase() === 'PUT' || String(req.method || '').toUpperCase() === 'POST') {
+                  const body = await readJsonBody(req)
+                  if (!body || typeof body !== 'object') return sendJson(res, 400, { ok: false, error: '请求体必须是 JSON' })
+                  const saved = saveVoiceConfig(body)
+                  return sendJson(res, 200, { ok: true, config: publicVoiceConfig(saved), presets: VOICE_PRESETS })
+                }
+                return sendJson(res, 200, { ok: true, config: publicVoiceConfig(readVoiceConfig()), presets: VOICE_PRESETS })
+              } catch (e) {
+                return sendJson(res, 500, { ok: false, error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/tts',
+            handler: async (req, res) => {
+              const body = await readJsonBody(req).catch(() => null)
+              const text = String((body && body.text) || '').trim()
+              if (!text) return sendJson(res, 400, { ok: false, error: '缺少 text' })
+              if (text.length > 1200) return sendJson(res, 400, { ok: false, error: 'text 过长（>1200 字）' })
+              const cfg = readVoiceConfig()
+              const endpoint = speechEndpoint(cfg)
+              if (cfg.provider !== 'openai' || !endpoint || !cfg.apiKey) {
+                return sendJson(res, 400, {
+                  ok: false,
+                  error: '未配置语音模型（provider/baseUrl/apiKey 不全）',
+                  fallback: 'browser',
+                  hint: '在界面的「语音设置」里配置 OpenAI 兼容 TTS 服务，或直接用浏览器语音',
+                })
+              }
+              try {
+                const upstream = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+                  body: JSON.stringify({
+                    model: String((body && body.model) || cfg.model || 'tts-1'),
+                    voice: String((body && body.voice) || cfg.voice || 'nova'),
+                    input: text,
+                    speed: Number((body && body.speed) || cfg.speed || 0.95),
+                    response_format: 'mp3',
+                  }),
+                  signal: AbortSignal.timeout(45000),
+                })
+                if (!upstream.ok) {
+                  const detail = await upstream.text().catch(() => '')
+                  return sendJson(res, 502, { ok: false, error: `上游 TTS ${upstream.status}`, detail: detail.slice(0, 300) })
+                }
+                const buf = Buffer.from(await upstream.arrayBuffer())
+                res.writeHead(200, {
+                  'content-type': upstream.headers.get('content-type') || 'audio/mpeg',
+                  'content-length': String(buf.length),
+                  'cache-control': 'no-store',
+                  'access-control-allow-origin': '*',
+                })
+                res.end(buf)
+                return undefined
+              } catch (e) {
+                return sendJson(res, 502, { ok: false, error: 'TTS 调用失败', detail: String((e && e.message) || e), fallback: 'browser' })
+              }
+            },
+          })
+        )
+
         // 0) 官方 UI 入口（T8/T9）：GET /jarvis-ui → 302 跳 /jarvis-office/jarvis.html。
         //    T9 起指向「本公司数据适配页」（左侧实时数据面板 + PixOffice 场景 iframe）；
         //    上游 demo 页 /jarvis-office/office/index.html 保持不动（仍可直接访问，用于对照）。
@@ -502,8 +600,8 @@ export function apply(ctx) {
             path: '/jarvis-ui',
             handler: async (req, res) => {
               try {
-                res.writeHead(302, { location: '/jarvis-office/jarvis.html', 'cache-control': 'no-store' })
-                res.end('→ /jarvis-office/jarvis.html')
+                res.writeHead(302, { location: '/jarvis-office/v2/index.html', 'cache-control': 'no-store' })
+                res.end('→ /jarvis-office/v2/index.html')
               } catch {}
             },
           })

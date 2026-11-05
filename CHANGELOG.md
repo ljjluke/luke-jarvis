@@ -2,6 +2,36 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.13.0] - 2026-11-05
+
+### 增强 UI v2：真接 DSH（动态浮动块 + 3D 协作空间 + 语音大模型设置）
+
+用户给了 `webui/jarvis-v2-wings.html` 并提出四点：语音能否接模型、浮动块要动态、员工协作要做成 3D、要真接 DSH。
+
+**1) 语音（原 Web Speech API → 可配语音大模型）**
+- 新增 `state/voice.js`：全局配置 `~/.dsh/luke-jarvis/voice.json`（权限 600），`provider: browser|openai`，
+  可选 `baseUrl/model/voice/speed`，API Key **只写不读**（GET 返回 `sk-…abcd`）；
+- 新增路由 `GET/PUT /api/jarvis/voice`（含音色/模型预设）与 `POST /api/jarvis/tts`（OpenAI 兼容 `/audio/speech` 代理，key 不出服务端）；
+- 前端：光球菜单 →「语音设置 · 模型与音色」可配置并试听；已配置模型时走模型音色，失败自动回退浏览器语音。
+
+**2) 主界面浮动块全部动态**
+- 快照 `/api/jarvis/state` 每 5s + 事件流每 3s 增量驱动：当前阶段/缺口/流程闸/最新事件/接入通道/下一步/对话三指标；
+- 进度页：真实六阶段链、缺口、事件控制台、按事实计算的汇报指标；
+- 右下角光球菜单保持静态鼠标菜单（唯一非数据区）；
+- 移除全部写死的演示文案（测试会拦"全局服务巡检""5 人在线""09:55"）。
+
+**3) 员工协作空间 → 真 3D（Three.js，MIT，已 vendored，不走 CDN）**
+- 环形 6 工位 + 中心全息白板 + 网格平台 + 动态光；角色=胶囊体+球头+状态环+名牌；拖拽旋转/滚轮缩放/点击成员播报；
+- 主题色取页面 CSS 变量，与全息 HUD 一致；数据来自 `state.tasks.byAssignee`；
+- 换用用户提供的开源 3D 办公室时只替换 `office/v2/scene3d.js`，保持 `createOffice3D(canvas)` + `setMembers()` 接口。
+
+**4) 真接 DSH**
+- `/jarvis-ui` 302 指向 `/jarvis-office/v2/index.html`；静态托管走既有 `/jarvis-office` 前缀；
+- 页面只依赖 4 个契约端点（state/events/voice/tts），不读 `.jarvis` 文件布局。
+
+新增 `docs/UI-v2.md`（接入说明 + 开源语音模型对照 + 3D 替换约定）。
+验证：plugin 320 + core 14 = **334** 全绿；selfcheck / 工具契约 31 / e2e 全过；版本 0.13.0。
+
 ## [0.12.0] - 2026-11-05
 
 ### 能力规划 + UI 契约 v1（底座仍是 DSH，jarvis 只做"公司层"）
