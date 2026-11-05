@@ -2750,7 +2750,7 @@ test('jarvisFlowGuard：jarvis 模式（调过 jarvis_*）+ 无卡片 → 建队
   assert.ok(typeof r === 'string' && r.includes('蒸馏角色卡'), `应拦并提示蒸馏：${r}`)
 })
 
-test('jarvisFlowGuard：派活描述缺开工须知 → 拒绝（纯协调类豁免）', async () => {
+test('jarvisFlowGuard：派活不再校验「描述里有没有开工须知」（固化改成 jarvis_dispatch_task 一步拼装，不考核步骤）', async () => {
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf6-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
@@ -2768,7 +2768,7 @@ test('jarvisFlowGuard：派活描述缺开工须知 → 拒绝（纯协调类豁
   recordGate(dir, 'build', true)
   const mk = (subject, description) => ({ name: 'agent_teams_create_task', arguments: { subject, description }, agent: { session: { id: 'cap', header: { cwd: dir } } } })
   const r1 = jarvisFlowGuard(mk('实现登录', '写完告诉我'))
-  assert.ok(typeof r1 === 'string' && r1.includes('开工须知'), '缺须知应拒')
+  assert.strictEqual(r1, undefined, '不再因「描述里没抄须知」拒派活（须知由 jarvis_dispatch_task 自动拼）')
   const r2 = jarvisFlowGuard(mk('实现登录', '【开工须知】先跑 ponder 十阶段……'))
   assert.strictEqual(r2, undefined, '带须知应放行')
   const r3 = jarvisFlowGuard(mk('【协调】需求分析会议', '开会讨论'))
@@ -2870,7 +2870,7 @@ test('jarvis_member_brief：须知必含「企业文化·领域专家深度思�
 
 // ── v0.7.5：成员交活必须过 ponder 核验（scan 实证：成员 3002 次调用 jarvis_* 为 0）──
 
-test('jarvisFlowGuard：成员 update_task→completed 无 ponder 核验 → 拒绝；有 PASS 记录 → 放行', async () => {
+test('jarvisFlowGuard：交活不要求 ponder 核验记录（ponder 是推荐思考方式，不是通行证）', async () => {
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptg-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
@@ -2883,7 +2883,7 @@ test('jarvisFlowGuard：成员 update_task→completed 无 ponder 核验 → 拒
   fs.writeFileSync(path.join(dir, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(200) + '\n验收：x')
   const mk = () => ({ name: 'agent_teams_update_task', arguments: { task_id: 't9', status: 'completed', attempt_id: 'a1' }, agent: { session: { id: 'member-1', header: { cwd: dir } } } })
   const r = jarvisFlowGuard(mk())
-  assert.ok(typeof r === 'string' && r.includes('ponder'), `无核验应拒：${r}`)
+  assert.strictEqual(r, undefined, `不应因没跑 ponder 就拒绝交活：${r}`)
 
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ptg2-'))
   fs.mkdirSync(path.join(dir2, '.jarvis/docs/ponder-verify'), { recursive: true })
@@ -2917,7 +2917,8 @@ test('apply：注册 luke-jarvis:protocol 到 systemPrompt（每请求固定注�
   assert.ok(txt.includes('固定注入'), '含固定注入声明')
   assert.ok(txt.includes('jarvis_distill'), '含蒸馏步骤')
   assert.ok(txt.includes('jarvis_flowguard'), '含闸门步骤')
-  assert.ok(txt.includes('ponder-verify'), '含 ponder 核验要求')
+  assert.ok(txt.includes('jarvis_dispatch_task'), '派活固化工具应写进协议（正确的路=最省事的路）')
+  assert.ok(!txt.includes('必须有该任务的 ponder-verify PASS'), '协议不再把 ponder 当通行证')
   assert.ok(txt.includes('绝不亲自实现'), '含顶层不亲自执行')
 })
 
@@ -3750,7 +3751,7 @@ test('T10+ marker 消费方：建队前（无 team.json）不写空标记、不�
   assert.deepStrictEqual(mk.teams, ['t1'], `标记须含本团队名：${JSON.stringify(mk.teams)}`)
 })
 
-test('T10+ 嵌套 team.json：成员任务缺「开工须知」必须被 build 闸拦下（不再因平铺匹配漏检）', async () => {
+test('T10+ 嵌套 team.json：缺开工须知不再进 build 闸缺口（流程靠 jarvis_dispatch_task 固化，不靠查表拦）', async () => {
   applyRealFs()
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 't10-nested-'))
   fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
@@ -3764,8 +3765,7 @@ test('T10+ 嵌套 team.json：成员任务缺「开工须知」必须被 build �
   fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
   fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', tasks: [{ id: 'a', subject: '实现X', description: '直接干', status: 'in_progress' }] }))
   const r = await runFlowguard('build', proj)
-  assert.strictEqual(r.ok, false, `成员任务缺开工须知必须 BLOCKED：${JSON.stringify(r.missing)}`)
-  assert.ok(r.missing.some((m) => m.includes('开工须知')), `缺口须点名开工须知：${JSON.stringify(r.missing)}`)
+  assert.ok(!r.missing.some((m) => String(m).includes('开工须知')), `不应再拿「有没有附须知」当缺口：${JSON.stringify(r.missing)}`)
 })
 
 test('T10+ 无 list 能力的 FileSystem（只有 resolve+listDir）：审计闸真生效（不再静默放行）', async () => {
@@ -4033,21 +4033,17 @@ test('T13 ③+ 写端不认领别家：sid 匹配不到任何团队时不写 fal
 test('T13 ③ marker 与闸解耦：build 闸被自家缺口拦住时仍写 marker（不再退 72h）', async () => {
   applyRealFs()
   const proj = makeMultiProjectFixture()
-  // 故意制造自家缺口：把自家 t1 的开工须知去掉 → build 必 BLOCKED
-  const teamFile = path.join(proj, '.agent-teams/luke-jarvis-完全体/team.json')
-  const t = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
-  t.tasks = t.tasks.map((x) => (x.id === 't1' ? { ...x, description: '直接干' } : x))
-  fs.writeFileSync(teamFile, JSON.stringify(t))
   fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
   fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160))
   fs.writeFileSync(path.join(proj, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
-  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  // 缺口用流程产物制造（缺方案设计），不再用「有没有附须知」当缺口
+
   fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
   fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头.md'), '# 猎头')
   fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO.md'), '# CEO')
   fs.unlinkSync(path.join(proj, '.jarvis/active-team.json')) // 先清标记，验证写入不依赖闸 ok
   const r = await runFlowguard('build', proj)
-  assert.strictEqual(r.ok, false, '自家缺开工须知 → build 应 BLOCKED（判据未放宽）')
+  assert.strictEqual(r.ok, false, '缺方案设计 → build 应 BLOCKED（流程产物判据不变）')
   assert.ok(r.activeTeamMarker, `闸 BLOCKED 时也必须写 marker（解耦）：${JSON.stringify(r)}`)
   const mk = JSON.parse(fs.readFileSync(path.join(proj, '.jarvis/active-team.json'), 'utf8'))
   assert.ok(mk.expiresAt, 'marker 必须带 expiresAt')
@@ -4304,27 +4300,42 @@ test('角色卡：开工须知把卡文本真塞进成员上下文（不是只�
   assert.ok(r2.brief.includes('先蒸馏再干'), '无卡时须知必须要求先蒸馏')
 })
 
-test('角色卡：派活闸在"有卡但没注入"时拦住（jarvisFlowGuard 同步判定）', async () => {
-  const { jarvisFlowGuard } = await import('../src/host/gates/flow.js')
-  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-card-gate-'))
+test('角色卡：jarvis_dispatch_task 一步完成「卡+须知+建任务」（流程固化，不靠闸查有没有抄）', async () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-dispatch-'))
   fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
   fs.writeFileSync(path.join(proj, '.jarvis/cards/产品增长-张一鸣.md'), CARD_SAMPLE)
-  fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO-带队.md'), CARD_SAMPLE.replace('张一鸣-产品增长', 'CEO-带队'))
-  fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头.md'), CARD_SAMPLE.replace('张一鸣-产品增长', '猎头'))
-  // 造一个"已建队 + 有方案/需求"的最小现场，确保走到卡检查而不是被更前面的闸拦住
-  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
-  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 's-card-gate', tasks: [{ id: 'A1', assignee: '产品增长', subject: '增长方案' }] }))
-  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
-  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求\n'.padEnd(400, 'a') + '\n验收：可判定')
-  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案\n节'.repeat(200))
-  // 硬流程闸要求 build 闸已记录（否则 create_task 会被更早的"不可绕过"拦住）
-  recordGate(proj, 'clarify', true)
-  recordGate(proj, 'decompose', true)
-  recordGate(proj, 'design', true)
-  recordGate(proj, 'build', true)
-  const exec = (args) => ({ name: 'agent_teams_create_task', agent: { session: { id: 's-card-gate', header: { cwd: proj } } }, arguments: args })
-  const blocked = jarvisFlowGuard(exec({ subject: '增长方案', description: 'ponder 开工须知 step-guard run_id', assignee: '产品增长' }))
-  assert.ok(blocked && blocked.includes('角色卡未注入'), `有卡但没注入应拦住，实际：${blocked}`)
-  const passed = jarvisFlowGuard(exec({ subject: '增长方案', description: '## 六、你的角色卡\n延迟满足', assignee: '产品增长' }))
-  assert.ok(!passed || !String(passed).includes('角色卡未注入'), `注入后不应再拦：${passed}`)
+  // 播种运行时 ctx + tools 服务：dispatch 内部要借 tools.execute 调 brief / create_task
+  const inner = []
+  const fakeTools = {
+    execute: async (req) => {
+      inner.push({ name: req.name, args: req.arguments })
+      if (req.name === 'jarvis_member_brief') {
+        const briefTool = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+        const v = await briefTool.execute(req.arguments, {})
+        return { isError: false, value: v, content: [{ type: 'text', text: 'ok' }] }
+      }
+      if (req.name === 'agent_teams_create_task') return { isError: false, value: { taskId: 'T-42' }, content: [{ type: 'text', text: 'created' }] }
+      return { isError: true, error: { code: 'UNKNOWN', message: 'unknown tool' }, content: [] }
+    },
+  }
+  const { setRuntimeContext } = await import('../src/host/runtime.js')
+  setRuntimeContext({ get: (n) => (n === 'tools' ? fakeTools : undefined) })
+  const dispatch = TOOLS.find((t) => t.name === 'jarvis_dispatch_task')
+  assert.ok(dispatch, '应注册 jarvis_dispatch_task')
+  const r = await dispatch.execute(
+    { assignee: '产品增长', subject: '做复购增长方案', description: '给出三档方案并说明取舍', acceptance: '每档含成本/预期/风险', projectDir: proj },
+    { agent: { session: { id: 's-dispatch', header: { cwd: proj } } }, signal: new AbortController().signal },
+  )
+  assert.strictEqual(r.ok, true, `派活链路应成功：${r.summary}`)
+  assert.strictEqual(r.dispatched, true)
+  assert.strictEqual(r.taskId, 'T-42')
+  assert.ok(r.cardPath.includes('产品增长-张一鸣.md'), `应注入该角色卡：${r.cardPath}`)
+  // 内部调用轨迹：brief → create_task
+  assert.deepStrictEqual(inner.map((i) => i.name), ['jarvis_member_brief', 'agent_teams_create_task'])
+  const created = inner[1].args
+  assert.ok(created.description.includes('## 六、你的角色卡'), '任务描述里必须含卡注入段（插件自动拼，不靠人抄）')
+  assert.ok(created.description.includes('延迟满足'), '卡里的方法论要真进描述')
+  assert.ok(created.description.includes('十阶段'), '须知里的 ponder 指引也要真进描述')
+  assert.ok(created.description.includes('每档含成本/预期/风险'), '原有验收标准不能丢')
 })
+

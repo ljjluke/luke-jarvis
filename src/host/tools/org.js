@@ -751,4 +751,154 @@ export const ORG_TOOLS = [
       }
     },
   },
+
+/**
+ * 派活一步到位（用户定调：固化流程，不考核步骤）。
+ *
+ * 旧做法：先用 jarvis_member_brief 生成须知 → 人工把须知抄进任务描述 → 再用闸检查「描述里有没有须知/角色卡标记」。
+ * 那是「考核员工有没有按流程填表」。新做法：把流程做进工具——一次调用内部完成
+ * ① jarvis_member_brief（含角色卡全文 + ponder 指引）② agent_teams_create_task（须知自动拼进描述）。
+ * 正确的路 = 最省事的路，于是不需要再靠闸去验证某一步有没有做。
+ */
+{
+  name: 'jarvis_dispatch_task',
+  description:
+    '派活一步到位（推荐用法）：内部先调 jarvis_member_brief 生成「角色卡全文 + ponder 指引 + 回报格式」的成员须知，再调 agent_teams_create_task 把须知自动拼进任务描述创建任务。把「正确流程」做成最省事的路：不用手工抄须知，不需要外部闸去检查你有没有抄。若任务已建好只想补须知，用 jarvis_member_brief + agent_teams_update_task。',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      assignee: { type: 'string', description: '成员名（与 agent_teams_add_member 的 name 一致；也是找角色卡的键）' },
+      subject: { type: 'string', description: '任务标题（写清交付物与验收口径）' },
+      description: { type: 'string', description: '任务正文：要做什么、输入在哪、验收标准（成员须知会自动附在后面）' },
+      acceptance: { type: 'string', description: '验收标准（可判定；会一并进入须知与任务描述）' },
+      team: { type: 'string', description: '团队 id（agent_teams_create_task 的 team 参数；不传由 agent-teams 决定）' },
+      taskId: { type: 'string', description: '显式任务 id（可选）' },
+      stakes: { type: 'string', description: '赌注 high/medium/low（默认 medium，影响 ponder 深度说明）' },
+      dependencies: { type: 'string', description: '依赖任务 id（JSON 数组字符串或逗号分隔，可选）' },
+      projectDir: { type: 'string', description: '项目目录（默认当前会话工作区）' },
+    },
+    required: ['assignee', 'subject'],
+  },
+  output: {
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        ok: { type: 'boolean', description: '整条链路是否成功' },
+        dispatched: { type: 'boolean', description: '任务是否真的建出来了（agent_teams_create_task 返回成功）' },
+        taskId: { type: 'string', description: '建出的任务 id（拿得到就填）' },
+        cardPath: { type: 'string', description: '注入的角色卡文件；空=该角色还没卡' },
+        cardMissing: { type: 'boolean', description: 'true=没有角色卡（流程建议先蒸馏，但不阻塞派活）' },
+        briefChars: { type: 'number', description: '写进任务描述的须知长度' },
+        inner: { type: 'array', items: { type: 'string' }, description: '内部调用轨迹（brief → create_task）' },
+        summary: { type: 'string', description: '结果摘要 + 失败时的补救办法' },
+      },
+      required: ['ok', 'summary'],
+    },
+    render: (r) =>
+      `${r.ok ? '✅' : '⚠️'} 派活${r.dispatched ? '已建任务' : '未建任务'}${r.taskId ? `（task=${r.taskId}）` : ''}\n` +
+      `角色卡：${r.cardPath || '（无——该角色还没蒸馏卡，建议先蒸馏再派活）'}\n` +
+      `须知：${r.briefChars ?? 0} 字已拼进任务描述\n` +
+      (Array.isArray(r.inner) && r.inner.length ? `内部调用：${r.inner.join(' → ')}\n` : '') +
+      `${r.summary || ''}`,
+  },
+  execute: async (args, exec) => {
+    const assignee = String(args.assignee ?? '').trim()
+    const subject = String(args.subject ?? '').trim()
+    if (!assignee || !subject) return { ok: false, summary: '⛔ 派活需要 assignee（成员名）与 subject（任务标题）' }
+    const projectDir = String(args.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || ''
+    const rt = getRuntimeContext()
+    const toolsSvc = rt && typeof rt.get === 'function' ? rt.get('tools') : undefined
+    if (!toolsSvc || typeof toolsSvc.execute !== 'function') {
+      return {
+        ok: false,
+        dispatched: false,
+        summary: '⚠️ 当前宿主没有 tools.execute（工具内派活不可用）。手工两步：① jarvis_member_brief(roleName=成员) ② 把 brief 原文附进 agent_teams_create_task 的 description。',
+      }
+    }
+    const signal = (exec && exec.signal) || new AbortController().signal
+    const rootCallId = (exec && exec.rootCallId) || undefined
+    const call = (name, a) =>
+      toolsSvc.execute({ callId: `jarvis-dispatch-${name}-${Date.now().toString(36)}`, rootCallId, name, arguments: a, agent: exec && exec.agent, signal })
+    const inner = []
+    const textOf = (res) => {
+      try {
+        if (!res || res.isError) return ''
+        const v = res.value
+        if (v && typeof v === 'object' && typeof v.brief === 'string') return v.brief
+      } catch {}
+      return ''
+    }
+    let brief = ''
+    let cardPath = ''
+    let cardMissing = true
+    try {
+      inner.push('jarvis_member_brief')
+      const b = await call('jarvis_member_brief', {
+        roleName: assignee,
+        task: [subject, args.description, args.acceptance].filter(Boolean).join('\n\n'),
+        stakes: String(args.stakes ?? 'medium'),
+        projectDir: projectDir || undefined,
+      })
+      brief = textOf(b)
+      const bv = b && !b.isError ? b.value : undefined
+      cardPath = String((bv && bv.cardPath) || '')
+      cardMissing = bv ? Boolean(bv.cardMissing) : true
+      if (b && b.isError) return { ok: false, dispatched: false, inner, cardPath, cardMissing, summary: `⚠️ 生成成员须知失败：${String((b.error && (b.error.message || b.error.code)) || '未知错误')}` }
+    } catch (e) {
+      return { ok: false, dispatched: false, inner, summary: `⚠️ 生成成员须知抛错：${String((e && e.message) || e)}` }
+    }
+    const body = String(args.description ?? '').trim()
+    const acceptance = String(args.acceptance ?? '').trim()
+    const description = [
+      body || '（见 subject）',
+      acceptance ? `验收标准：${acceptance}` : '',
+      brief ? '\n---\n' : '',
+      brief,
+    ].filter(Boolean).join('\n')
+    const taskArgs = { subject, description, assignee }
+    if (args.team) taskArgs.team = String(args.team)
+    if (args.taskId) taskArgs.task_id = String(args.taskId)
+    if (args.dependencies) {
+      const raw = String(args.dependencies).trim()
+      let deps = raw
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) deps = parsed
+      } catch {}
+      taskArgs.dependencies = deps
+    }
+    try {
+      inner.push('agent_teams_create_task')
+      const created = await call('agent_teams_create_task', taskArgs)
+      const cv = created && !created.isError ? created.value : undefined
+      const taskId = String((cv && (cv.taskId || cv.id || (cv.task && cv.task.id))) || '')
+      if (created && created.isError) {
+        return {
+          ok: false,
+          dispatched: false,
+          taskId,
+          cardPath,
+          cardMissing,
+          briefChars: brief.length,
+          inner,
+          summary: `⚠️ 任务创建失败：${String((created.error && (created.error.message || created.error.code)) || '未知错误')}——须知已生成（${brief.length} 字），可手工建任务并把须知附进描述。`,
+        }
+      }
+      return {
+        ok: true,
+        dispatched: true,
+        taskId,
+        cardPath,
+        cardMissing,
+        briefChars: brief.length,
+        inner,
+        summary: `任务「${subject}」已派给 ${assignee}；须知（含${cardPath ? '角色卡' : '角色卡缺失提示'} + ponder 指引）已自动写进描述。${cardMissing ? '⚠️ 该角色还没有卡：建议先蒸馏再让他开工。' : ''}`,
+      }
+    } catch (e) {
+      return { ok: false, dispatched: false, cardPath, cardMissing, briefChars: brief.length, inner, summary: `⚠️ 建任务抛错：${String((e && e.message) || e)}` }
+    }
+  },
+},
 ]

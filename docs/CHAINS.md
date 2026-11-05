@@ -16,9 +16,9 @@ luke-jarvis/
 ├── preset/*.yml          预设单一事实源 ──脚本──► presets/*.patch.yml ──setup──► profile patch
 ├── skills/{jarvis.md,ponder/}   随包技能 ──setup──► ~/.dsh/skills/
 ├── src/host/
-│   ├── plugin.js         647 行：apply(ctx) 注册 30 工具 + /jarvis + 4 guard + 4 路由 + systemPrompt
+│   ├── plugin.js         647 行：apply(ctx) 注册 31 工具 + /jarvis + 4 guard + 4 路由 + systemPrompt
 │   ├── runtime.js        宿主 ctx / exec / 工作区解析 / fs 服务（单例唯一来源）
-│   ├── tools/            30 工具按域：intake/memory/distill/review/org/deliver
+│   ├── tools/            31 工具按域：intake/memory/distill/review/org/deliver
 │   ├── gates/            ownership（归属/状态根）/ store（gates.json+记忆）/ stage（阶段机）/ flow（流程闸）/ audit（六审计）
 │   ├── state/            board（公屏）/ company（3D 公司状态）落盘
 │   ├── pixoffice/        relay 帧/命令校验（纯函数）
@@ -62,7 +62,7 @@ cordis.patch.yml
 plugin.js  export const inject = ['tools','webServer','agents','systemPrompt']   # plugin.js:182
            export async function apply(ctx)                                       # 见文件尾部
         │
-        ├─ ctx.tools.register(TOOLS)            → 30 个 jarvis_* 工具
+        ├─ ctx.tools.register(TOOLS)            → 31 个 jarvis_* 工具
         ├─ commands.register('/jarvis')         → jarvisCommand
         ├─ ctx.systemPrompt.section(...)        → protocol/JARVIS_SYSTEM_PROTOCOL + JARVIS_CULTURE
         └─ ctx.webServer.route(...)             → /jarvis-ui、/jarvis-office/*、/api/luke-jarvis/*、/api/pixoffice/events
@@ -195,7 +195,7 @@ package.json version ─► CHANGELOG.md ─► git tag vX.Y.Z ─► npm publis
 
 ## 11. 已知结构性债务（诚实清单）
 
-1. `src/host/plugin.js` 仍 ~5,700 行：30 个工具定义 + 闸/阶段/路由/app 混在一起。已拆出
+1. `src/host/plugin.js` 仍 ~5,700 行：31 个工具定义 + 闸/阶段/路由/app 混在一起。已拆出
    `core/`、`adapters/`、`distill/`、`protocol/`；剩余 `tools/`、`gates/`、`state/`、`ui/` 待拆。
 2. `scripts/` 是平铺的（selfcheck/build/check/rehearse 混放），未按用途分组。
 3. `docs/` 文档数量多，缺索引（本次补 [README.md](README.md)）。

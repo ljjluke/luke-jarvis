@@ -35,47 +35,7 @@ export function jarvisFlowGuard(exec) {
       const memIssue = checkMemoryFresh(String(cwd), { force: name === 'agent_teams_create' })
       if (memIssue) return memIssue
     }
-    // 成员交活（update_task → completed）无论 captain 还是 member 都必须先有 ponder 核验
-    if (name === 'agent_teams_update_task') {
-      const a = (exec && exec.arguments) || {}
-      const st2 = String(a.status || '')
-      const taskId = String(a.task_id || a.taskId || '')
-      if (st2 === 'completed' && taskId) {
-        let assignee = ''
-        try {
-          const fsx = _require('node:fs')
-          const pathx = _require('node:path')
-          const teamsDir = pathx.join(String(cwd), '.agent-teams')
-          for (const t of fsx.readdirSync(teamsDir)) {
-            try {
-              const d = JSON.parse(fsx.readFileSync(pathx.join(teamsDir, t, 'team.json'), 'utf8'))
-              const task = (d.tasks || []).find((x) => String(x.id) === taskId)
-              if (task) { assignee = String(task.assignee || ''); break }
-            } catch {}
-          }
-        } catch {}
-        const coord = assignee === 'captain' || assignee === 'CEO' || assignee === ''
-        if (!coord) {
-          let verified = false
-          try {
-            const fsx = _require('node:fs')
-            const pathx = _require('node:path')
-            const dir = pathx.join(String(cwd), '.jarvis/docs/ponder-verify')
-            const prefix = taskId.replace(/[^\w.:-]/g, '_')
-            for (const f of fsx.readdirSync(dir)) {
-              if (!f.endsWith('.json') || !f.startsWith(prefix)) continue
-              const rec = JSON.parse(fsx.readFileSync(pathx.join(dir, f), 'utf8'))
-              if (String(rec.verdict || '').toUpperCase() === 'PASS') { verified = true; break }
-            }
-          } catch {}
-          if (!verified) {
-            return `【jarvis 流程闸·ponder 强制】任务 ${taskId} 不能直接标 completed——没有 ponder 核验记录。必须：① 按开工须知跑 ponder 十阶段（export PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ → node step-guard.cjs init/before/after 逐阶段）② step-guard verify 通过 ③ jarvis_ponder_check(runId=<run_id>, dataDir=<目录>, evidenceDir=<产出目录>, taskId="${taskId}") 拿 PASS ④ 再 update_task(completed)。裸干交付=不合格。`
-          }
-        }
-        return undefined
-      }
-      return undefined
-    }
+    // 交活：不再校验「有没有跑 ponder」——ponder 是推荐思考方式，不是通行证（用户定调：固化流程，不考核步骤）
     if (!isCaptain && name !== 'agent_teams_create') return undefined
     // ① 建队/派活前必须有需求规格或基线清单
     if (!st.hasReq && st.baseline === 0) {
@@ -102,27 +62,8 @@ export function jarvisFlowGuard(exec) {
         return `【jarvis 流程闸·不可绕过】缺少前置闸：${chainMissing.join('、')}。必须按 clarify → decompose → design → build 顺序逐个通过 jarvis_flowguard（每步的产物要真实：需求规格/任务编排图/方案设计），不允许跳步直接派活——即使用户要求"快点做"也不行。`
       }
     }
-    // ④ 派活必须附成员开工须知（含 ponder 指引）——否则成员会裸干（scan 实证：成员会话 jarvis 工具 0 次）
-    if (name === 'agent_teams_create_task') {
-      const desc = String((exec && exec.arguments && exec.arguments.description) || '')
-      const subj = String((exec && exec.arguments && exec.arguments.subject) || '')
-      // T13 ②：与 auditTeamBriefs 共用 COORD_TASK_RE（禁止两处各写一份口径 → 自家【协调】任务被拦）
-      const HAS_BRIEF = /开工须知|jarvis_member_brief|ponder|step-guard|run_id|PONDER_DATA_DIR/
-      // ④b 有卡必须在场：assignee 在 .jarvis/cards/ 有卡，但描述里没卡注入段 → 成员会按通用思路干
-      if (!COORD_TASK_RE.test(subj)) {
-        const assignee = String((exec && exec.arguments && (exec.arguments.assignee || exec.arguments.member)) || '')
-        if (assignee && !desc.includes(CARD_SECTION_MARK)) {
-          let card = null
-          try { card = findRoleCardSync(String(cwd), assignee, _require('node:path')) } catch { card = null }
-          if (card) {
-            return `【jarvis 流程闸·角色卡未注入】任务「${subj.slice(0, 40)}」的 assignee「${assignee}」已有角色卡（${card.relPath}），但任务描述里没有「${CARD_SECTION_MARK}」段——成员拿不到卡就会按模型默认的通用思路干（名义蒸馏、实际没按大佬方式工作）。请用 jarvis_member_brief(roleName="${assignee}") 重新生成须知（内含卡文本）并把 brief 原文附进 description。`
-          }
-        }
-      }
-      if (!COORD_TASK_RE.test(subj) && !HAS_BRIEF.test(desc)) {
-        return `【jarvis 流程闸】派活必须附成员开工须知：任务「${subj.slice(0, 40)}」的描述里没有 ponder/开工须知指引。请先调 jarvis_member_brief(roleName=该成员) 生成须知，把 brief 原文附进 description，再建任务（否则成员不知道要跑 ponder 十阶段，只会裸干）。纯协调类任务可在 subject 标【协调】豁免。`
-      }
-    }
+    // ④ 派活：不再用「描述里有没有开工须知/角色卡标记」来执法。
+    //    改由 jarvis_dispatch_task 一步完成「卡+须知+建任务」，正确的路变成最省事的路。
     return undefined
   } catch {
     return undefined

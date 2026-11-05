@@ -143,6 +143,7 @@ export function renderStage(cwd, opts = {}) {
     r.done.length ? `已通过：${r.done.join(' → ')}` : '已通过：（无）',
     r.missing.length ? `当前缺口：${r.missing.join('；')}` : '当前缺口：无',
     `下一步：${r.next}`,
+    r.stage === 'build' ? '本阶段固化用法：jarvis_dispatch_task(assignee, subject, description, acceptance) 一步完成「角色卡+须知+建任务」，再用 agent_teams_reassign_task 唤醒成员。' : '',
     `事实快照：需求规格=${r.artifacts.reqDoc ? '有' : '无'} 任务编排=${r.artifacts.taskmap ? '有' : '无'} 方案设计=${r.artifacts.designDoc ? '有' : '无'} 角色卡=${r.artifacts.cards} 团队=${r.artifacts.teams} 未完成任务=${r.artifacts.openTasks} ponder核验=${r.artifacts.verify}`,
     '规则：只做当前阶段允许的动作；下游动作（建队/派活）在阶段未过时会被机械闸拒绝。',
   ]

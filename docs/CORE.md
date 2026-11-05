@@ -81,6 +81,6 @@ jarvis_ticket({ action: 'stop', ticketId: 'ticket-xxx', reason: '方向错了' }
 
 ```bash
 node --test test/core.test.js     # 14 用例：生命周期/阶段/裁决/仓储/工具/守卫
-node --test test/plugin.test.js   # 296 用例不回归（30 工具）
+node --test test/plugin.test.js   # 296 用例不回归（31 工具）
 bash scripts/selfcheck.sh         # 15 项（新增 core 分层检查）
 ```

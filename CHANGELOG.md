@@ -2,6 +2,43 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.10.5] - 2026-11-05
+
+### 把「基本工作流程」固化进插件，而不是考核「有没有用过某个步骤」
+
+用户定调：要的是流程长在插件里，不是插件不停检查"你跑没跑 ponder、抄没抄须知"。本轮按此重构。
+
+**1) 新增 `jarvis_dispatch_task`（流程固化 = 正确的路最省事）**
+
+一次调用内部完成两件事：
+① 调 `jarvis_member_brief` 生成「**角色卡全文** + ponder 指引 + 回报格式」的成员须知；
+② 调 `agent_teams_create_task` 把须知自动拼进任务描述建任务（保留原描述与验收标准）。
+于是「派活要带卡和须知」不再需要闸去查表——插件自己把它做掉了。内部经宿主 `tools.execute`
+做嵌套调用；宿主不支持时明确降级为手工两步并给出指令。
+
+**2) 去掉「步骤执法」类硬闸（保留流程产物闸）**
+
+- `agent_teams_update_task(status=completed)` 不再要求 `.jarvis/docs/ponder-verify` PASS 记录：
+  ponder 是深度思考方式，不是通行证；验收看产物与证据。
+- `agent_teams_create_task` 不再校验描述里有没有「开工须知/角色卡标记」（0.10.4 刚加的那道）。
+- `jarvis_flowguard(step="build")` 不再把「任务缺须知/缺卡」列进缺口。
+- **保留**流程产物闸：需求规格 → 任务编排 → 方案设计 → 建队 → 收口覆盖矩阵（这才是"流程"本身），
+  以及顶层不亲自执行的职责闸、状态根/归档隔离等安全闸。
+
+**3) 文档与提示对齐新口径**
+
+- `JARVIS_SYSTEM_PROTOCOL` 第 9 步改为「jarvis_dispatch_task 一步到位」；第 10 步改为「看产物与证据，
+  ponder 可选不是通行证」；第 11 步去掉 ponder 核验。
+- 阶段注入在 build 阶段会提示 dispatch 用法；成员须知结尾改为推荐 dispatch。
+
+**4) 验证**
+
+```
+node --test test/plugin.test.js test/core.test.js → 317 / 317
+bash scripts/selfcheck.sh → 全过（TOOLS-COUNT-OK 31）   node scripts/verify-tool-contract.mjs → 真实 ToolRuntime 31/31
+node test/e2e-flow.test.mjs → 31 工具链路闭环
+```
+
 ## [0.10.4] - 2026-11-05
 
 ### 角色卡真注入 + 真机路由 bug 修复（"蒸馏了，但员工真按大佬方式工作吗？"）
