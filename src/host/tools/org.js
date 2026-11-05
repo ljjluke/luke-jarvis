@@ -16,6 +16,7 @@ import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, c
 import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
 import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing, countMeetingProgress } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
+import { checkMinutesShape, meetingPolicy, MEETING_LABELS } from '../state/meetings.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
 const _require = createRequire(import.meta.url)
@@ -438,6 +439,12 @@ export const ORG_TOOLS = [
           meetingVerdict: { type: 'string', description: '真会议校验结果：真开会 / 假开会/未充分开会（按 memberReplies+brainstormEvidence 判定）' },
           meetingVerdictNote: { type: 'string', description: '真会议校验明细（缺什么/通过）' },
           meetingIssues: { type: 'array', items: { type: 'string' }, description: '假开会的问题清单（缺观点/无质疑/缺三轮）' },
+          minutesSaved: { type: 'boolean', description: '纪要是否真的落盘（.jarvis/meetings/<id>-minutes.json）——没纪要=这场会不算开' },
+          minutesPath: { type: 'string', description: '纪要落盘路径' },
+          minutesMissing: { type: 'array', items: { type: 'string' }, description: '纪要缺的要素（缺了不落盘）' },
+          minutesNote: { type: 'string', description: '纪要落盘结果说明' },
+          meetingRequired: { type: 'array', items: { type: 'object', additionalProperties: true }, description: '当前必开的会（type/why/agenda，来自事实判定）' },
+          nextMeetingRule: { type: 'string', description: '下次该不该开会：必开/建议/不必开 + 判据' },
         },
         required: ['goal', 'resolutions'],
       },
@@ -607,10 +614,58 @@ export const ORG_TOOLS = [
       const meetingClosed = meetingIssues.length === 0
         ? '本次会议结论可进入后续（拆解/派活/收口）；收口防迎合总闸第4条（对抗碰撞过）以本次 meetingVerdict 为证据。'
         : '⛔ **本次会议结论作废**：未达到真会议标准（见上），**后续拆解/派活/收口不得基于本次会结论**——先重开会议收齐成员观点+三轮证据（补 memberReplies/brainstormEvidence 或重新开会），收口防迎合总闸第4条（对抗碰撞过）将按本次 verdict=假开会 拦截。'
+      // ── 纪要必须落盘（不只群聊模式）：没有纪要 = 这场会不算开（结论无法被后续引用，也无法判定该不该开）
+      const pathM = _require('node:path')
+      const projectDirM = String(args.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || ''
+      let minutesResult = null
+      const minutesRaw2 = String(args.minutes ?? '').trim()
+      if (minutesRaw2) {
+        try {
+          const parsed = JSON.parse(minutesRaw2)
+          parsed.type = String(parsed.type || type).toLowerCase()
+          const miss = checkMinutesShape(parsed)
+          if (miss.length) {
+            minutesResult = { ok: false, missing: miss, note: '纪要要素不全，未落盘（缺：' + miss.join('、') + '）——开会可以，但"开了没结论"不算开' }
+          } else if (!projectDirM) {
+            minutesResult = { ok: false, missing: ['projectDir（解析不到工作区，无法落盘）'], note: '纪要未落盘' }
+          } else {
+            const meetId2 = 'm' + Date.now().toString(36)
+            const rel = '.jarvis/meetings/' + meetId2 + '-minutes.json'
+            const fsSvcM = getFsService(exec)
+            const full = pathM.join(projectDirM, rel)
+            const body = JSON.stringify({ ...parsed, meetId: meetId2, savedAt: new Date().toISOString() }, null, 2)
+            if (fsSvcM && typeof fsSvcM.writeText === 'function') {
+              await fsSvcM.writeText(full, body)
+              minutesResult = { ok: true, path: rel, note: '纪要已落盘（' + parsed.type + '）' }
+            } else {
+              const fsx = _require('node:fs')
+              fsx.mkdirSync(pathM.dirname(full), { recursive: true })
+              fsx.writeFileSync(full, body)
+              minutesResult = { ok: true, path: rel, note: '纪要已落盘（' + parsed.type + '）' }
+            }
+          }
+        } catch (e) {
+          minutesResult = { ok: false, missing: ['minutes 必须是合法 JSON'], note: '纪要未落盘：' + String((e && e.message) || e) }
+        }
+      } else {
+        minutesResult = { ok: false, missing: ['minutes'], note: '⚠️ 本次会议没有传纪要——会议结论无法被后续流程引用；要算"开过会"必须传 minutes（topic/attendees/type/resolutions/actions）' }
+      }
+      const policy = projectDirM ? meetingPolicy(projectDirM, pathM) : { required: [], suggested: [], noMeetingReason: '' }
+      const nextMeetingRule = policy.required.length
+        ? '必开：' + policy.required.map((r) => `${MEETING_LABELS[r.type] || r.type}——${r.why}`).join('；')
+        : policy.suggested.length
+          ? '建议：' + policy.suggested.map((r) => `${MEETING_LABELS[r.type] || r.type}——${r.why}`).join('；')
+          : policy.noMeetingReason || '暂不需要开会'
       return {
         type,
         goal: m.goal,
         protocol: m.protocol + (agenda ? `\n议程：${agenda}` : '') + (ctx ? `\n上下文：${ctx}` : ''),
+        minutesSaved: Boolean(minutesResult && minutesResult.ok),
+        minutesPath: (minutesResult && minutesResult.path) || '',
+        minutesMissing: (minutesResult && minutesResult.missing) || [],
+        minutesNote: (minutesResult && minutesResult.note) || '',
+        meetingRequired: policy.required.map((r) => ({ type: r.type, why: r.why, agenda: r.agenda })),
+        nextMeetingRule,
         resolutions: m.resolutions,
         actions: m.actions,
         meetingVerdict,
@@ -886,6 +941,14 @@ export const ORG_TOOLS = [
           summary: `⚠️ 任务创建失败：${String((created.error && (created.error.message || created.error.code)) || '未知错误')}——须知已生成（${brief.length} 字），可手工建任务并把须知附进描述。`,
         }
       }
+      let meetingHint = ''
+      try {
+        const { meetingPolicy } = await import('../state/meetings.js')
+        const pd = meetingPolicy(projectDir, _require('node:path'))
+        meetingHint = pd.required.length
+          ? ' ｜ 会议：必开 ' + pd.required.map((r) => `${r.type}（${r.why}）`).join('；')
+          : pd.suggested.length ? ' ｜ 会议建议：' + pd.suggested.map((r) => r.type).join('、') : ''
+      } catch { /* 判定失败不阻塞派活 */ }
       return {
         ok: true,
         dispatched: true,
@@ -894,7 +957,7 @@ export const ORG_TOOLS = [
         cardMissing,
         briefChars: brief.length,
         inner,
-        summary: `任务「${subject}」已派给 ${assignee}；须知（含${cardPath ? '角色卡' : '角色卡缺失提示'} + ponder 指引）已自动写进描述。${cardMissing ? '⚠️ 该角色还没有卡：建议先蒸馏再让他开工。' : ''}`,
+        summary: `任务「${subject}」已派给 ${assignee}；须知（含${cardPath ? '角色卡' : '角色卡缺失提示'} + ponder 指引）已自动写进描述。${cardMissing ? '⚠️ 该角色还没有卡：建议先蒸馏再让他开工。' : ''}${meetingHint}`,
       }
     } catch (e) {
       return { ok: false, dispatched: false, cardPath, cardMissing, briefChars: brief.length, inner, summary: `⚠️ 建任务抛错：${String((e && e.message) || e)}` }

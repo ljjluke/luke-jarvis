@@ -3936,6 +3936,12 @@ function makeMultiProjectFixture() {
   fs.mkdirSync(td, { recursive: true })
   // 自家：t1（含开工须知）、t4【协调】（无开工须知，应豁免）、t9 已完成（终态不参与审计）
   fs.mkdirSync(path.join(td, 'luke-jarvis-完全体'), { recursive: true })
+  // 开工对齐纪要（现在属流程产物：有团队有任务就必须有，否则 build 闸报「必开会」）
+  fs.mkdirSync(path.join(proj, '.jarvis/meetings'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/meetings/m0-minutes.json'), JSON.stringify({
+    type: 'kickoff', topic: '开工对齐', date: '2026-11-05', attendees: ['m1'], agenda: ['目标', '验收', '接口', '分工'],
+    resolutions: ['R1 目标与验收标准', 'R2 接口契约'], actions: [{ who: 'm1', what: '实现X' }],
+  }))
   fs.writeFileSync(path.join(td, 'luke-jarvis-完全体/team.json'), JSON.stringify({
     name: 'luke-jarvis-完全体', captainSessionId: 'cap',
     tasks: [
@@ -4347,4 +4353,128 @@ test('成员须知：交付格式要求「反方攻击/失效边界/置信度」
     assert.ok(r.brief.includes(k), `回报格式必须要求「${k}」——这是 ponder 级思考在产物里的痕迹`)
   }
   assert.ok(/不是必填门槛|可溯源/.test(r.brief), 'ponder run_id 应标注为可选溯源，不是门槛（与「不考核步骤」一致）')
+})
+
+// ── 会议判定（不是摆设：从事实算该不该开会）──────────────────────────────────
+test('会议判定：没团队不开会；有团队有任务没开工会 → 必开开工对齐会', async () => {
+  const m = await import('../src/host/state/meetings.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'meet-'))
+  assert.strictEqual(m.meetingPolicy(proj).required.length, 0, '没团队 → 不要求开会')
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ tasks: [
+    { id: 'a', subject: '实现X', assignee: 'm1', status: 'in_progress' },
+    { id: 'b', subject: '验收Y', assignee: 'm2', status: 'in_progress' },
+  ] }))
+  const p = m.meetingPolicy(proj)
+  assert.strictEqual(p.required.length, 1, `应必开一个会：${JSON.stringify(p.required)}`)
+  assert.strictEqual(p.required[0].type, 'kickoff')
+  assert.ok(p.required[0].why.includes('开工对齐'), '理由要说清为什么必开')
+  assert.ok(p.required[0].agenda.length >= 4, '议题要从事实带出来（目标/验收/接口/分工），不是空模板')
+})
+
+test('会议判定：开工纪要齐备后不再要求；新成员进场 → 必开循环会（上下文对齐）', async () => {
+  const m = await import('../src/host/state/meetings.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'meet2-'))
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ tasks: [
+    { id: 'a', subject: '实现X', assignee: 'm1', status: 'in_progress' },
+  ] }))
+  fs.mkdirSync(path.join(proj, '.jarvis/meetings'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/meetings/m1-minutes.json'), JSON.stringify({ type: 'kickoff', topic: '开工', attendees: ['m1', 'm2'], resolutions: ['R1'], actions: [{ who: 'm1', what: 'x' }] }))
+  assert.deepStrictEqual(m.meetingPolicy(proj).required, [], '开过工工会且成员都参加 → 不再要求')
+  // 新成员 m9 进场
+  const tf = path.join(proj, '.agent-teams/t1/team.json')
+  const t = JSON.parse(fs.readFileSync(tf, 'utf8'))
+  t.tasks.push({ id: 'b', subject: '接新模块', assignee: 'm9', status: 'in_progress' })
+  fs.writeFileSync(tf, JSON.stringify(t))
+  const p = m.meetingPolicy(proj)
+  assert.ok(p.required.some((r) => r.type === 'cycle' && r.why.includes('新成员')), `新成员应触发循环会：${JSON.stringify(p.required)}`)
+})
+
+test('会议判定：黑板阻塞/未决≥3/分工冲突 → 必开循环会；收敛后不开会', async () => {
+  const m = await import('../src/host/state/meetings.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'meet3-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/meetings'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/meetings/m0-minutes.json'), JSON.stringify({ type: 'kickoff', topic: '开工', attendees: ['m1', 'm2'], resolutions: ['R1'], actions: [{ who: 'm1', what: 'x' }] }))
+  // 阻塞 → 必开
+  fs.writeFileSync(path.join(proj, '.jarvis/board.json'), JSON.stringify({ items: [{ id: 'B1', type: '阻塞', content: '接口缺字段', status: 'open' }] }))
+  let p = m.meetingPolicy(proj)
+  assert.ok(p.required.some((r) => r.type === 'cycle' && r.why.includes('阻塞')), '阻塞 → 必开循环会')
+  assert.ok(p.required[0].agenda.some((a) => a.includes('B1')), '议题必须点名具体条目（不是泛泛而谈）')
+  // 收敛 → 不开
+  fs.writeFileSync(path.join(proj, '.jarvis/board.json'), JSON.stringify({ items: [{ id: 'B1', type: '阻塞', content: '接口缺字段', status: 'resolved' }] }))
+  p = m.meetingPolicy(proj)
+  assert.ok(!p.required.some((r) => r.type === 'cycle'), `收敛后不该要求循环会：${JSON.stringify(p.required)}`)
+  // ≥3 未决 → 必开
+  fs.writeFileSync(path.join(proj, '.jarvis/board.json'), JSON.stringify({ items: [
+    { id: 'O1', type: '问题', content: 'x', status: 'open' },
+    { id: 'O2', type: '风险', content: 'y', status: 'open' },
+    { id: 'O3', type: '发现', content: 'z', status: 'open' },
+  ] }))
+  p = m.meetingPolicy(proj)
+  assert.ok(p.required.some((r) => r.type === 'cycle' && r.why.includes('未决')), '未决≥3 → 必开收敛会')
+  // 分工冲突：同主题两人并行
+  fs.writeFileSync(path.join(proj, '.jarvis/board.json'), JSON.stringify({ items: [] }))
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ tasks: [
+    { id: 'a', subject: '【实现】会员分层模型', assignee: 'm1', status: 'in_progress' },
+    { id: 'b', subject: '【实现】会员分层模型', assignee: 'm2', status: 'in_progress' },
+  ] }))
+  p = m.meetingPolicy(proj)
+  assert.ok(p.required.some((r) => r.type === 'cycle' && r.why.includes('分工冲突')), `同一主题两人并行 → 分工冲突必开会：${JSON.stringify(p.required)}`)
+})
+
+test('会议判定：任务全交完没开收口会 → 必开收口会；开完不再要求', async () => {
+  const m = await import('../src/host/state/meetings.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'meet4-'))
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ tasks: [{ id: 'a', subject: '实现X', assignee: 'm1', status: 'completed' }] }))
+  fs.mkdirSync(path.join(proj, '.jarvis/meetings'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/meetings/m0-minutes.json'), JSON.stringify({ type: 'kickoff', topic: '开工', attendees: ['m1'], resolutions: ['R1'], actions: [{ who: 'm1', what: 'x' }] }))
+  let p = m.meetingPolicy(proj)
+  assert.ok(p.required.some((r) => r.type === 'close'), '任务全交完必须开收口会')
+  fs.writeFileSync(path.join(proj, '.jarvis/meetings/m1-minutes.json'), JSON.stringify({ type: 'close', topic: '收口', attendees: ['m1'], resolutions: ['逐项验收通过'], actions: [{ who: 'CEO', what: '交付' }] }))
+  p = m.meetingPolicy(proj)
+  assert.ok(!p.required.some((r) => r.type === 'close'), '开过收口会 → 不再要求')
+})
+
+test('jarvis_meeting：不开会可以，开了必须有完整纪要（缺要素不落盘、不算开过）', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_meeting')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'meet5-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  // 不传纪要 → 明确说不算开过
+  const r0 = await def.execute({ meetingType: 'kickoff', projectDir: proj }, {})
+  assert.strictEqual(r0.minutesSaved, false)
+  assert.ok(/必须传 minutes|没有传纪要/.test(r0.minutesNote), `没纪要要明说：${r0.minutesNote}`)
+  // 缺 actions → 不落盘并点名缺什么
+  const r1 = await def.execute({ meetingType: 'kickoff', projectDir: proj, minutes: JSON.stringify({ topic: '对齐', type: 'kickoff', attendees: ['m1', 'm2'], resolutions: ['R1'] }) }, {})
+  assert.strictEqual(r1.minutesSaved, false)
+  assert.ok(r1.minutesMissing.some((x) => String(x).includes('actions')), `缺 actions 要点名：${JSON.stringify(r1.minutesMissing)}`)
+  // 完整纪要 → 落盘 + 判定认可
+  const r2 = await def.execute({ meetingType: 'kickoff', projectDir: proj, minutes: JSON.stringify({ topic: '开工对齐', type: 'kickoff', attendees: ['m1', 'm2'], agenda: ['目标', '验收'], resolutions: ['R1 目标与验收'], actions: [{ who: 'm1', what: '实现X' }] }) }, {})
+  assert.strictEqual(r2.minutesSaved, true, `完整纪要应落盘：${JSON.stringify(r2.minutesMissing)}`)
+  assert.ok(fs.existsSync(path.join(proj, r2.minutesPath)), '纪要文件真的存在')
+  const m = await import('../src/host/state/meetings.js')
+  assert.strictEqual(m.readMinutesSync(proj).length, 1, '判定能读到这份纪要')
+  assert.ok(r2.nextMeetingRule, '返回值要带「下次该不该开会」的判定')
+})
+
+test('flowguard(build)：有团队有任务却没开工对齐纪要 → 缺口点名开工对齐会；补纪要后消失', async () => {
+  applyRealFs()
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'meet6-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160) + '\n验收：x')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/任务编排-x.md'), '# 任务编排')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案')
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头.md'), '# 猎头')
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO.md'), '# CEO')
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', tasks: [{ id: 'a', subject: '实现X', assignee: 'm1', status: 'in_progress' }] }))
+  const r1 = await runFlowguard('build', proj)
+  assert.ok(r1.missing.some((x) => String(x).includes('开工对齐会')), `缺开工纪要要拦：${JSON.stringify(r1.missing)}`)
+  fs.mkdirSync(path.join(proj, '.jarvis/meetings'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/meetings/m0-minutes.json'), JSON.stringify({ type: 'kickoff', topic: '开工', attendees: ['m1'], resolutions: ['R1'], actions: [{ who: 'm1', what: 'x' }] }))
+  const r2 = await runFlowguard('build', proj)
+  assert.ok(!r2.missing.some((x) => String(x).includes('开工对齐会')), `补纪要后不该再拦：${JSON.stringify(r2.missing)}`)
 })

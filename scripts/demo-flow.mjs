@@ -61,7 +61,17 @@ for (const f of ['CEO-带队.md', '猎头.md', '产品增长-张一鸣.md']) {
 fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
 fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ name: 't1', captainSessionId: 'demo-captain', tasks: [{ id: 'T1', assignee: '产品增长', status: 'in_progress', subject: '分层模型' }] }))
 recordGate(proj, 'build', true)
-show('5. 蒸馏出角色卡 + 建队之后')
+show('5. 蒸馏出角色卡 + 建队之后（注意「会议：必开 开工对齐会」）')
+
+// 5b) 开工会：写纪要 → 会议判定清除
+fs.mkdirSync(path.join(proj, '.jarvis/meetings'), { recursive: true })
+fs.writeFileSync(path.join(proj, '.jarvis/meetings/m0-minutes.json'), JSON.stringify({
+  type: 'kickoff', topic: '开工对齐：会员复购增长', date: '2026-11-05', attendees: ['CEO', '产品增长', '猎头'],
+  agenda: ['目标与验收', '接口契约', '依赖与分工'],
+  resolutions: ['R1 目标：30 天复购率 +5%，可判定', 'R2 接口：产品给分层规则，数据给口径，增长给触达方案'],
+  actions: [{ who: '产品增长', what: '出分层模型' }],
+}, null, 2))
+show('5b. 写完开工对齐会纪要之后（必开会已消除）')
 
 // 6) 任务交完 → build 闸；close 闸
 const teamFile = path.join(proj, '.agent-teams/t1/team.json')
@@ -69,8 +79,14 @@ const t = JSON.parse(fs.readFileSync(teamFile, 'utf8'))
 t.tasks[0].status = 'completed'
 fs.writeFileSync(teamFile, JSON.stringify(t))
 fs.writeFileSync(path.join(proj, '.jarvis/board.json'), JSON.stringify({ items: [{ id: 'B1', type: '决策', content: '采用三档策略', status: 'resolved' }] }))
+show('6a. 任务全交完、还没开收口会（注意「会议：必开 收口会」）')
+fs.writeFileSync(path.join(proj, '.jarvis/meetings/m1-minutes.json'), JSON.stringify({
+  type: 'close', topic: '收口验收', date: '2026-11-05', attendees: ['CEO', '产品增长'],
+  resolutions: ['R1 验收：三档策略+成本/预期/风险齐备，通过', 'R2 遗留：触达渠道细化 → 下轮'],
+  actions: [{ who: 'CEO', what: '交付方案给用户' }],
+}, null, 2))
 recordGate(proj, 'close', true)
-show('6. 任务完成 + 黑板归拢 + flowguard(close) 之后（全 6/6）')
+show('6b. 收口会纪要 + flowguard(close) 之后（全 6/6）')
 
 line('阶段机结论（插件视角）')
 const st = computeStage(proj, { sessionId: 'demo-captain' })

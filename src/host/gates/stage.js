@@ -6,6 +6,7 @@
 import { createRequire } from 'node:module'
 import { _readGates, _flowState } from './store.js'
 import { resolveOwnedTeams, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE } from './ownership.js'
+import { renderMeetingStatus } from '../state/meetings.js'
 const _require = createRequire(import.meta.url)
 
 // ── 插件级「顶层 captain 不得亲自执行」硬拦截 ─────────────────────────────
@@ -144,6 +145,7 @@ export function renderStage(cwd, opts = {}) {
     r.missing.length ? `当前缺口：${r.missing.join('；')}` : '当前缺口：无',
     `下一步：${r.next}`,
     r.stage === 'build' ? '本阶段固化用法：jarvis_dispatch_task(assignee, subject, description, acceptance) 一步完成「角色卡+须知+建任务」，再用 agent_teams_reassign_task 唤醒成员。' : '',
+    (() => { try { return renderMeetingStatus(cwd, undefined, { teams: r.artifacts.activeTeams || [] }) } catch { return '' } })(),
     `事实快照：需求规格=${r.artifacts.reqDoc ? '有' : '无'} 任务编排=${r.artifacts.taskmap ? '有' : '无'} 方案设计=${r.artifacts.designDoc ? '有' : '无'} 角色卡=${r.artifacts.cards} 团队=${r.artifacts.teams} 未完成任务=${r.artifacts.openTasks} ponder记录（可选，不作闸）=${r.artifacts.verify}`,
     '规则：只做当前阶段允许的动作；下游动作（建队/派活）在阶段未过时会被机械闸拒绝。',
   ]

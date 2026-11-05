@@ -14,6 +14,7 @@ import { listNames, readTextSafe, hasTeamJson, resolveWorkspace, ponderVerifyPro
 import { MEMORY_MAX_AGE_MS, checkMemoryFresh, _readGates, _memoryState, recordGate, _flowState } from '../gates/store.js'
 import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from '../gates/stage.js'
 import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
+import { meetingGaps } from '../state/meetings.js'
 import { auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
@@ -727,6 +728,8 @@ export const DELIVER_TOOLS = [
             if (teamFound) {
               // 派活：建队闸只认流程产物（需求规格/方案/人才层），不考核「有没有用 brief/卡」——
               // 固化作法是 jarvis_dispatch_task（内部自动拼须知+角色卡），不是靠闸查表。
+              // 会议：有团队有任务却没开工对齐纪要 → 必开（会议是流程产物，不是摆设）
+              missing.push(...meetingGaps(projectDir, 'build', path, { teams: [...ownedSet] }))
             }
           },
           next: '先蒸馏猎头→CEO→各岗位角色卡（cards/ 齐备）→ 再建队派活（每任务附开工须知）→ 成员开工先 ponder → 执行',
@@ -752,6 +755,8 @@ export const DELIVER_TOOLS = [
                 `疑似卡死任务：${staleTasks.join('、')}（claimed 未交付 / attempt≥4 产出为空——必须 agent_teams_reassign_task 唤醒成员或换人，不许顶层自己顶替）`
               )
             }
+            // 会议：黑板有阻塞/接口变更、未决≥3、分工冲突、新成员进场 → 必开循环会
+            missing.push(...meetingGaps(projectDir, 'execute', path, { teams: [...ownedSet] }))
           },
           next: '开发-测试迭代（对照基准）+ 质量自循环深挖 → 收口',
         },
@@ -786,6 +791,8 @@ export const DELIVER_TOOLS = [
               const covMissing = await checkCoverageGate(fsSvc, projectDir, path)
               missing.push(...covMissing)
             } catch {}
+            // 会议：任务全交完却没开收口会 → 必开（逐项验收 + 遗留项分级）
+            missing.push(...meetingGaps(projectDir, 'close', path, { teams: [...ownedSet] }))
             // ponder 核验：不再是收口硬闸（用户定调：流程固化，不考核步骤）——核验记录仍可用 jarvis_ponder_check 生成并查
           },
           next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',

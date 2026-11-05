@@ -16,6 +16,7 @@ import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, c
 import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
 import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
+import { meetingPolicy } from '../state/meetings.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
 const _require = createRequire(import.meta.url)
@@ -528,14 +529,13 @@ export const MEMORY_TOOLS = [
       const blockers = openItems.filter((i) => i.type === '阻塞' || i.type === '接口变更')
       // 决策条目必须过 jarvis_essence 需求本质校验才能定稿（防迎合/防幻觉闸门）
       const decisions = items.filter((i) => i.type === '决策' && !!i.essenceChecked === false)
-      const needsMeeting = blockers.length > 0 || openItems.length >= 3
+      // 开会判定统一走 state/meetings.js（单一事实源）：不再在黑板工具里手写第二份口径
+      const projDir = resolveWorkspace(getRuntimeContext(), exec) || ''
+      const mpolicy = meetingPolicy(projDir || '.', _require('node:path'), { boardItems: items })
+      const needsMeeting = mpolicy.required.length > 0
       const reason = needsMeeting
-        ? openItems.length === 0
-          ? '黑板未决项为 0（异常状态）'
-          : blockers.length > 0
-            ? `存在 ${blockers.length} 项未解决阻塞/接口变更（${blockers.map((b) => b.id).join(',')}）——必须二次开会同步`
-            : `未决项 ${openItems.length} 项（≥3，需要同步收敛）——建议二次开会`
-        : `黑板收敛（未决 ${openItems.length} 项，无阻塞）——暂不需要二次会，继续独自思考/干活，有新问题随时写黑板`
+        ? mpolicy.required.map((r) => `${r.type}：${r.why}`).join('；')
+        : mpolicy.noMeetingReason || `黑板收敛（未决 ${openItems.length} 项，无阻塞）——暂不需要二次会，继续独自思考/干活，有新问题随时写黑板`
       const essenceNote = decisions.length ? `；⚠️ ${decisions.length} 条决策条目未过 jarvis_essence 需求本质校验，定稿前必须审计（防迎合/防幻觉）` : ''
       const summary = `未决 ${openItems.length} 项；阻塞 ${blockers.length} 项${blockers.length ? '：' + blockers.map((b) => b.id + '(' + b.content.slice(0, 20) + ')').join(', ') : ''}。${reason}${essenceNote}`
       // 写回磁盘（项目级公屏持久化）。成功=真源已更新；失败=本次仅内存返回（下次调用仍以磁盘为准，不伪造持久化）
