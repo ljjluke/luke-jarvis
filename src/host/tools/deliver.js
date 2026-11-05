@@ -14,7 +14,7 @@ import { listNames, readTextSafe, hasTeamJson, resolveWorkspace, ponderVerifyPro
 import { MEMORY_MAX_AGE_MS, checkMemoryFresh, _readGates, _memoryState, recordGate, _flowState } from '../gates/store.js'
 import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from '../gates/stage.js'
 import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
-import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
+import { auditTeamBriefs, auditTeamCards, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
@@ -727,6 +727,10 @@ export const DELIVER_TOOLS = [
             if (teamFound) {
               const briefOk = await auditTeamBriefs(fsSvc, projectDir, path, ownedSet)
               if (!briefOk) missing.push('有团队成员任务缺「开工须知」（派活后跑 jarvis_member_brief audit——成员没须知=不会跑 ponder）')
+              const cardGaps = await auditTeamCards(fsSvc, projectDir, path, ownedSet)
+              if (cardGaps.length) {
+                missing.push(`有成员任务没注入角色卡（${cardGaps.slice(0, 3).map((g) => g.assignee + ':' + g.card).join('、')}${cardGaps.length > 3 ? ' 等' : ''}）——成员拿不到卡 = 按通用思路干；用 jarvis_member_brief(roleName=…) 重新生成须知并把 brief 原文附进 description`)
+              }
             }
           },
           next: '先蒸馏猎头→CEO→各岗位角色卡（cards/ 齐备）→ 再建队派活（每任务附开工须知）→ 成员开工先 ponder → 执行',

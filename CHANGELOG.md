@@ -2,6 +2,47 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.10.4] - 2026-11-05
+
+### 角色卡真注入 + 真机路由 bug 修复（"蒸馏了，但员工真按大佬方式工作吗？"）
+
+用户质疑命中了一个真缺陷：**卡只在写侧被使用（jarvis_distill 校验、jarvis_store 落盘），读侧从来没人读**。
+成员开工须知只写「按你的角色卡方法论」，但成员上下文里根本没有卡文本——等于名义蒸馏、实际用模型默认的通用思路干活。
+
+**1) 角色卡真注入（机制，不是提示词）**
+
+- 新增 `src/host/state/cards.js`：`findRoleCard` / `findRoleCardSync`（按角色名在 `.jarvis/cards/` 命中、跳过
+  `cards/history/`、读出六段式）+ `cardStructureOk`（缺哪段报哪段）。
+- `jarvis_member_brief` 生成须知时**把卡文本嵌进去**（`## 六、你的角色卡` 段 + 卡文件路径 + 用法：把六段式
+  当作 ponder 画像的人物视角）；找不到卡 → 须知里显式写「⛔ 先蒸馏再干」，输出 `cardMissing: true`。
+- 派活闸 `jarvisFlowGuard`：assignee 已有卡但任务描述没有卡注入段 → 直接拒绝建任务（给出修复指令）。
+- 建队闸 `jarvis_flowguard(step="build")`：新增 `auditTeamCards` 审计，未注入卡的任务列出来打回。
+- 不注入卡的后果从"没人知道"变成"机械失败"。
+
+**2) ponder 链路复核（原本已有硬闸，这次一并说清）**
+
+- 成员交活 `agent_teams_update_task(status=completed)`：无 `.jarvis/docs/ponder-verify/<taskId>-*.json`（verdict=PASS）
+  → 闸直接拒绝（`gates/flow.js`），裸干交付进不了 completed。
+- 核验记录只能由 `jarvis_ponder_check` 写，而它校验 step-guard 的**完整性/顺序/子 agent 数/阶段产出文件**，
+  自报"我跑了"不算。
+- `jarvis_member_brief audit` + `jarvis_flowguard(build)` 双查「任务有没有附开工须知（含 ponder 指引）」。
+
+**3) 真机启动暴露的路由 bug（HTTP 一调就现形）**
+
+- `GET /api/luke-jarvis/company` 返回 `{"ok":false,"error":"relayPath is not defined"}`——`relayPath` 定义在另一个
+  try 块作用域，跨块引用；改用本块 `path.basename`。
+- `GET /api/luke-jarvis/board` 读 `/.jarvis/board.json`（systemd 下 `process.cwd()='/'`，apply 期预热把 '/' 缓存成
+  工作区）——新增 `requestWorkspace()`：`?workspace=` > live 会话 cwd > agents 列表；解析不到就明确报
+  `no workspace`，不再拼出一个看起来能用、实际读错的路径。
+
+**4) 验证**
+
+```
+node --test test/plugin.test.js test/core.test.js → 317 / 317（新增 5 个卡注入/路由回归用例）
+bash scripts/selfcheck.sh → 全过      node scripts/verify-tool-contract.mjs → 真实 ToolRuntime 30/30
+node test/e2e-flow.test.mjs → 闭环    真机：/jarvis-office 200、/api/luke-jarvis/* 正常、新会话 30 个 jarvis_* 工具
+```
+
 ## [0.10.3] - 2026-11-04
 
 ### 完全对齐 DSH 插件规范（工具契约 / 导出形式 / display 元数据 / 预设声明）
@@ -89,7 +130,7 @@ node scripts/build-preset-patches.mjs --check     → 3 处无漂移
 
 **问题**（0.10.1 遗留）：`plugin.js` 仍有 5,764 行——30 个工具、阶段机、流程闸、六审计、状态落盘、relay 协议全在一个文件里；改一段要读五千行，判定口径还各写一份。
 
-**代码：按依赖方向单向分层（每步一个提交、每步 312 全绿）**
+**代码：按依赖方向单向分层（每步一个提交、每步 317 全绿）**
 
 | 新模块 | 内容 | 依赖 |
 |---|---|---|
@@ -136,7 +177,7 @@ node scripts/build-preset-patches.mjs --check    → OK
 - **新增 [docs/CHAINS.md](docs/CHAINS.md)**：11 条链路的唯一事实源/落点/验证命令（安装/挂载/预设/技能/工具/闸/状态/UI/测试/发布 + 债务清单）。
 - **新增 [docs/README.md](docs/README.md)**：文档索引（入门/运维/设计/发布/归档）。
 - selfcheck 第 15 项扩展为「领域内核与模块化」：core/index/adapters/distill/protocol 齐全。
-- 测试：296 + 14 = **312 全绿**；selfcheck 15 项。
+- 测试：296 + 14 = **317 全绿**；selfcheck 15 项。
 
 **仍未做**：`tools/`、`gates/`、`state/`、`ui/` 从 `plugin.js` 拆出（P2 待续）；`scripts/` 平铺未分组；`vendor/` 未接线（P3）。
 
@@ -180,10 +221,10 @@ node scripts/build-preset-patches.mjs --check    → OK
 - **README 快速开始**改为「一条命令装全」，手工步骤保留为排障路径；组件映射表更新。
 - **状态根守卫泛化（记忆文件零污染）**：新增导出 `stateRootConflict(dir)`，把「插件仓库自身不是 jarvis 状态根」从只拦闸记录/团队标记，扩展到**所有 `.jarvis` 写入方**——会话快照、基线清单、覆盖矩阵、ponder 核验记录、公司状态（含会议/绩效自动同步）、公屏 board、问题上行登记：在插件仓库内一律拒绝（返回 `STATE_ROOT_CONFLICT` / 明确 verdict），不再生成 `.jarvis/`。`.gitignore` 增补 `artifacts/`、`.dsh/`、`*.bak-*`；`selfcheck` 第 13 项实测「仓库根无 `.jarvis`/`.agent-teams`/`artifacts` + 忽略规则生效 + 守卫函数可用」。
 - **本地归档移出仓库**：历史审计/记忆文档（原 `.jarvis-archive/`：`gates.json` + 4 份流程文档 + README）整体**移出仓库**（本机保留在仓库外目录，不随包分发、不参与提交）；`.gitignore` 保留 `.jarvis-archive/`、`.jarvis/`、`.agent-teams/` 排除规则兜底；README / `docs/安装-半插件.md` / `docs/STRUCTURE.md` 同步说明；`selfcheck` 第 14 项实测「仓库内无归档目录 + 排除规则生效 + 未被跟踪」。
-- **测试**：新增「T13 ⑥ 状态根守卫泛化」用例（插件仓库拒写快照/基线/公司状态，普通项目放行）→ **298/298**。
+- **测试**：新增「T13 ⑥ 状态根守卫泛化」用例（插件仓库拒写快照/基线/公司状态，普通项目放行）→ **303/303**。
 - **文档对账**：README 标题 `v0.3.4 → v0.9.2`；RELEASE「22 工具 → 29 工具（以 `TOOLS` 为准）」；ARCHITECTURE 补当前基线；e2e 汇总文案改为 `TOOLS.length`（不再写死 19）；根目录过期 `MARKET-LAUNCH.md` 归档到 `docs/archive/`。
 - **selfcheck 第 12/13/14 项**：CLI 可用 / 预设生成物无漂移 / 结构文档存在 / 包导出完整；状态根隔离；本地归档隔离 → 11 项 → **14 项**。
-- 回归：`node --test test/plugin.test.js` **298/298 通过**；`bash scripts/selfcheck.sh` 14 项全过；`npx luke-jarvis setup/doctor` 在临时 HOME 实测通过（幂等、可 --dry-run）。
+- 回归：`node --test test/plugin.test.js` **303/303 通过**；`bash scripts/selfcheck.sh` 14 项全过；`npx luke-jarvis setup/doctor` 在临时 HOME 实测通过（幂等、可 --dry-run）。
 
 **回滚**：`git revert <本提交>` 即可（不改 `src/host/plugin.js` 逻辑，工具/闸行为与 0.9.1 完全一致）。
 

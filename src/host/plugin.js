@@ -122,6 +122,44 @@ let officeSeq = 0
 
 
 
+/**
+ * 路由期工作区解析（HTTP handler 没有 exec，不能只靠 apply 期单例）。
+ * 顺序：?workspace=<真实路径> > agents.list() 里的会话 cwd > 最近一次工具调用的会话 cwd > 单例。
+ * 背景：systemd 起服务时 process.cwd()='/'，apply 期预热会缓存 '/'，导致
+ *       /api/luke-jarvis/board 读 `/.jarvis/board.json`（真机实测 404）。
+ */
+function firstSessionCwd(ctx) {
+  try {
+    const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
+    const list = agents && typeof agents.list === 'function' ? agents.list() : []
+    for (const a of Array.isArray(list) ? list : []) {
+      const w = a && a.session && a.session.header && a.session.header.cwd
+      if (typeof w === 'string' && w.length > 0) return w
+    }
+  } catch { /* 无 agents 服务：继续降级 */ }
+  return ''
+}
+
+function requestWorkspace(ctx, req) {
+  try {
+    const m = String((req && req.url) || '').match(/[?&]workspace=([^&]+)/)
+    if (m) {
+      const v = decodeURIComponent(m[1])
+      if (v.startsWith('/') || /^[A-Za-z]:[\\/]/.test(v)) return v
+    }
+  } catch { /* 非法 query：忽略 */ }
+  try {
+    const ag = getLatestExec() && getLatestExec().agent
+    const w = ag && ag.session && ag.session.header && ag.session.header.cwd
+    if (typeof w === 'string' && w.length > 0) return w
+  } catch { /* 没 exec：继续 */ }
+  const live = firstSessionCwd(ctx)
+  if (live) return live
+  // 不吃 apply 期缓存：它是 process.cwd()（systemd 下 '/'、测试里是插件仓库），拿它拼出的 .jarvis 必错。
+  // 宁可明确说「没解析到工作区」，也不给一个看起来能用、实际读到空/别处的路径。
+  return ''
+}
+
 export const name = 'luke-jarvis'
 
 export function apply(ctx) {
@@ -310,8 +348,9 @@ export function apply(ctx) {
               }
               if (!req || req.method !== 'GET') return send(405, { items: [], error: 'method-not-allowed' })
               try {
-                const cwd = resolveWorkspace(getRuntimeContext())
-                const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return send(200, { items: [], active: false, reason: 'no workspace（未从会话解析到工作区，可加 ?workspace=<路径>）' })
+                const boardPath = cwd + '/.jarvis/board.json'
                 let fsSvc = null
                 try { fsSvc = ctx.get('fs') } catch { fsSvc = null }
                 if (!fsSvc || typeof fsSvc.readText !== 'function') return send(200, { items: [], error: 'fs 不可用' })
@@ -384,25 +423,13 @@ export function apply(ctx) {
                 try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
               }
               try {
-                // 工作区解析：?workspace= 显式指定 > 最近一次工具调用的会话工作区 > 兜底
-                let cwd = ''
-                try {
-                  const q = String((req && req.url) || '')
-                  const m = q.match(/[?&]workspace=([^&]+)/)
-                  if (m) cwd = decodeURIComponent(m[1])
-                } catch {}
-                if (!cwd) {
-                  try {
-                    const ag = getLatestExec() && getLatestExec().agent
-                    cwd = (ag && ag.session && ag.session.header && ag.session.header.cwd) || ''
-                  } catch {}
-                }
-                if (!cwd) cwd = getResolvedWorkspace() || process.cwd()
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return send(200, { ok: true, active: false, reason: 'no workspace' })
                 const target = path.join(cwd, '.jarvis/company-state.json')
                 let state = null
                 try { state = JSON.parse(fsm.readFileSync(target, 'utf8')) } catch { state = null }
                 const seq = Number(state && state.__seq) > 0 ? Number(state.__seq) : (officeSeq = (officeSeq || 0) + 1)
-                const snap = toPixOfficeSnapshot(state || {}, { seq, workspaceId: 'jarvis-' + relayPath.basename(cwd), workspaceName: (state && state.company && state.company.name) || 'Jarvis 数字员工公司' })
+                const snap = toPixOfficeSnapshot(state || {}, { seq, workspaceId: 'jarvis-' + path.basename(cwd), workspaceName: (state && state.company && state.company.name) || 'Jarvis 数字员工公司' })
                 return send(200, { ok: true, active: Boolean(state), snapshot: snap })
               } catch (e) {
                 return send(200, { ok: false, active: false, error: String((e && e.message) || e) })
@@ -508,8 +535,10 @@ export function apply(ctx) {
             globalThis.harness.handle('jarvis/board', async (args) => {
               const sessionId = args && args.sessionId ? String(args.sessionId) : ''
               try {
-                const cwd = resolveWorkspace(getRuntimeContext())
-                const boardPath = (cwd ? cwd + '/' : '') + '.jarvis/board.json'
+                // RPC 路径没有 req/res：用同一个解析器（无 query 时按 live 会话走），返回对象而非 HTTP
+                const cwd = requestWorkspace(ctx, { url: '' })
+                if (!cwd) return { items: [], active: false, reason: 'no workspace' }
+                const boardPath = cwd + '/.jarvis/board.json'
                 let fsSvc = null
                 try { fsSvc = ctx.get('fs') } catch { fsSvc = null }
                 if (!fsSvc || typeof fsSvc.readText !== 'function') {

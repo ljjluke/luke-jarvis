@@ -5,6 +5,7 @@
  *  返回空数组/0 = 没发现问题；返回 null = 查不了（调用方要自己选 fail-open 还是 fail-closed）。
  */
 import { listNames, readTextSafe, hasTeamJson } from '../runtime.js'
+import { findRoleCard, CARD_SECTION_MARK } from '../state/cards.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams } from './ownership.js'
 
 // ── jarvis_flowguard 辅助函数（模块级，TOOLS 数组外）──
@@ -290,3 +291,37 @@ export async function checkCoverageGate(fsSvc, projectDir, path) {
   return missing
 }
 
+/**
+ * 角色卡是否真的附进了任务（用户质疑点：卡只在写侧用、读侧没人读 → 成员按通用思路干）。
+ * 判定：该 assignee 在 .jarvis/cards/ 有卡，但任务描述里没有卡注入段标记 → 记为缺。
+ * 只审计未终态、非协调类任务（与 auditTeamBriefs 同口径）；查不了 → 返回空（fail-open）。
+ * @returns {Promise<Array<{team:string,taskId:string,assignee:string,card:string}>>}
+ */
+export async function auditTeamCards(fsSvc, projectDir, path, owned) {
+  if (!fsSvc || !projectDir) return []
+  const out = []
+  try {
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    const names = await listNames(fsSvc, teamsDir)
+    if (names === null) return []
+    const teamNames = owned && owned.size ? names.filter((n) => owned.has(String(n))) : names
+    for (const team of Array.isArray(teamNames) ? teamNames : []) {
+      let d = null
+      try {
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(team), 'team.json'))
+        if (!txt) continue
+        d = JSON.parse(txt)
+      } catch { continue }
+      for (const t of d.tasks || []) {
+        if (TERMINAL_TASK_STATUS.includes(String(t.status || ''))) continue
+        if (COORD_TASK_RE.test(String(t.subject || ''))) continue
+        const assignee = String(t.assignee || '')
+        const text = String(t.description || '') + ' ' + String(t.subject || '') + ' ' + String(t.acceptance || '')
+        if (text.includes(CARD_SECTION_MARK)) continue // 已注入
+        const card = await findRoleCard(fsSvc, projectDir, assignee, path)
+        if (card) out.push({ team: String(team), taskId: String(t.id ?? '?'), assignee, card: card.relPath })
+      }
+    }
+  } catch { return [] }
+  return out
+}

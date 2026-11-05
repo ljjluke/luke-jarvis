@@ -10,6 +10,7 @@ import { JsonTicketRepositories } from '../adapters/json-tickets.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from '../distill/index.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from '../protocol/index.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams, looksLikePluginRepo, stateRootConflict, writeActiveTeamMarker } from '../gates/ownership.js'
+import { findRoleCard, cardStructureOk, CARD_SECTION_MARK } from '../state/cards.js'
 import { listNames, readTextSafe, hasTeamJson, resolveWorkspace, ponderVerifyProjectDir, getFsService, getRuntimeContext, getLatestExec, getResolvedWorkspace, markJarvisSession, isJarvisSession } from '../runtime.js'
 import { MEMORY_MAX_AGE_MS, checkMemoryFresh, _readGates, _memoryState, recordGate, _flowState } from '../gates/store.js'
 import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from '../gates/stage.js'
@@ -174,6 +175,8 @@ export const REVIEW_TOOLS = [
         properties: {
           brief: { type: 'string', description: '可直接粘贴进任务描述/消息的完整成员开工须知' },
           mustRunPonder: { type: 'boolean', description: '是否必须跑 ponder（本单恒为 true——每个成员都要）' },
+          cardPath: { type: 'string', description: '已注入的角色卡文件（.jarvis/cards/ 下）；空=没找到卡' },
+          cardMissing: { type: 'boolean', description: 'true=该角色还没有卡 → 须先蒸馏再派活（否则成员会用通用思路干）' },
           sendsBack: { type: 'array', items: { type: 'string' }, description: '成员回报必须带的字段' },
           verdict: { type: 'string' },
         },
@@ -255,6 +258,26 @@ export const REVIEW_TOOLS = [
       const dataDirHint = projectDir + '/.jarvis/ponder-runs/<你的 run_id>/'
       const sg = ponderDir + '/scripts/step-guard.cjs'
 
+      // 🎴 角色卡真注入（用户质疑点：卡只在写侧用、读侧没人读 → 成员其实没按大佬方式工作）
+      const fsSvcForCard = getFsService(exec)
+      const card = await findRoleCard(fsSvcForCard, projectDir, role, path)
+      const cardCheck = card ? cardStructureOk(card.text) : { ok: false, missing: [] }
+      const cardBlock = card
+        ? [
+            '',
+            `${CARD_SECTION_MARK}（按这个人的方式思考——这是你的工作方式，不是装饰）`,
+            `- 卡文件：${card.relPath}${cardCheck.ok ? '' : '（⚠️ 结构不全：缺 ' + cardCheck.missing.join('/') + '，按缺的段补蒸馏后再用）'}`,
+            '- 用法：把下面六段式当作「人物视角」注入 ponder 画像（思维模型/方法论/红线驱动十阶段），产出要能看出是这个人的取舍，不是通用分析师的套话。',
+            '',
+            card.text.trim().slice(0, 12000),
+          ].join('\n')
+        : [
+            '',
+            '## 六、⛔ 你没有角色卡（先蒸馏再干）',
+            `- 本项目 .jarvis/cards/ 里找不到「${role}」的卡。**不许用通用分析师的方式硬干**——派活方必须先：jarvis_distill_guide(role="${role}", material=真实素材) → jarvis_distill(...) 过六段式校验 → jarvis_store(save, itemType=card) 落到 .jarvis/cards/，再重新生成本须知派活。`,
+            '- 没有卡就派活 = 成员只能凭模型默认思路做，等于「名义蒸馏、实际没按大佬方式工作」。',
+          ].join('\n')
+
       const brief = [
         `【${role} · 开工须知（本项目团队正式成员，不是执行手）】`,
         '',
@@ -317,6 +340,8 @@ export const REVIEW_TOOLS = [
         '```',
         '- **声称"已完成/已改好"之前，先自己回看产物确认它真的变了且符合要求**（文件读回/看 diff；改在副本/备份上=没改）；没成功就如实说没成功。',
         '',
+        cardBlock,
+        '',
         task ? '## 五、你的本次任务\n' + task : '## 五、你的本次任务\n（见派活消息/任务描述）',
         '',
         '> 派活方提示：本须知由 jarvis_member_brief 生成，**每次派活都应附带**（成员看不到 jarvis 协议，不附 = 成员只能当执行手）。',
@@ -338,6 +363,8 @@ export const REVIEW_TOOLS = [
         brief,
         executionPrompt,
         mustRunPonder: true,
+        cardPath: card ? card.relPath : '',
+        cardMissing: !card,
         sendsBack: ['runId', 'dataDir(PONDER_DATA_DIR)', 'evidenceDir(阶段产出目录)', '交付物路径', '阻塞/风险'],
         verdict: `已生成「${role}」成员开工须知：含 ponder 十阶段执行路径（skill-free bash 版）、协议要点、回报格式${task ? '、本次任务' : ''}——派活时原文附上（create_task 描述 或 send_message）；**executionPrompt 版同步给出（add_member 时注入成员系统 prompt，成员出生即带协议）**。`,
       }

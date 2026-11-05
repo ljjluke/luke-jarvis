@@ -6,6 +6,7 @@
 import { createRequire } from 'node:module'
 import { _readGates, _flowState, checkMemoryFresh } from './store.js'
 import { auditTeamBriefs } from './audit.js'
+import { CARD_SECTION_MARK, findRoleCardSync } from '../state/cards.js'
 import { COORD_TASK_RE } from './ownership.js'
 import { _captainIds } from './stage.js'
 import { isJarvisSession } from '../runtime.js'
@@ -107,6 +108,17 @@ export function jarvisFlowGuard(exec) {
       const subj = String((exec && exec.arguments && exec.arguments.subject) || '')
       // T13 ②：与 auditTeamBriefs 共用 COORD_TASK_RE（禁止两处各写一份口径 → 自家【协调】任务被拦）
       const HAS_BRIEF = /开工须知|jarvis_member_brief|ponder|step-guard|run_id|PONDER_DATA_DIR/
+      // ④b 有卡必须在场：assignee 在 .jarvis/cards/ 有卡，但描述里没卡注入段 → 成员会按通用思路干
+      if (!COORD_TASK_RE.test(subj)) {
+        const assignee = String((exec && exec.arguments && (exec.arguments.assignee || exec.arguments.member)) || '')
+        if (assignee && !desc.includes(CARD_SECTION_MARK)) {
+          let card = null
+          try { card = findRoleCardSync(String(cwd), assignee, _require('node:path')) } catch { card = null }
+          if (card) {
+            return `【jarvis 流程闸·角色卡未注入】任务「${subj.slice(0, 40)}」的 assignee「${assignee}」已有角色卡（${card.relPath}），但任务描述里没有「${CARD_SECTION_MARK}」段——成员拿不到卡就会按模型默认的通用思路干（名义蒸馏、实际没按大佬方式工作）。请用 jarvis_member_brief(roleName="${assignee}") 重新生成须知（内含卡文本）并把 brief 原文附进 description。`
+          }
+        }
+      }
       if (!COORD_TASK_RE.test(subj) && !HAS_BRIEF.test(desc)) {
         return `【jarvis 流程闸】派活必须附成员开工须知：任务「${subj.slice(0, 40)}」的描述里没有 ponder/开工须知指引。请先调 jarvis_member_brief(roleName=该成员) 生成须知，把 brief 原文附进 description，再建任务（否则成员不知道要跑 ponder 十阶段，只会裸干）。纯协调类任务可在 subject 标【协调】豁免。`
       }

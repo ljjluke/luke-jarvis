@@ -60,7 +60,7 @@ luke-jarvis/
 │   ├── protocol/             # 协议文本：固定注入的工作方式与企业文化
 │   └── vendor/               # superagent background.ts（P3 执行器预留，尚未接线）
 ├── office/                   # PixOffice 静态页（24MB，含 characters/assets）
-├── test/                     # plugin 298 用例 + core 14 用例 + e2e + bagua
+├── test/                     # plugin 303 用例 + core 14 用例 + e2e + bagua
 ├── scripts/                  # selfcheck / build-preset-patches / 一致性 / 预演
 ├── docs/                     # 索引 README.md + 架构/结构/链路/安装/发布（含 archive/）
 ├── CHANGELOG.md              # 版本记录（0.9.2 及以前）
@@ -197,7 +197,7 @@ src/host/
 
 依赖方向（禁止反向）：`plugin → tools → gates/state/pixoffice → runtime/core → 无依赖`。
 
-验收口径（每一步都实跑）：`node --test` **312 全绿** + `bash scripts/selfcheck.sh` **15 项** + `node test/e2e-flow.test.mjs` 闭环；
+验收口径（每一步都实跑）：`node --test` **317 全绿** + `bash scripts/selfcheck.sh` **15 项** + `node test/e2e-flow.test.mjs` 闭环；
 公开导出集合不变（`test/plugin.test.js` 的具名 import 一个没改）。
 
 ### ⏳ P3 · 执行器 / 自动推进（R4，待做）
@@ -213,7 +213,7 @@ src/host/
 ```bash
 node scripts/build-preset-patches.mjs --check     # 预设生成物无漂移
 node bin/luke-jarvis.mjs help                     # CLI 可用
-node --test test/plugin.test.js                   # 298 pass（需宿主 dsh-tools 在场）
+node --test test/plugin.test.js                   # 303 pass（需宿主 dsh-tools 在场）
 node --test test/core.test.js                     # 14 pass（领域内核：任务单/派单/汇报/裁决/仓储）
 bash scripts/selfcheck.sh                         # 15 项全过
 npm pack --dry-run                                # 包内含 bin/ presets/ skills/ office/

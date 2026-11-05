@@ -4183,3 +4183,148 @@ test('阶段 section：按 agent 注册一次（全局 section 拿不到 cwd，p
   assert.strictEqual(registered[0].name, 'luke-jarvis:stage')
   assert.strictEqual(typeof registered[0].text, 'function', '阶段 section 用 provider（每轮重算，不缓存）')
 })
+
+// ── 路由回归：真机启动后 HTTP 接口必须能跑（catch ReferenceError 类死代码）──────────
+function makeRouteCtx({ routes, cwd, fsReadText }) {
+  const reads = []
+  const fsSvc = {
+    resolve: async (p) => p,
+    readText: async (p) => { reads.push(p); return fsReadText ? fsReadText(p) : '' },
+    readFileSync: (p) => fsReadText ? fsReadText(p) : '',
+  }
+  const ctx = {
+    get(name) {
+      if (name === 'fs') return fsSvc
+      if (name === 'agents') return { list: () => (cwd ? [{ session: { id: 's-route-1', header: { cwd } } }] : []) }
+      return undefined
+    },
+    effect(fn) { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  return { ctx, reads }
+}
+
+function callRoute(route, url) {
+  const res = { code: 0, headers: {}, body: '' }
+  res.writeHead = (code, headers) => { res.code = code; res.headers = headers || {} }
+  res.end = (chunk) => { if (chunk !== undefined) res.body += String(chunk) }
+  return Promise.resolve(route.handler({ url, method: 'GET' }, res)).then(() => res)
+}
+
+test('路由回归：/api/luke-jarvis/* 真调不抛未定义变量，且工作区从 live 会话解析（不是 /.jarvis）', async () => {
+  const routes = []
+  const { ctx, reads } = makeRouteCtx({ routes, cwd: '/tmp/jarvis-route-proj' })
+  apply(ctx)
+  const board = routes.find((r) => r.path === '/api/luke-jarvis/board')
+  const company = routes.find((r) => r.path === '/api/luke-jarvis/company')
+  assert.ok(board && company, '应注册 board/company 路由')
+
+  // 关键回归：apply 期预热缓存的是 process.cwd()（systemd 下为 '/'），路由期必须用 live 会话工作区
+  const b = await callRoute(board, '/api/luke-jarvis/board')
+  assert.ok(!/is not defined/.test(b.body), `board 抛未定义变量：${b.body}`)
+  assert.ok(!b.body.includes('/.jarvis/board.json'), `board 读到了错误工作区（'/.jarvis/...'）：${b.body}`)
+  assert.ok(reads.some((p) => p.startsWith('/tmp/jarvis-route-proj/')), `board 应读会话工作区的 board.json，实际：${reads.join(',')}`)
+
+  const c = await callRoute(company, '/api/luke-jarvis/company')
+  assert.ok(!/is not defined/.test(c.body), `company 抛未定义变量（历史 bug: relayPath）：${c.body}`)
+  assert.strictEqual(c.code, 200, `company 应 200，实际 ${c.code}`)
+  const parsed = JSON.parse(c.body)
+  assert.strictEqual(parsed.ok, true, `company 返回异常：${c.body}`)
+  assert.strictEqual(parsed.snapshot.workspace.id, 'jarvis-jarvis-route-proj', 'workspace.id 应由真实工作区 basename 派生')
+})
+
+test('路由回归：解析不到会话工作区时明确报 no workspace（不再拼出 /.jarvis）', async () => {
+  const routes = []
+  const { ctx } = makeRouteCtx({ routes, cwd: '' })
+  apply(ctx)
+  const board = routes.find((r) => r.path === '/api/luke-jarvis/board')
+  const b = await callRoute(board, '/api/luke-jarvis/board')
+  assert.strictEqual(b.code, 200)
+  const body = JSON.parse(b.body)
+  assert.strictEqual(body.active, false)
+  assert.ok(/no workspace/.test(String(body.reason || body.error || '')), `应明确报 no workspace：${b.body}`)
+})
+
+// ── 角色卡真注入（用户质疑：蒸馏了卡，成员有没有按大佬方式工作？）──────────────────
+const CARD_SAMPLE = `# 张一鸣-产品增长
+
+## 身份定位
+信息分发效率工程师。
+
+## 思维模型
+延迟满足 + 数据驱动假设验证。
+
+## 核心方法论
+先做最小可分发单元，再用真实留存数据判断要不要加码。
+
+## 代表作品
+今日头条冷启动。
+
+## 决策红线
+不为短期数据牺牲长期留存。
+
+## 语言风格
+短句、先结论后依据、爱用比喻。
+`
+
+test('角色卡：findRoleCard 按角色名命中、跳过 history/、读出六段式', async () => {
+  const { findRoleCard, cardStructureOk } = await import('../src/host/state/cards.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-card-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/cards/history'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/产品增长-张一鸣.md'), CARD_SAMPLE)
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/history/产品增长-旧版.md'), '# 旧版\n## 身份定位\n旧')
+  const card = await findRoleCard(null, proj, '产品增长')
+  assert.ok(card, '应找到产品增长的卡')
+  assert.ok(card.relPath.endsWith('产品增长-张一鸣.md'), `不该命中 history：${card.relPath}`)
+  const chk = cardStructureOk(card.text)
+  assert.strictEqual(chk.ok, true, `六段式应完整：缺 ${chk.missing}`)
+  // 六段不全必须报出缺哪段（不能假装完整）
+  const partial = cardStructureOk('## 身份定位\n只有一段')
+  assert.strictEqual(partial.ok, false)
+  assert.ok(partial.missing.includes('核心方法论'))
+  // 没有卡 → null（不编造）
+  assert.strictEqual(await findRoleCard(null, proj, '财务'), null)
+})
+
+test('角色卡：开工须知把卡文本真塞进成员上下文（不是只说"按你的角色卡"）', async () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-card-brief-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/产品增长-张一鸣.md'), CARD_SAMPLE)
+  const brief = TOOLS.find((t) => t.name === 'jarvis_member_brief')
+  const r = await brief.execute({ roleName: '产品增长', projectDir: proj, task: '做复购增长方案' }, {})
+  assert.strictEqual(r.cardMissing, false, `应找到卡：${r.cardMissing}`)
+  assert.ok(r.cardPath.includes('产品增长-张一鸣.md'), `卡路径应回报：${r.cardPath}`)
+  assert.ok(r.brief.includes('## 六、你的角色卡'), '须知必须有卡注入段标记（派活闸按它判定）')
+  assert.ok(r.brief.includes('延迟满足') && r.brief.includes('先做最小可分发单元'), '卡里的方法论必须真进须知文本')
+  // 无卡：必须显式告警 + cardMissing=true（不许静默降级成通用分析师）
+  const r2 = await brief.execute({ roleName: '不存在的角色', projectDir: proj }, {})
+  assert.strictEqual(r2.cardMissing, true)
+  assert.ok(r2.brief.includes('先蒸馏再干'), '无卡时须知必须要求先蒸馏')
+})
+
+test('角色卡：派活闸在"有卡但没注入"时拦住（jarvisFlowGuard 同步判定）', async () => {
+  const { jarvisFlowGuard } = await import('../src/host/gates/flow.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-card-gate-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/产品增长-张一鸣.md'), CARD_SAMPLE)
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/CEO-带队.md'), CARD_SAMPLE.replace('张一鸣-产品增长', 'CEO-带队'))
+  fs.writeFileSync(path.join(proj, '.jarvis/cards/猎头.md'), CARD_SAMPLE.replace('张一鸣-产品增长', '猎头'))
+  // 造一个"已建队 + 有方案/需求"的最小现场，确保走到卡检查而不是被更前面的闸拦住
+  fs.mkdirSync(path.join(proj, '.agent-teams/t1'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 's-card-gate', tasks: [{ id: 'A1', assignee: '产品增长', subject: '增长方案' }] }))
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求\n'.padEnd(400, 'a') + '\n验收：可判定')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/方案设计-x.md'), '# 方案\n节'.repeat(200))
+  // 硬流程闸要求 build 闸已记录（否则 create_task 会被更早的"不可绕过"拦住）
+  recordGate(proj, 'clarify', true)
+  recordGate(proj, 'decompose', true)
+  recordGate(proj, 'design', true)
+  recordGate(proj, 'build', true)
+  const exec = (args) => ({ name: 'agent_teams_create_task', agent: { session: { id: 's-card-gate', header: { cwd: proj } } }, arguments: args })
+  const blocked = jarvisFlowGuard(exec({ subject: '增长方案', description: 'ponder 开工须知 step-guard run_id', assignee: '产品增长' }))
+  assert.ok(blocked && blocked.includes('角色卡未注入'), `有卡但没注入应拦住，实际：${blocked}`)
+  const passed = jarvisFlowGuard(exec({ subject: '增长方案', description: '## 六、你的角色卡\n延迟满足', assignee: '产品增长' }))
+  assert.ok(!passed || !String(passed).includes('角色卡未注入'), `注入后不应再拦：${passed}`)
+})
