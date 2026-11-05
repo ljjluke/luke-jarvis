@@ -28,14 +28,51 @@ function agentCwd(agent) {
   }
 }
 
+/** 每个 agent 的启动来源（agent/created 的 source：startup/resume/clear/compact）。 */
+const AGENT_START = new WeakMap()
+
+/**
+ * 记录 agent 是怎么起来的（由 apply 里的 agent/created 监听调用）。
+ * 'compact'（上下文压缩后重建）/ 'resume'/'clear' 都要在首轮提醒"以磁盘事实为准、先把记忆读回来"——
+ * 压缩丢的是对话记忆，不是流程；流程从 .jarvis/ 重新算得出来。
+ */
+export function noteAgentStart(agent, source) {
+  try {
+    if (agent && typeof agent === 'object') AGENT_START.set(agent, String(source || 'startup'))
+  } catch {
+    /* WeakMap 写入失败不影响主流程 */
+  }
+}
+
+function agentStart(agent) {
+  try {
+    return AGENT_START.get(agent) || ''
+  } catch {
+    return ''
+  }
+}
+
+/** 压缩/恢复后的首轮提醒（确定性文本，不依赖模型记忆）。 */
+export function continuationNotice(agent) {
+  const src = agentStart(agent)
+  if (src !== 'compact' && src !== 'resume' && src !== 'clear') return ''
+  const label = src === 'compact' ? '上下文压缩后重建' : src === 'clear' ? '会话清空重建' : '会话恢复'
+  return [
+    `⚠️ 本会话是「${label}」：你之前的对话记忆可能不完整。**以磁盘事实为准，不要凭记忆假设**：`,
+    '- 先 jarvis_store(check) 读回 .jarvis/project.md（当前进度/下一步/未决项/团队清单/关键决策与依据）+ 需求规格/方案/黑板，再继续；',
+    '- 当前第几步、缺什么、下一步做什么，以本段「jarvis 当前阶段」实时计算为准（它是每次请求从磁盘重算的）；',
+    '- 用户原始需求细节如果记不全 → 从 .jarvis/docs/需求规格-*.md 读，不要凭印象补。',
+  ].join('\n')
+}
+
 /**
  * 按 agent 注入「当前第几步」：
  * 全局 systemPrompt section 的 AssembleContext 只有 { scope, signal }，拿不到会话工作区；
  * 按规范，per-agent 贡献要注册在该 agent 自己的 ctx 上（DSH 的报错原文也是这么说）。
- * 所以在第一次执行 jarvis_* 工具时，把它挂到 exec.agent.ctx，并按 agent 幂等。
+ * 两个注册时机（都要）：① apply 里 agent/created（首个请求就有阶段——新会话/压缩后重建也生效）
+ * ② 首次执行 jarvis_* 工具（兜底：宿主不派发 agent/created 时仍能补上）。按 agent 幂等。
  */
-function ensureAgentStageSection(exec) {
-  const agent = exec && exec.agent
+export function ensureAgentStageSection(agent) {
   if (!agent || agent[STAGE_SECTION]) return
   const sp = agent.ctx && agent.ctx.systemPrompt
   if (!sp || typeof sp.section !== 'function') return
@@ -45,7 +82,9 @@ function ensureAgentStageSection(exec) {
       order: 119,
       text: () => {
         try {
-          return renderStage(agentCwd(agent))
+          const stage = renderStage(agentCwd(agent))
+          const notice = continuationNotice(agent)
+          return notice ? stage + '\n\n' + notice : stage
         } catch {
           return ''
         }
@@ -65,7 +104,7 @@ function trackExecution(tool, args, exec) {
     if (String(tool.name).startsWith('jarvis_')) {
       const sid = exec && exec.agent && exec.agent.session && exec.agent.session.id
       markJarvisSession(sid)
-      ensureAgentStageSection(exec)
+      ensureAgentStageSection(exec && exec.agent)
     }
   } catch {
     /* 记账失败不影响工具本身执行 */

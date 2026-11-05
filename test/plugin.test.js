@@ -4479,3 +4479,39 @@ test('flowguard(build)：有团队有任务却没开工对齐纪要 → 缺口�
   const r2 = await runFlowguard('build', proj)
   assert.ok(!r2.missing.some((x) => String(x).includes('开工对齐会')), `补纪要后不该再拦：${JSON.stringify(r2.missing)}`)
 })
+
+// ── 上下文压缩/新会话：流程不靠记忆，靠每轮从磁盘重算 + 首轮提醒 ──────────────
+test('压缩/新会话：agent 创建即挂「当前阶段」段，compact 来源额外提醒先读回项目记忆', async () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'compact-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/project.md'), '# 记忆\n当前进度：x')
+  fs.writeFileSync(path.join(proj, '.jarvis/docs/需求规格-x.md'), '# 需求'.repeat(160) + '\n验收：x')
+  const handlers = {}
+  const ctx = {
+    tools: { register: () => () => {} },
+    systemPrompt: { section: () => () => {} },
+    webServer: { register: () => () => {} },
+    effect: (fn) => { try { fn() } catch {} },
+    get: () => undefined,
+    on: (ev, fn) => { handlers[ev] = fn; return () => {} },
+  }
+  apply(ctx)
+  assert.ok(typeof handlers['agent/created'] === 'function', '必须监听 agent/created（否则新会话/压缩后首个请求看不到阶段）')
+  const sections = []
+  const agent = { session: { header: { cwd: proj } }, ctx: { systemPrompt: { section: (s) => { sections.push(s); return () => {} } } } }
+  handlers['agent/created']({ agent, source: 'compact' })
+  assert.strictEqual(sections.length, 1, '创建即挂阶段段')
+  assert.strictEqual(sections[0].name, 'luke-jarvis:stage')
+  const txt = sections[0].text()
+  assert.ok(txt.includes('jarvis 当前阶段'), `首个请求就要有阶段（不依赖先调 jarvis 工具）：${txt.slice(0, 80)}`)
+  assert.ok(txt.includes('上下文压缩'), 'compact 来源必须明确提示')
+  assert.ok(txt.includes('jarvis_store(check)'), '要给具体动作：读回项目记忆')
+  // 幂等：重复创建事件不重复挂
+  handlers['agent/created']({ agent, source: 'compact' })
+  assert.strictEqual(sections.length, 1, '同一 agent 只挂一次 section')
+  // startup：不加压缩提醒（新开会话正常从阶段开始）
+  const s2 = []
+  const agent2 = { session: { header: { cwd: proj } }, ctx: { systemPrompt: { section: (x) => { s2.push(x); return () => {} } } } }
+  handlers['agent/created']({ agent: agent2, source: 'startup' })
+  assert.ok(!s2[0].text().includes('上下文压缩'), 'startup 不做压缩提示')
+})

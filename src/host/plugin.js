@@ -51,7 +51,7 @@ const _require = createRequire(import.meta.url)
 
 
 /** 全局协作健康检查：依赖图是否闭环/孤立/有升级路径。 */
-import { TOOLS } from './tools/index.js'
+import { TOOLS, ensureAgentStageSection, noteAgentStart } from './tools/index.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
 export { TOOLS }
@@ -498,6 +498,27 @@ export function apply(ctx) {
         ctx.effect(() => toolsSvc.guard(jarvisFlowGuard))
       }
     } catch {}
+
+    // 1.6) 每个 agent 创建时立刻挂「当前阶段」段（含压缩/恢复提醒）——
+    //      解决"新会话/上下文压缩后重建的 agent 在第一次调 jarvis 工具前看不到阶段"的问题：
+    //      流程不靠记忆，每轮从 .jarvis/ 重算并注入；compact/resume/clear 明确提示先读回项目记忆。
+    try {
+      if (typeof ctx.on === 'function') {
+        ctx.effect(() =>
+          ctx.on('agent/created', (payload) => {
+            const agent = payload && payload.agent
+            if (!agent) return undefined
+            try {
+              noteAgentStart(agent, payload.source)
+            } catch {}
+            ensureAgentStageSection(agent)
+            return undefined
+          }),
+        )
+      }
+    } catch (e) {
+      console.error('[luke-jarvis] agent/created 监听注册失败（阶段段仍会在首次 jarvis 工具调用时补挂）：', e && e.message)
+    }
 
     // 2) /jarvis 命令：commands 为可选服务——优先懒注入（就绪后自动注册），无 inject 能力时降级 get
     const registerJarvisCommand = (commandCtx) => {

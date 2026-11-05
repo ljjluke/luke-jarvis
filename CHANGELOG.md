@@ -2,6 +2,27 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.11.0] - 2026-11-05
+
+### 抗上下文压缩：阶段段「创建即挂」+ 压缩/恢复提醒（首个请求就生效）
+
+用户担心：装好后用 jarvis，上下文压缩了会不会出问题。
+
+**发现的真缺口**：阶段段原来只在**第一次调用 jarvis_* 工具时**才挂到 agent 上——新会话/压缩后重建的 agent
+在首个请求看不到「当前第几步」，只能靠模型记忆（压缩后恰恰最不可靠）。
+
+**修复**：
+- 监听 `agent/created`（payload 含 `source: startup|resume|clear|compact`），**创建即挂** `luke-jarvis:stage`；
+  首次调用 jarvis 工具时仍保留兜底挂载（宿主不派发事件也能补上）。
+- 阶段段文本每轮从 `.jarvis/` 重算；`compact/resume/clear` 来源额外追加提醒：
+  「先 jarvis_store(check) 读回 project.md 续接五件套，需求细节从需求规格读，不要凭记忆补」。
+- `noteAgentStart` / `continuationNotice` / `ensureAgentStageSection(agent)` 导出（`tools/index.js`）。
+
+**结论（写进 docs/执行流程.md 第九节）**：协议段每请求注入、阶段段创建即挂且每轮重算、三闸每次调用判定、
+工具与判定现读磁盘 → 压缩/重启/新会话不影响流程；会丢的只有对话记忆，补救 = `.jarvis/` 落盘 + 首轮读回提醒。
+
+验证：`node --test` plugin 311 + core 14 = **325** 全绿（新增压缩场景用例：agent/created 即挂段、compact 追加提醒、幂等、startup 不提醒）。
+
 ## [0.10.9] - 2026-11-05
 
 ### 纪要必须有多人发言（一个人自说自话不算开会）
