@@ -5,6 +5,7 @@
  */
 import { createRequire } from 'node:module'
 import { looksLikePluginRepo } from './ownership.js'
+import { appendEvent } from '../state/events.js'
 const _require = createRequire(import.meta.url)
 
 // ── 记忆保鲜闸（①）：project.md 落后于工作进度 → 拒绝关键动作 ──────────
@@ -105,6 +106,7 @@ export function recordGate(cwd, step, ok) {
     gates[step] = entry
     fs.writeFileSync(file, JSON.stringify(gates, null, 2))
     _gateCache.at = 0
+    try { appendEvent(cwd, 'gate', { step, ok: true }) } catch { /* 事件失败不阻断闸 */ }
     return true
   } catch { return false }
 }

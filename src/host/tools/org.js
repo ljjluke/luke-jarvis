@@ -17,6 +17,7 @@ import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
 import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing, countMeetingProgress } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { checkMinutesShape, meetingPolicy, MEETING_LABELS } from '../state/meetings.js'
+import { appendEvent } from '../state/events.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
 const _require = createRequire(import.meta.url)
@@ -637,11 +638,13 @@ export const ORG_TOOLS = [
             if (fsSvcM && typeof fsSvcM.writeText === 'function') {
               await fsSvcM.writeText(full, body)
               minutesResult = { ok: true, path: rel, note: '纪要已落盘（' + parsed.type + '）' }
+              try { appendEvent(projectDirM, 'meeting', { type: parsed.type, path: rel, attendees: parsed.attendees }) } catch {}
             } else {
               const fsx = _require('node:fs')
               fsx.mkdirSync(pathM.dirname(full), { recursive: true })
               fsx.writeFileSync(full, body)
               minutesResult = { ok: true, path: rel, note: '纪要已落盘（' + parsed.type + '）' }
+              try { appendEvent(projectDirM, 'meeting', { type: parsed.type, path: rel, attendees: parsed.attendees }) } catch {}
             }
           }
         } catch (e) {
@@ -945,6 +948,7 @@ export const ORG_TOOLS = [
       try {
         const { meetingPolicy } = await import('../state/meetings.js')
         const pd = meetingPolicy(projectDir, _require('node:path'))
+        try { appendEvent(projectDir, 'dispatch', { taskId, assignee, subject }) } catch {}
         meetingHint = pd.required.length
           ? ' ｜ 会议：必开 ' + pd.required.map((r) => `${r.type}（${r.why}）`).join('；')
           : pd.suggested.length ? ' ｜ 会议建议：' + pd.suggested.map((r) => r.type).join('、') : ''

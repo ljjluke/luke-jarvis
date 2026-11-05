@@ -2,6 +2,30 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.12.0] - 2026-11-05
+
+### 能力规划 + UI 契约 v1（底座仍是 DSH，jarvis 只做"公司层"）
+
+用户要求：底座用 DeepSeek Harness，jarvis 是插件但能力要强，先把能力规划好，后期要接增强 UI。
+
+**1) 新增 `docs/能力规划.md`（规划正文）**
+- 边界表：L0 DSH 运行时 / L0.5 agent-teams / L1 流程引擎 / L2 组织协作 / L3 知识资产 / L4 交付验收 / L5 UI 契约；
+- 能力矩阵：31 个工具按域归类，逐项标「✅已有 / 🟡半成品 / ⬜未做」+ 优先级 + **可判定验收**；
+- 路线图 P0（已完成基线）→ P1（事件流/受控命令/快照差分/回放/换人闭环）→ P2（审计成本/三层团队/记忆检索/报告导出）→ P3；
+- 非目标：不重写 agent 循环、不把 UI 渲染塞进插件、不用提示词承担强制、不做跨项目共用记忆。
+
+**2) UI 契约 v1（后期增强 UI 的唯一接口，`state/snapshot.js`）**
+- `GET /api/jarvis/state`：全量快照 `{schema:'jarvis.snapshot/1', snapshot:{stage,gates,artifacts,tasks,board,meetings,cards,memory,company,capabilities}}`；
+- `GET /api/jarvis/summary`：轻量摘要（轮询/头图）；
+- `GET /api/jarvis/capabilities`：工具数/版本/面板 id/阶段定义；
+- 原则：UI 只读快照 + 只发命令，不直接改 `.jarvis/`；快照只读无副作用、字段可缺省、带 schema 版本。
+
+**3) 事件流（UI 时间轴数据源，`state/events.js`）**
+- `.jarvis/events.jsonl` append-only，自增 `seq`，坏行跳过；`GET /api/jarvis/events?since=&limit=`；
+- 已接写入点：闸记录（recordGate）、黑板写入、会议纪要落盘、派活（dispatch）。
+
+验证：plugin 316 + core 14 = **330** 全绿；selfcheck / 工具契约 31 / e2e 全过。
+
 ## [0.11.2] - 2026-11-05
 
 ### 去提示词化的第二刀：成员须知不再用"必须先跑 ponder"下命令，硬要求改挂可验证的交付物

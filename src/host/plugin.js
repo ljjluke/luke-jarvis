@@ -52,6 +52,8 @@ const _require = createRequire(import.meta.url)
 
 /** 全局协作健康检查：依赖图是否闭环/孤立/有升级路径。 */
 import { TOOLS, ensureAgentStageSection } from './tools/index.js'
+import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
+import { readEvents } from './state/events.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
 export { TOOLS }
@@ -397,6 +399,99 @@ export function apply(ctx) {
           '.svg': 'image/svg+xml', '.gif': 'image/gif', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
           '.map': 'application/json; charset=utf-8',
         }
+        // 0.9) UI 契约 v1（给后期增强 UI 的唯一数据入口，只读聚合、带 schema 版本）：
+        //      GET /api/jarvis/state   → 全量快照 { ok, schema, snapshot }
+        //      GET /api/jarvis/summary → 轻量摘要（列表/头图轮询用）
+        //      GET /api/jarvis/capabilities → 能力清单（工具数/版本/面板 id/阶段定义）
+        //      UI 只依赖这三个契约 + 工具调用（命令），不依赖 .jarvis 内部文件布局。
+        const pluginMeta = (() => {
+          try {
+            // 插件自身 package.json（src/host → ../../package.json）；装成 bundle 后布局相同
+            const here = path.dirname(new URL(import.meta.url).pathname)
+            const pkg = JSON.parse(fsm.readFileSync(path.join(here, '../../package.json'), 'utf8'))
+            return { version: String(pkg.version || ''), tools: TOOLS.length }
+          } catch {
+            return { version: '', tools: TOOLS.length }
+          }
+        })()
+        const sendJson = (res, status, body) => {
+          try {
+            res.writeHead(status, {
+              'content-type': 'application/json; charset=utf-8',
+              'cache-control': 'no-store',
+              'access-control-allow-origin': '*',
+            })
+            res.end(JSON.stringify(body))
+          } catch {}
+        }
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/state',
+            handler: async (req, res) => {
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return sendJson(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA, reason: 'no workspace' })
+                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, snapshot: buildSnapshot(cwd, pluginMeta) })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/summary',
+            handler: async (req, res) => {
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return sendJson(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA })
+                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, summary: snapshotSummary(buildSnapshot(cwd, pluginMeta)) })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/capabilities',
+            handler: async (req, res) => {
+              return sendJson(res, 200, {
+                ok: true,
+                schema: SNAPSHOT_SCHEMA,
+                plugin: pluginMeta,
+                tools: TOOLS.map((t) => ({ name: t.name, description: String(t.description || '').slice(0, 160) })),
+                panels: ['stage', 'tasks', 'board', 'meetings', 'cards', 'memory', 'company'],
+              })
+            },
+          })
+        )
+
+        // 0.95) 事件流（轮询式，SSE 留到 P1）：GET /api/jarvis/events?since=<seq>&limit=<n>
+        //       源 = .jarvis/events.jsonl（append-only）；UI 用它画时间轴/做增量刷新。
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/events',
+            handler: async (req, res) => {
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return sendJson(res, 200, { ok: true, active: false, events: [], lastSeq: 0, total: 0 })
+                const url = String((req && req.url) || '')
+                const since = Number((url.match(/[?&]since=(\d+)/) || [])[1] || 0)
+                const limit = Number((url.match(/[?&]limit=(\d+)/) || [])[1] || 100)
+                const r = readEvents(cwd, { since, limit })
+                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, ...r })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, events: [], error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+
         // 0) 官方 UI 入口（T8/T9）：GET /jarvis-ui → 302 跳 /jarvis-office/jarvis.html。
         //    T9 起指向「本公司数据适配页」（左侧实时数据面板 + PixOffice 场景 iframe）；
         //    上游 demo 页 /jarvis-office/office/index.html 保持不动（仍可直接访问，用于对照）。

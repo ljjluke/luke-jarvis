@@ -17,6 +17,7 @@ import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
 import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { meetingPolicy } from '../state/meetings.js'
+import { appendEvent } from '../state/events.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
 const _require = createRequire(import.meta.url)
@@ -542,6 +543,10 @@ export const MEMORY_TOOLS = [
       // 状态根守卫：插件仓库不写 .jarvis/board.json（防记忆文件污染插件项目）
       const boardConflict = stateRootConflict(resolveWorkspace(getRuntimeContext(), exec))
       const persisted = boardConflict ? { ok: false, error: boardConflict.error } : await writeBoardItems(fsSvc, items, disk.version)
+      // 事件流（UI 时间轴数据源）：黑板真落盘才记，失败不记（不造"看起来发生了"的事件）
+      if (persisted.ok && projDir) {
+        try { appendEvent(projDir, 'board', { open: openItems.length, blockers: blockers.map((b) => b.id) }) } catch { /* 事件不阻断 */ }
+      }
       // 资源闭环检查（代码级归一化：有 open 的资源需求 = 未闭环 = 相关任务不得标记完成——压缩不丢）
       const openResources = items.filter((i) => i.type === '资源需求' && i.status === 'open')
       const resourceBlockNote = openResources.length

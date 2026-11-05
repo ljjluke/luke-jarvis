@@ -4535,3 +4535,110 @@ test('续接事实：进度/下一步/未决/团队/决策 从 project.md 读出
   assert.ok(txt.includes('黑板未决：1 项'), '黑板未决来自磁盘')
   assert.ok(!/必须|不许|务必/.test(txt), '续接事实只陈述事实，不下命令')
 })
+
+// ── UI 契约 v1：快照/摘要/能力清单三个只读接口（后期增强 UI 只依赖这三样）────────
+test('UI 契约 v1：/api/jarvis/state 返回带 schema 的全量快照（磁盘事实聚合，只读）', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const state = routes.find((r) => r.path === '/api/jarvis/state')
+  assert.ok(state, `应注册 /api/jarvis/state；实际：${routes.map((r) => r.path).join(', ')}`)
+  assert.strictEqual(state.kind, 'exact')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'uiapi-'))
+  fs.mkdirSync(path.join(proj, '.jarvis/docs'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/project.md'), '- 当前进度：写方案\n- 下一步：建队')
+  fs.writeFileSync(path.join(proj, '.jarvis/board.json'), JSON.stringify({ items: [{ id: 'B1', type: '阻塞', content: 'x', status: 'open' }] }))
+  const res = { writeHead: (c, h) => { res.code = c; res.headers = h }, end: (b) => { res.body = b } }
+  await state.handler({ url: '/api/jarvis/state?workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.headers['access-control-allow-origin'], '*', 'UI 跨源要允许')
+  const body = JSON.parse(res.body)
+  assert.strictEqual(body.schema, 'jarvis.snapshot/1', '快照必须带版本（UI 只认版本）')
+  const snap = body.snapshot
+  for (const key of ['stage', 'gates', 'artifacts', 'tasks', 'board', 'meetings', 'cards', 'memory', 'company', 'capabilities']) {
+    assert.ok(key in snap, `快照缺面板字段：${key}`)
+  }
+  assert.strictEqual(snap.board.blockers.length, 1, '阻塞从磁盘事实来')
+  assert.ok(snap.memory.exists, '记忆状态可读')
+  assert.ok(Array.isArray(snap.capabilities.panels) && snap.capabilities.panels.length >= 5, '能力清单要报告面板 id')
+})
+
+test('UI 契约 v1：/api/jarvis/summary 轻量摘要 + /api/jarvis/capabilities 能力清单', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const summary = routes.find((r) => r.path === '/api/jarvis/summary')
+  const caps = routes.find((r) => r.path === '/api/jarvis/capabilities')
+  assert.ok(summary && caps, '摘要/能力清单路由都要有')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'uiapi2-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  fs.writeFileSync(path.join(proj, '.jarvis/project.md'), '- 当前进度：x')
+  const mk = () => ({ writeHead() {}, end(b) { this.body = b } })
+  const r1 = mk()
+  await summary.handler({ url: '/api/jarvis/summary?workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, r1)
+  const b1 = JSON.parse(r1.body)
+  assert.strictEqual(b1.schema, 'jarvis.snapshot/1')
+  assert.ok(typeof b1.summary.stage === 'string' && /\/6 /.test(b1.summary.stage), `摘要要有阶段串：${b1.summary && b1.summary.stage}`)
+  const r2 = mk()
+  await caps.handler({ url: '/api/jarvis/capabilities?workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, r2)
+  const b2 = JSON.parse(r2.body)
+  assert.strictEqual(b2.tools.length, 31, '能力清单要列全 31 个工具')
+  assert.ok(b2.panels.includes('meetings'), '面板 id 固定（UI 契约）')
+  assert.ok(b2.plugin.version, '要报插件版本')
+})
+
+// ── 事件流：append-only + 增量读 + 路由（UI 时间轴数据源）────────────────────
+test('事件流：闸/黑板/会议/派活写入 events.jsonl，可按 since 增量读取', async () => {
+  const ev = await import('../src/host/state/events.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'events-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  assert.strictEqual(ev.readEvents(proj).total, 0, '空项目 → 0 事件')
+  ev.appendEvent(proj, 'gate', { step: 'clarify' })
+  ev.appendEvent(proj, 'board', { open: 3 })
+  const all = ev.readEvents(proj)
+  assert.strictEqual(all.total, 2)
+  assert.strictEqual(all.lastSeq, 2)
+  const inc = ev.readEvents(proj, { since: 1 })
+  assert.strictEqual(inc.events.length, 1, 'since=1 只回第 2 条')
+  assert.strictEqual(inc.events[0].type, 'board')
+  // 坏行跳过（不因为一条坏数据丢整条时间轴）
+  fs.appendFileSync(path.join(proj, '.jarvis/events.jsonl'), 'not-json\n')
+  assert.strictEqual(ev.readEvents(proj).total, 2, '坏行不计入')
+})
+
+test('事件流路由：/api/jarvis/events 返回 {ok, events, lastSeq}', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const route = routes.find((r) => r.path === '/api/jarvis/events')
+  assert.ok(route, '应注册事件流路由')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'eventsroute-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const ev = await import('../src/host/state/events.js')
+  ev.appendEvent(proj, 'gate', { step: 'design' })
+  const res = { writeHead() {}, end(b) { this.body = b } }
+  await route.handler({ url: '/api/jarvis/events?since=0&workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, res)
+  const body = JSON.parse(res.body)
+  assert.strictEqual(body.ok, true)
+  assert.strictEqual(body.events.length, 1)
+  assert.strictEqual(body.events[0].type, 'gate')
+  assert.strictEqual(body.lastSeq, 1)
+})
