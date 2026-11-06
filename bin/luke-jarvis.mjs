@@ -21,7 +21,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PKG = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, 'package.json'), 'utf8'))
@@ -154,7 +154,7 @@ function setup() {
   say(DRY ? `\n${C.dim('dry-run：没有写任何文件。')}` : '')
 }
 
-function doctor() {
+async function doctor() {
   let bad = 0
   const fail = (s) => { bad++; say(`  ${C.err('FAIL')} ${s}`) }
   const warn = (s) => say(`  ${C.warn('WARN')} ${s}`)
@@ -208,6 +208,41 @@ function doctor() {
     }
   }
 
+  // ── 设置面板诊断（客户实测反馈"升级后 DSH 设置里没有路克贾维斯"——面板数据源 = 运行副本的 Config 导出）──
+  step('设置面板（Config schema）')
+  for (const name of profiles) {
+    const entry = path.join(PROFILES_DIR, name, 'node_modules/luke-jarvis/src/host/plugin.js')
+    if (!fs.existsSync(entry)) continue
+    try {
+      const m = await import(pathToFileURL(entry).href)
+      if (typeof m.Config !== 'function') {
+        fail(`${name}: 运行副本无 Config 导出——DSH 设置面板不会出现本插件区块（副本损坏/偏旧，重装）`)
+        continue
+      }
+      const defaults = m.Config({})
+      const keys = Object.keys(defaults || {})
+      const need = ['ui', 'voice', 'workspaceMode', 'selfEvolution']
+      const missing = need.filter((k) => !keys.includes(k))
+      missing.length
+        ? warn(`${name}: Config 缺区块 ${missing.join('/')}（副本偏旧——重装 + 重启 dsh web 后设置页才有新配置项）`)
+        : ok(`${name}: Config schema 完整（ui/voice/workspaceMode/selfEvolution 全在，面板应显示 luke-jarvis 区块）`)
+    } catch (e) {
+      fail(`${name}: Config schema 加载失败（${String(e.message || e).slice(0, 100)}）——设置面板不会显示本插件`)
+    }
+  }
+  // DSH 版本（设置面板要求 dsh >= 0.2.1-rc.1；config 是启动期读取的——升级后必须重启 dsh web）
+  const webNM = path.join(PROFILES_DIR, 'web', 'node_modules', '@deepseek-ai')
+  try {
+    const pkgs = fs.existsSync(webNM) ? fs.readdirSync(webNM).filter((d) => /^dsh/.test(d)) : []
+    for (const d of pkgs) {
+      try {
+        const v = JSON.parse(fs.readFileSync(path.join(webNM, d, 'package.json'), 'utf8')).version
+        ok(`DSH 组件 @deepseek-ai/${d} = ${v}${/rc\.0|0\.1\./.test(v) ? '（⚠️ 设置面板需 dsh >= 0.2.1-rc.1，过旧则面板不渲染插件 Config）' : ''}`)
+      } catch { /* 忽略个别坏包 */ }
+    }
+  } catch { /* 无 web profile：上面 profile 步已报 */ }
+  warn('提醒：Config 是 dsh web 启动期读取的——升级插件后必须重启 dsh web，设置面板才会出现/更新（改完 profile 同理）')
+
   say(bad ? `\n${C.err(`doctor: ${bad} 项失败`)}` : `\n${C.ok('doctor: 全部通过')}`)
   say(bad ? C.dim('按上面 FAIL/WARN 处置后重跑；改完 profile 需重启 dsh web 才生效。') : C.dim('改动 profile 后需重启 dsh web 才生效。'))
   process.exit(bad ? 2 : 0)
@@ -252,7 +287,7 @@ function help() {
 
 try {
   if (cmd === 'setup') setup()
-  else if (cmd === 'doctor') doctor()
+  else if (cmd === 'doctor') await doctor()
   else if (cmd === 'presets') presetsCmd()
   else if (cmd === 'status') status()
   else if (cmd === 'version' || cmd === '--version' || cmd === '-v') say(VERSION)
