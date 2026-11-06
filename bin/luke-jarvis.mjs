@@ -208,40 +208,63 @@ async function doctor() {
     }
   }
 
-  // ── 设置面板诊断（客户实测反馈"升级后 DSH 设置里没有路克贾维斯"——面板数据源 = 运行副本的 Config 导出）──
-  step('设置面板（Config schema）')
+  // ── 设置面板诊断（客户实测反馈"升级后 DSH 设置里没有路克贾维斯"）──
+  // 真实路径：设置 → 内置插件 → luke-jarvis → 配置卡片。
+  // 卡片 = client 半（src/client/index.js）注册 plugins.bundle.config 插槽；
+  // 数据源 = host Config 的 volatile 字段派生的 settings 命名空间（jarvis-core）。
+  // 原版 DSH 不会仅凭 host Config 自动生成设置 UI——两件套缺一不可。
+  step('设置面板（内置插件 → 配置卡片）')
   for (const name of profiles) {
     const entry = path.join(PROFILES_DIR, name, 'node_modules/luke-jarvis/src/host/plugin.js')
     if (!fs.existsSync(entry)) continue
     try {
       const m = await import(pathToFileURL(entry).href)
       if (typeof m.Config !== 'function') {
-        fail(`${name}: 运行副本无 Config 导出——DSH 设置面板不会出现本插件区块（副本损坏/偏旧，重装）`)
+        fail(`${name}: 运行副本无 Config 导出——配置卡片无数据源（副本损坏/偏旧，重装）`)
         continue
       }
       const defaults = m.Config({})
       const keys = Object.keys(defaults || {})
       const need = ['ui', 'voice', 'workspaceMode', 'selfEvolution']
       const missing = need.filter((k) => !keys.includes(k))
-      missing.length
-        ? warn(`${name}: Config 缺区块 ${missing.join('/')}（副本偏旧——重装 + 重启 dsh web 后设置页才有新配置项）`)
-        : ok(`${name}: Config schema 完整（ui/voice/workspaceMode/selfEvolution 全在，面板应显示 luke-jarvis 区块）`)
+      if (missing.length) {
+        warn(`${name}: Config 缺区块 ${missing.join('/')}（副本偏旧——重装 + 重启 dsh web 后卡片才有新配置项）`)
+        continue
+      }
+      // volatile 是 settings 命名空间的派生条件：没有它卡片会显示"不可用"
+      const volatileOk = keys.every((k) => defaults[k] && typeof defaults[k].get === 'function')
+      if (!volatileOk) {
+        warn(`${name}: Config 字段未 volatile 化（副本偏旧——配置卡片无法读取实时值，重装 + 重启）`)
+        continue
+      }
+      // client 半：配置卡片的实际来源（没有它设置里什么都不会显示）
+      const clientEntry = path.join(PROFILES_DIR, name, 'node_modules/luke-jarvis/src/client/index.js')
+      if (!fs.existsSync(clientEntry)) {
+        fail(`${name}: 运行副本缺 client 半（src/client/index.js）——设置里不会出现配置卡片，需升级到含 client 半的版本 + 重启 dsh web`)
+        continue
+      }
+      const pkgRaw = JSON.parse(fs.readFileSync(path.join(PROFILES_DIR, name, 'node_modules/luke-jarvis/package.json'), 'utf8'))
+      if (!pkgRaw.dsh || !pkgRaw.dsh.client || !pkgRaw.exports || !pkgRaw.exports['./client']) {
+        fail(`${name}: package.json 缺 dsh.client/exports./client 声明——client 模块无法被发现（副本偏旧，重装）`)
+        continue
+      }
+      ok(`${name}: 配置卡片两件套完整（volatile Config + client 半）——设置 → 内置插件 → luke-jarvis 应可见`)
     } catch (e) {
-      fail(`${name}: Config schema 加载失败（${String(e.message || e).slice(0, 100)}）——设置面板不会显示本插件`)
+      fail(`${name}: Config schema 加载失败（${String(e.message || e).slice(0, 100)}）——配置卡片无法显示`)
     }
   }
-  // DSH 版本（设置面板要求 dsh >= 0.2.1-rc.1；config 是启动期读取的——升级后必须重启 dsh web）
+  // DSH 版本（设置面板要求 dsh >= 0.2.1-rc.1；client 模块与 Config 都是启动期加载——升级后必须重启 dsh web）
   const webNM = path.join(PROFILES_DIR, 'web', 'node_modules', '@deepseek-ai')
   try {
     const pkgs = fs.existsSync(webNM) ? fs.readdirSync(webNM).filter((d) => /^dsh/.test(d)) : []
     for (const d of pkgs) {
       try {
         const v = JSON.parse(fs.readFileSync(path.join(webNM, d, 'package.json'), 'utf8')).version
-        ok(`DSH 组件 @deepseek-ai/${d} = ${v}${/rc\.0|0\.1\./.test(v) ? '（⚠️ 设置面板需 dsh >= 0.2.1-rc.1，过旧则面板不渲染插件 Config）' : ''}`)
+        ok(`DSH 组件 @deepseek-ai/${d} = ${v}${/rc\.0|0\.1\./.test(v) ? '（⚠️ 设置面板需 dsh >= 0.2.1-rc.1，过旧则不渲染插件配置卡片）' : ''}`)
       } catch { /* 忽略个别坏包 */ }
     }
   } catch { /* 无 web profile：上面 profile 步已报 */ }
-  warn('提醒：Config 是 dsh web 启动期读取的——升级插件后必须重启 dsh web，设置面板才会出现/更新（改完 profile 同理）')
+  warn('提醒：插件 host/client 都是 dsh web 启动期加载的——升级插件后必须重启 dsh web，再到 设置 → 内置插件 → luke-jarvis 看配置卡片')
 
   say(bad ? `\n${C.err(`doctor: ${bad} 项失败`)}` : `\n${C.ok('doctor: 全部通过')}`)
   say(bad ? C.dim('按上面 FAIL/WARN 处置后重跑；改完 profile 需重启 dsh web 才生效。') : C.dim('改动 profile 后需重启 dsh web 才生效。'))

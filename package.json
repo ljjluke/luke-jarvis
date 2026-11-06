@@ -1,12 +1,13 @@
 {
   "name": "luke-jarvis",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "贾维斯数字员工公司（领域无关的操作系统）：需求分级 → CEO 定领域流程 → 现场蒸馏角色卡(六段式+证据链+防冒名) → 项目沉淀(.jarvis/ 可复用) → 协同/会议/黑板/问题上行/能力补足。插件不携带任何静态角色卡与领域模板——卡与流程沉淀在项目里。含可执行 /jarvis 命令。",
   "type": "module",
   "main": "src/host/plugin.js",
   "exports": {
     ".": "./src/host/plugin.js",
     "./host": "./src/host/plugin.js",
+    "./client": "./src/client/index.js",
     "./cli": "./bin/luke-jarvis.mjs",
     "./preset/*": "./preset/*",
     "./presets/*": "./presets/*",
@@ -25,6 +26,12 @@
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
   },
   "license": "BSD-3-Clause",
@@ -58,7 +65,7 @@
     "role-card"
   ],
   "scripts": {
-    "test": "node --test test/plugin.test.js test/core.test.js test/evolution.test.js",
+    "test": "node --test test/plugin.test.js test/core.test.js test/evolution.test.js test/settings-card.test.js",
     "typecheck:manual": "node --check src/host/plugin.js",
     "selfcheck": "bash scripts/selfcheck.sh",
     "verify:evolution": "node scripts/verify-evolution-loop.mjs",

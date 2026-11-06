@@ -65,22 +65,25 @@ npx luke-jarvis doctor --profile web
 
 ## ⚙️ 设置面板
 
-安装后在 DSH 设置里出现 luke-jarvis 区块：
+安装后进入 **设置 → 内置插件 → luke-jarvis**，即可看到「路克贾维斯」配置卡片（保存后实时生效，无需重启）：
 
 | 配置项 | 作用 | 默认值 |
 |---|---|---|
 | `ui` | 界面：`wings`（全息驾驶舱）/ `legacy`（经典版） | `wings` |
 | `defaultWorkspace` | 解析不到工作区时的回退项目目录 | 空 |
+| `workspaceMode` | 实例角色：`user`（上报+升级）/ `dev`（研发巡检+修复） | `user` |
 | `voice.provider` | 语音来源：`browser` / `openai` | `browser` |
 | `voice.baseUrl / model / voice / speed` | 语音模型地址 / 模型名 / 音色 / 语速 | api.openai.com / tts-1 / nova / 0.95 |
+| `selfEvolution.*` | GitHub 自进化闭环：仓库 / Token / 上报确认门 / 审批门 / 升级渠道 | 见卡片 |
 
 > 语音 API Key 在 Wings 界面的「语音设置」里填写（落盘本机 `~/.dsh/luke-jarvis/voice.json`，不进设置面板）。
+> 升级插件后需重启 dsh web 一次（插件为启动期加载），再到内置插件页查看卡片。
 
 ---
 
 ## 🧪 质量
 
-- 单测 **362/362** 全过（含核心引擎、工具闸、安装链路专项）
+- 单测 **385/385** 全过（含核心引擎、工具闸、安装链路、设置卡片契约专项）
 - 发布前 selfcheck 15 项自检，`setup + doctor` 全链路验证
 
 ---

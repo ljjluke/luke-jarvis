@@ -31,7 +31,8 @@ import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_
 import { setRuntimeContext, rememberExec, getRuntimeContext, getLatestExec, getResolvedWorkspace, resolveWorkspace, ponderVerifyProjectDir, getFsService, listNames, readTextSafe, hasTeamJson, markJarvisSession, isJarvisSession } from './runtime.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from './state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from './state/company.js'
-import { setSelfEvolutionConfig } from './state/selfconfig.js'
+import { setSelfEvolutionConfig, bindSelfEvolutionLive } from './state/selfconfig.js'
+import { bindPluginConfig, readConfigValue } from './state/liveconfig.js'
 import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from './gates/audit.js'
 import { MEMORY_MAX_AGE_MS, checkMemoryFresh, _readGates, _memoryState, recordGate, _flowState } from './gates/store.js'
 import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from './gates/stage.js'
@@ -125,15 +126,18 @@ export function jarvisCommand(requirement) {
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
 export const inject = ['tools', 'webServer', 'agents', 'systemPrompt']
 
-// ── DSH 设置面板：Config schema（安装后在 DSH 设置里出现「luke-jarvis」配置区块）──
+// ── DSH 设置面板：Config schema（设置 → 内置插件 → luke-jarvis → 配置卡片）──
 // 约定与 @nanmicoder/dsh-agent-teams 一致：@deepseek-ai/schemastery 的 z.object 导出 Config。
 // 注意：这里声明的每一项都在 apply 里真实生效，不做"假设置"。
+// volatile：DSH 只为带 .volatile() 字段的 entry 派生 settings 命名空间（配置卡片的数据源），
+// 且面板保存后实时生效、无需重启。volatile 字段在 apply 里是 { get() } 引用，
+// 由 state/liveconfig.js 桥接成 PLUGIN_CONFIG 的实时 getter（测试裸值兼容）。
 import z from '@deepseek-ai/schemastery'
 export const Config = z.object({
   /** 默认 UI：wings = 全息 Wings（3D 核心 + 真实任务点）；legacy = v2 数据适配页。 */
-  ui: z.union([z.const('wings'), z.const('legacy')]).default('wings'),
+  ui: z.union([z.const('wings'), z.const('legacy')]).default('wings').volatile(),
   /** 默认工作区：HTTP 接口解析不到会话 cwd 时的回退项目目录（留空 = process.cwd()）。 */
-  defaultWorkspace: z.string().default(''),
+  defaultWorkspace: z.string().default('').volatile(),
   /** 语音（TTS）默认值：voice.json 已保存的值优先，缺省字段用这里兜底。apiKey 只写 voice.json，不进设置面板。 */
   voice: z.object({
     provider: z.union([z.const('browser'), z.const('openai')]).default('browser'),
@@ -141,9 +145,9 @@ export const Config = z.object({
     model: z.string().default('tts-1'),
     voice: z.string().default('nova'),
     speed: z.number().min(0.25).max(4).default(0.95),
-  }).default({}),
+  }).default({}).volatile(),
   /** 实例角色：user=用户实例（上报+检测升级）/ dev=研发实例（工作区=源码仓，解锁 issue 巡检+修复链路）。 */
-  workspaceMode: z.union([z.const('user'), z.const('dev')]).default('user'),
+  workspaceMode: z.union([z.const('user'), z.const('dev')]).default('user').volatile(),
   /** 自进化闭环：GitHub issue 上报/巡检/稳定版检测（docs/设计-GitHub自进化闭环.md）。token 建议只给 repo 权限。 */
   selfEvolution: z.object({
     githubRepo: z.string().default('ljjluke/luke-jarvis'),
@@ -151,7 +155,7 @@ export const Config = z.object({
     reportMode: z.union([z.const('confirm'), z.const('auto')]).default('confirm'),
     approvalRequired: z.boolean().default(true),
     releaseChannel: z.union([z.const('stable'), z.const('latest')]).default('stable'),
-  }).default({}),
+  }).default({}).volatile(),
 }).default({})
 
 /** apply 期落定的运行配置（模块级，供路由/接口读取）。 */
@@ -228,13 +232,13 @@ export const name = 'luke-jarvis'
 
 export function apply(ctx, config) {
     setRuntimeContext(ctx)
-    // 设置面板配置落定（DSH 会把 Config 校验/默认化后的对象作为第二参传入）
+    // 设置面板配置落定（volatile 字段是 { get() } 引用：绑定实时 getter，面板保存即生效；
+    // 测试/旧运行时的裸值走同一桥，非法值忽略，与旧语义一致）
     try {
       const c = config || {}
-      if (c.ui === 'legacy' || c.ui === 'wings') PLUGIN_CONFIG.ui = c.ui
-      if (typeof c.defaultWorkspace === 'string') PLUGIN_CONFIG.defaultWorkspace = c.defaultWorkspace
-      if (c.voice && typeof c.voice === 'object') PLUGIN_CONFIG.voice = c.voice
-      setSelfEvolutionConfig({ ...(c.selfEvolution || {}), workspaceMode: c.workspaceMode })
+      bindPluginConfig(PLUGIN_CONFIG, c)
+      setSelfEvolutionConfig({ ...(readConfigValue(c.selfEvolution) || {}), workspaceMode: readConfigValue(c.workspaceMode) })
+      bindSelfEvolutionLive(c)
     } catch { /* 配置异常不阻断启动 */ }
     resolveWorkspace(ctx) // 预热：apply 时即解析用户工作区（首个工具调用即用对路径）
 

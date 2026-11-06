@@ -3655,9 +3655,10 @@ test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效
   const mod = await import('../src/host/plugin.js')
   assert.ok(mod.Config, '应导出 Config（DSH 设置面板 schema）')
   // schemastery schema 是可调用对象：直接调用即解析默认值
+  // volatile 字段解析后是 { get() } 引用（DSH 设置面板实时源），读取走 .get()
   const parsed = typeof mod.Config === 'function' ? mod.Config({}) : {}
-  assert.strictEqual(parsed.ui, 'wings')
-  assert.strictEqual(parsed.voice.provider, 'browser')
+  assert.strictEqual(parsed.ui.get(), 'wings')
+  assert.strictEqual(parsed.voice.get().provider, 'browser')
   const routes = []
   const ctx = {
     get: () => undefined,
@@ -3666,7 +3667,8 @@ test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效
     webServer: { register: (r) => { routes.push(r); return () => {} } },
     systemPrompt: { section: () => () => {} },
   }
-  mod.apply(ctx, { ui: 'legacy', defaultWorkspace: '', voice: { provider: 'openai' } })
+  // 用真实 volatile ref 配置（Config 解析产物）驱动 apply——与 DSH 运行时传入的形状一致
+  mod.apply(ctx, mod.Config({ ui: 'legacy', defaultWorkspace: '', voice: { provider: 'openai' } }))
   const ui = routes.find((r) => r.path === '/jarvis-ui')
   const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
@@ -3682,7 +3684,7 @@ test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效
   assert.strictEqual(vbody.ok, true)
   assert.strictEqual(vbody.config.provider, 'openai', 'GET 应返回合并后的 provider')
   // 恢复默认配置，避免污染后续测试（PLUGIN_CONFIG 是模块级单例）
-  mod.apply({ get: () => undefined, effect: () => {}, tools: { register: () => () => {} }, webServer: { register: () => {} }, systemPrompt: { section: () => () => {} } }, { ui: 'wings', defaultWorkspace: '', voice: {} })
+  mod.apply({ get: () => undefined, effect: () => {}, tools: { register: () => () => {} }, webServer: { register: () => {} }, systemPrompt: { section: () => () => {} } }, mod.Config({}))
 })
 
 test('T9d 跨站防护：/api/jarvis/command 拒绝不同源 Origin', async () => {

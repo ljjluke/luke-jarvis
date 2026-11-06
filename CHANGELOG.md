@@ -2,6 +2,28 @@
 
 本文件记录 luke-jarvis 每个版本的变更，遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 风格。用户通过版本号 + 本文件判断"能否升级、升了什么"。
 
+## [0.14.1] - 2026-11-06
+
+### 修复：DSH 设置里看不到「路克贾维斯」配置（客户实测反馈）
+
+根因：原版 DSH **不会仅凭 host 侧 Config schema 自动生成设置 UI**——设置 → 内置插件页的配置卡片
+由插件的浏览器半（client）注册，之前版本只导出了 host Config，卡片不存在，设置里自然什么都没有。
+
+- **新增 client 半** `src/client/index.js`（纯 ESM + React.createElement，零构建）：在
+  `plugins.bundle.config` 插槽注册「路克贾维斯」配置卡片（key=包名），数据走 `ctx.configForms`
+  （命名空间=cordis.patch.yml 行 id `jarvis-core`，包名兜底），覆盖 ui/defaultWorkspace/
+  workspaceMode/voice.*/selfEvolution.* 全部配置，zh/en 文案，revision 围栏保存、改回默认发 unset；
+- **Config 全字段 volatile 化**：DSH 只为带 `.volatile()` 字段的 entry 派生 settings 命名空间；
+  volatile 字段在 apply 是 `{ get() }` 引用，新增 `state/liveconfig.js` 桥接成 PLUGIN_CONFIG 实时
+  getter——**面板保存即生效，无需重启**，测试裸值配置完全兼容；
+- `package.json` 新增 `dsh.client`（plugin-manager 注入）与 `exports["./client"]`；
+- **doctor 设置面板诊断重写**：校验运行副本「volatile Config + client 半 + dsh.client 声明」两件套，
+  旧副本会明确报"缺 client 半，设置里不会出现配置卡片"；
+- 测试 385/385（新增 settings-card 契约 7 项），selfcheck 全过。
+
+**升级指引**：升级到本版后重启一次 dsh web（插件启动期加载），再到 设置 → 内置插件 → luke-jarvis
+即可看到配置卡片。另含 0.14.0 之后的自进化闭环（34 工具）与 ponder 难度智能路由。
+
 ## [0.14.0] - 2026-11-05
 
 ### 能力台（31 工具全接入）+ 员工协作空间换回开源 PixOffice（不自己画）
