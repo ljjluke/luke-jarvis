@@ -4702,7 +4702,7 @@ test('UI 契约 v1：/api/jarvis/summary 轻量摘要 + /api/jarvis/capabilities
   const r2 = mk()
   await caps.handler({ url: '/api/jarvis/capabilities?workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, r2)
   const b2 = JSON.parse(r2.body)
-  assert.strictEqual(b2.tools.length, 31, '能力清单要列全 31 个工具')
+  assert.strictEqual(b2.tools.length, 34, '能力清单要列全 34 个工具')
   assert.ok(b2.panels.includes('meetings'), '面板 id 固定（UI 契约）')
   assert.ok(b2.plugin.version, '要报插件版本')
 })
@@ -4909,7 +4909,7 @@ test('能力台：toolSpecs 覆盖全部 31 个工具，且每个工具都在界
   const { TOOLS } = await import('../src/host/tools/index.js')
   const specs = toolSpecs()
   assert.strictEqual(specs.length, TOOLS.length, 'spec 数必须等于真实工具数')
-  assert.strictEqual(TOOLS.length, 31)
+  assert.strictEqual(TOOLS.length, 34)
   const names = new Set(TOOLS.map((t) => t.name))
   const grouped = new Set()
   for (const [g, list] of Object.entries(TOOL_GROUPS)) {
@@ -5037,7 +5037,7 @@ test('能力台路由：/api/jarvis/tools 返回 31 条；/api/jarvis/command �
   await toolsRoute.handler({ url: '/api/jarvis/tools', method: 'GET', headers: {} }, r1)
   const b1 = JSON.parse(r1.body)
   assert.strictEqual(b1.ok, true)
-  assert.strictEqual(b1.tools.length, 31, `能力台必须暴露 31 个工具，实际 ${b1.tools.length}`)
+  assert.strictEqual(b1.tools.length, 34, `能力台必须暴露 34 个工具，实际 ${b1.tools.length}`)
 
   const cmdRoute = routes.find((r) => r.path === '/api/jarvis/command')
   assert.ok(cmdRoute, '应注册 /api/jarvis/command')

@@ -31,6 +31,7 @@ import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_
 import { setRuntimeContext, rememberExec, getRuntimeContext, getLatestExec, getResolvedWorkspace, resolveWorkspace, ponderVerifyProjectDir, getFsService, listNames, readTextSafe, hasTeamJson, markJarvisSession, isJarvisSession } from './runtime.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from './state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from './state/company.js'
+import { setSelfEvolutionConfig } from './state/selfconfig.js'
 import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from './gates/audit.js'
 import { MEMORY_MAX_AGE_MS, checkMemoryFresh, _readGates, _memoryState, recordGate, _flowState } from './gates/store.js'
 import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from './gates/stage.js'
@@ -141,6 +142,16 @@ export const Config = z.object({
     voice: z.string().default('nova'),
     speed: z.number().min(0.25).max(4).default(0.95),
   }).default({}),
+  /** 实例角色：user=用户实例（上报+检测升级）/ dev=研发实例（工作区=源码仓，解锁 issue 巡检+修复链路）。 */
+  workspaceMode: z.union([z.const('user'), z.const('dev')]).default('user'),
+  /** 自进化闭环：GitHub issue 上报/巡检/稳定版检测（docs/设计-GitHub自进化闭环.md）。token 建议只给 repo 权限。 */
+  selfEvolution: z.object({
+    githubRepo: z.string().default('ljjluke/luke-jarvis'),
+    githubToken: z.string().default(''),
+    reportMode: z.union([z.const('confirm'), z.const('auto')]).default('confirm'),
+    approvalRequired: z.boolean().default(true),
+    releaseChannel: z.union([z.const('stable'), z.const('latest')]).default('stable'),
+  }).default({}),
 }).default({})
 
 /** apply 期落定的运行配置（模块级，供路由/接口读取）。 */
@@ -223,6 +234,7 @@ export function apply(ctx, config) {
       if (c.ui === 'legacy' || c.ui === 'wings') PLUGIN_CONFIG.ui = c.ui
       if (typeof c.defaultWorkspace === 'string') PLUGIN_CONFIG.defaultWorkspace = c.defaultWorkspace
       if (c.voice && typeof c.voice === 'object') PLUGIN_CONFIG.voice = c.voice
+      setSelfEvolutionConfig({ ...(c.selfEvolution || {}), workspaceMode: c.workspaceMode })
     } catch { /* 配置异常不阻断启动 */ }
     resolveWorkspace(ctx) // 预热：apply 时即解析用户工作区（首个工具调用即用对路径）
 
@@ -556,7 +568,7 @@ export function apply(ctx, config) {
           })
         )
 
-        // 0.94) 能力台：UI → 31 个 jarvis 工具的真实执行通道（走宿主 tools.execute，闸照常生效）
+        // 0.94) 能力台：UI → 34 个 jarvis 工具的真实执行通道（走宿主 tools.execute，闸照常生效）
         //   GET  /api/jarvis/tools     → 工具清单 + 参数 schema（界面据此渲染表单）
         //   GET  /api/jarvis/sessions  → 可绑定的活动会话
         //   POST /api/jarvis/command   → {tool, args} 执行；拒绝时如实返回原因

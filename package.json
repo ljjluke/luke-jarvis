@@ -58,7 +58,7 @@
     "role-card"
   ],
   "scripts": {
-    "test": "node --test test/plugin.test.js test/core.test.js",
+    "test": "node --test test/plugin.test.js test/core.test.js test/evolution.test.js",
     "typecheck:manual": "node --check src/host/plugin.js",
     "selfcheck": "bash scripts/selfcheck.sh",
     "setup": "node bin/luke-jarvis.mjs setup",

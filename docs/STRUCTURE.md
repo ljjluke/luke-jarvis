@@ -87,7 +87,7 @@ luke-jarvis/
 | 挂载层 | `cordis.patch.yml` | 唯一根挂载：插件 + agent-teams（`memberMaxDepth: 2`） | 不写业务逻辑 |
 | 插件层 | `src/host/plugin.js` | `apply`：注册 31 工具（汇总 `tools/*`）、`/jarvis` 命令、4 条 guard、systemPrompt 注入、webServer 路由 | 不写工具实现、不做判定逻辑、不做领域模板 |
 | 运行时层 | `src/host/runtime.js` | 进程级单例：宿主 ctx / 最近 exec / 用户工作区解析 / fs 服务探测 / 通用 fs 助手 | 不存业务状态（状态在 `state/`）、不做判定 |
-| 工具层 | `src/host/tools/` | 31 个 `jarvis_*` 工具定义与 `execute(args, exec)`，按域分六组（intake/memory/distill/review/org/deliver）；`index.js` 负责 DSH 契约适配（render→ContentBlock[]、schema 断言） | 不自己实现闸/归属判定（一律 import）；不重复实现工具契约 |
+| 工具层 | `src/host/tools/` | 34 个 `jarvis_*` 工具定义与 `execute(args, exec)`，按域分七组（intake/memory/distill/review/org/deliver/evolution）；`index.js` 负责 DSH 契约适配（render→ContentBlock[]、schema 断言） | 不自己实现闸/归属判定（一律 import）；不重复实现工具契约 |
 | 判定层 | `src/host/gates/` | ownership（归属 + 状态根）、store（gates.json + 记忆保鲜）、stage（阶段机）、flow（流程闸）、audit（六审计） | 不直接改文件系统之外的宿主状态 |
 | 状态层 | `src/host/state/` | board（公屏）/ company（3D 公司状态）落盘，唯二写 `.jarvis/` 的应用层入口 | 不写插件仓库自身（`STATE_ROOT_CONFLICT`） |
 | 协议层 | `src/host/pixoffice/` + `protocol/` | relay 帧/命令校验（纯函数）；固定注入的工作方式与企业文化 | 不做 IO、不伪造场景绑定 |
@@ -106,7 +106,7 @@ luke-jarvis/
 |---|---|---|---|
 | `preset/agent.cordis.yml` + `preset/preset.yml` | `presets/jarvis-org.patch.yml` | `node scripts/build-preset-patches.mjs` | `node scripts/build-preset-patches.mjs --check` |
 | `preset/jarvis-captain.cordis.yml` | `presets/jarvis-captain.patch.yml` | 同上 | 同上 |
-| `src/host/tools/*.js` 的 31 个工具定义 | `src/host/plugin.js` 的 `TOOLS`（汇总）与文档工具数（README/RELEASE） | 人工 | `scripts/selfcheck.sh` 第 15 项（TOOLS.length = 30）+ `scripts/verify-tool-contract.mjs`（真实 ToolRuntime） |
+| `src/host/tools/*.js` 的 31 个工具定义 | `src/host/plugin.js` 的 `TOOLS`（汇总）与文档工具数（README/RELEASE） | 人工 | `scripts/selfcheck.sh` 第 15 项（TOOLS.length = 34）+ `scripts/verify-tool-contract.mjs`（真实 ToolRuntime） |
 | `package.json` version | CHANGELOG / tag / npm | 人工 | 发布清单（待补 CI） |
 
 规则：**生成物禁止手改**；改了事实源必须重跑生成器并提交生成物（CI 跑 `--check` 即红）。

@@ -1,4 +1,4 @@
-/** 30 个 jarvis_* 工具的汇总入口（唯一 TOOLS 事实源 + DSH 工具契约适配）。
+/** 34 个 jarvis_* 工具的汇总入口（唯一 TOOLS 事实源 + DSH 工具契约适配）。
  *
  *  为什么要适配：DSH 的 ToolDefinition 契约（@deepseek-ai/dsh-tools 0.2.x）要求
  *  `execute(args, exec)` 与 `output.render(args, value) → ContentBlock[]`。
@@ -17,6 +17,7 @@ import { DISTILL_TOOLS } from './distill.js'
 import { REVIEW_TOOLS } from './review.js'
 import { ORG_TOOLS } from './org.js'
 import { DELIVER_TOOLS } from './deliver.js'
+import { EVOLUTION_TOOLS } from './evolution.js'
 
 const STAGE_SECTION = Symbol.for('luke-jarvis.stageSection')
 
@@ -125,4 +126,5 @@ export const TOOLS = [
   ...REVIEW_TOOLS,
   ...ORG_TOOLS,
   ...DELIVER_TOOLS,
+  ...EVOLUTION_TOOLS,
 ].map(toToolDefinition)

@@ -1,8 +1,8 @@
-/** 能力台（UI → 31 个 jarvis 工具的真实执行通道）。
+/** 能力台（UI → 34 个 jarvis 工具的真实执行通道）。
 
  *  为什么需要它：UI 之前只有只读快照，用户要求"能力全部接入"。
  *  设计原则（不绕过插件的硬闸）：
- *   ① UI 只能调 `jarvis_*` 这 31 个工具，别的（read/write/bash/agent_teams_*）一律拒绝；
+ *   ① UI 只能调 `jarvis_*` 这 34 个工具，别的（read/write/bash/agent_teams_*）一律拒绝；
  *   ② 执行走宿主真实的 `tools.execute`，因此 **captain 闸 / 阶段闸 / 流程闸照常生效** ——
  *      UI 点一下不能变成"绕过闸"的后门；被闸拦住时把拒绝原因如实返回给界面；
  *   ③ 必须绑定一个真实活动会话（agent）：工具要按该会话的 cwd 落盘，且闸按该会话判定；
@@ -20,6 +20,7 @@ export const TOOL_GROUPS = {
   '交付与验收': ['jarvis_baseline', 'jarvis_coverage', 'jarvis_fingerprint', 'jarvis_release', 'jarvis_dispatch_task'],
   '运行与协作': ['jarvis_meeting', 'jarvis_company', 'jarvis_update'],
   '深度思考': ['jarvis_think', 'jarvis_think_deep', 'jarvis_ponder_check'],
+  '自进化闭环': ['jarvis_report_issue', 'jarvis_issue_sync', 'jarvis_release_check'],
 }
 
 /** 工具元数据（给界面渲染表单用）。派生自真实 TOOLS，不手抄。 */
@@ -113,7 +114,7 @@ export async function runCommand({ ctx, projectDir, tool, args, agent, signal })
   const name = String(tool)
   if (!INVOKABLE.test(name)) return { ok: false, tool: name, error: `只允许调用 jarvis_* 工具（收到：${name}）` }
   const spec = TOOLS.find((t) => t.name === name)
-  if (!spec) return { ok: false, tool: name, error: `未知工具：${name}（能力台只暴露 31 个 jarvis 工具）` }
+  if (!spec) return { ok: false, tool: name, error: `未知工具：${name}（能力台只暴露 34 个 jarvis 工具）` }
   const specMeta = toolSpecs().find((t) => t.name === spec.name)
   const { args: norm, errors } = normalizeArgs(specMeta, args)
   if (errors.length) return { ok: false, tool: spec.name, error: errors.join('；') }
