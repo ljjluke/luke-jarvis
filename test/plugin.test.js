@@ -507,6 +507,31 @@ test('jarvis_think_deep：stakes=high 引导加载 ponder 十阶段（B13 接入
   assert.ok(r.ponderGuide.includes('ponder-runs'), 'FIX-1a：run 目录映射 .jarvis/ponder-runs/<run_id>/')
 })
 
+// ── 智能路由：难度决定 ponder 深度（easy 免 ponder / standard 框架精简 / complex 满血）──
+
+test('jarvis_think_deep：difficulty=easy 路由免 ponder（直做+自检三条+升级路径），route=easy-direct', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
+  const r = await def.execute({ question: '把按钮文案从"提交"改成"确认"', roleCard: '身份定位：前端工程师。', difficulty: 'easy' })
+  assert.strictEqual(r.route, 'easy-direct', 'easy 须路由到直做')
+  assert.ok(r.ponderGuide.includes('免 ponder'), 'easy 须免 ponder')
+  assert.ok(r.ponderGuide.includes('升级路径'), 'easy 须带升级路径（发现复杂立即升级）')
+  assert.ok(r.ponderGuide.includes('自检'), 'easy 免 ponder 但自检三条不许省')
+  assert.ok(!r.ponderGuide.includes('必须加载 ponder'), 'easy 不强制加载 ponder')
+})
+
+test('jarvis_think_deep：difficulty=complex 走满血（route=full-ponder 含可谬自评）；stakes=high 自动 full；force 压过 easy', async () => {
+  const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
+  const stages = ['interview', 'shensi', 'divergence', 'bagua', 'plans', 'converge', 'score', 'simulate', 'debate', 'synthesis']
+  const a = await def.execute({ question: '迁移支付核心架构', roleCard: '身份定位：架构师。', difficulty: 'complex' })
+  assert.strictEqual(a.route, 'full-ponder', 'complex 须路由满血')
+  assert.ok(stages.every((s) => a.ponderGuide.includes(s)), 'complex 十阶段全含')
+  assert.ok(a.ponderGuide.includes('可谬自评'), 'complex 须含可谬自评')
+  const b = await def.execute({ question: '是否接入第三方支付？', roleCard: '身份定位：风控负责人。', stakes: 'high' })
+  assert.strictEqual(b.route, 'full-ponder', 'stakes=high 自动按满血对待')
+  const c = await def.execute({ question: '改个文案', roleCard: '身份定位：前端工程师。', difficulty: 'easy', force: true })
+  assert.strictEqual(c.route, 'standard-ponder', 'force（第一次分析需求）压过 easy 路由，仍须真跑 ponder')
+})
+
 test('jarvis_think_deep：stakes=low 也走 ponder（精简 agent 规模但十阶段不跳）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_think_deep')
   const r = await def.execute({ question: '按钮文案用哪个？', roleCard: '身份定位：产品负责人。', stakes: 'low' })
