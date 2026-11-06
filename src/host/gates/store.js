@@ -6,6 +6,7 @@
 import { createRequire } from 'node:module'
 import { looksLikePluginRepo } from './ownership.js'
 import { appendEvent } from '../state/events.js'
+import { createJarvisEngine, registerRawIo } from '../engine.js'
 const _require = createRequire(import.meta.url)
 
 // ── 记忆保鲜闸（①）：project.md 落后于工作进度 → 拒绝关键动作 ──────────
@@ -59,8 +60,9 @@ export function _readGates(cwd) {
   _gateCache.gates = gates
   return gates
 }
-/** flowguard 通过时落闸（step → {ok, at}）；失败不落闸（旧闸保留，避免抖动静默放行） */
-export function recordGate(cwd, step, ok) {
+/** 落闸原始 IO（同步）：flowguard 通过时写 .jarvis/gates.json；失败不落闸（旧闸保留，避免抖动静默放行）。
+ *  （Engine 收编后由 engine.js 经 registerRawIo 调用；直接调用仅作 Engine 不可用时的回退。） */
+export function recordGateRaw(cwd, step, ok) {
   if (!cwd || !step || !ok) return false
   // T13 ⑤ 纵深防御：插件仓库自身不是 jarvis 状态根 → 一律拒写（防止任何调用方（含测试/旧会话）
   // 把第二个 .jarvis 写出来造成假 PASS）
@@ -109,6 +111,21 @@ export function recordGate(cwd, step, ok) {
     try { appendEvent(cwd, 'gate', { step, ok: true }) } catch { /* 事件失败不阻断闸 */ }
     return true
   } catch { return false }
+}
+
+// 把原始写注册进 Engine（Engine = gates.json 唯一写者）
+registerRawIo('gates', (cwd, step, ok) => recordGateRaw(cwd, step, ok))
+
+/** 落闸（Engine 门面，同步）：守卫（状态根冲突拒绝）→ Engine.recordGateSync（唯一写者）。
+ *  同步契约刻意保留：落闸后紧接的 _readGates 必须立即读到；Engine 不可用/守卫拒绝时回退原始写。 */
+export function recordGate(cwd, step, ok) {
+  try {
+    const eng = createJarvisEngine({ projectDir: String(cwd || '') })
+    const r = eng.recordGateSync({ projectDir: String(cwd || ''), step, ok })
+    return Boolean(r && r.ok)
+  } catch {
+    return recordGateRaw(cwd, step, ok)
+  }
 }
 
 // ── 流程闸：jarvis 团队会话在「未过 clarify/project 闸」前不得直接开工 ──────────────

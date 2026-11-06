@@ -8,6 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert'
+import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -2472,7 +2473,7 @@ test('/jarvis 续跑：正常需求不受影响（仍走领域判定流程）', 
 // ── v0.3.4：插件级拦截——顶层 captain 不得亲自执行（作用于已存在会话）──
 
 test('captainExecutionGuard：captain 在 jarvis 工作区用 bash/edit → 拒绝；成员/只读/非 jarvis/逃生阀 → 放行', () => {
-  const base = fs.mkdtempSync('/tmp/jarvis-guard-')
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-guard-'))
   const proj = path.join(base, 'proj')
   fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
   fs.mkdirSync(path.join(proj, '.agent-teams', 't1'), { recursive: true })
@@ -3553,13 +3554,13 @@ test('T8 /jarvis-ui：apply 注册 exact 路由 → 302 到 /jarvis-office/（�
   const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
   assert.strictEqual(res.code, 302, `应 302 跳转：${res.code}`)
-  assert.strictEqual(res.headers.location, '/jarvis-office/v2/index.html', 'Location 指向 v2 增强 UI（真接 DSH）')
+  assert.strictEqual(res.headers.location, '/jarvis-wings', 'Location 默认指向 Wings UI（?ui=legacy 回退 v2）')
 })
 
 // ── t9：PixOffice 数据接上画面（适配页 + 机械可判定断言）──
 
 test('T9 适配页：office/jarvis.html 真实引用快照接口 + DOM 面板钩子齐备（非注释）', () => {
-  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
   const html = fs.readFileSync(path.join(repo, '../office/jarvis.html'), 'utf8')
   const js = fs.readFileSync(path.join(repo, '../office/jarvis-adapter.js'), 'utf8')
   const API = 'api/luke-jarvis'
@@ -3579,7 +3580,7 @@ test('T9 适配页：office/jarvis.html 真实引用快照接口 + DOM 面板钩
   assert.ok(fs.existsSync(path.join(repo, '../office/office/index.html')), '原 PixOffice demo 页必须保留')
 })
 
-test('T9 适配页：/jarvis-ui 302 指向 v2 增强 UI（真接 DSH 快照/语音）', async () => {
+test('T9 适配页：/jarvis-ui 302 默认指向 Wings UI，?ui=legacy 回退 v2', async () => {
   const routes = []
   const ctx = {
     get: () => undefined,
@@ -3593,7 +3594,89 @@ test('T9 适配页：/jarvis-ui 302 指向 v2 增强 UI（真接 DSH 快照/语�
   const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
   assert.strictEqual(res.code, 302)
-  assert.strictEqual(res.headers.location, '/jarvis-office/v2/index.html')
+  assert.strictEqual(res.headers.location, '/jarvis-wings')
+  const res2 = { writeHead: (code, headers) => { res2.code = code; res2.headers = headers }, end: () => {} }
+  await ui.handler({ url: '/jarvis-ui?ui=legacy', method: 'GET' }, res2)
+  assert.strictEqual(res2.code, 302)
+  assert.strictEqual(res2.headers.location, '/jarvis-office/v2/index.html')
+})
+
+test('T9b Wings UI：/jarvis-wings 托管 webui/jarvis-v2-wings.html（缺失时回退 v2）', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const wings = routes.find((r) => r.path === '/jarvis-wings')
+  assert.ok(wings, '应注册 /jarvis-wings 路由')
+  assert.strictEqual(wings.kind, 'exact')
+  const chunks = []
+  const res = {
+    writeHead: (code, headers) => { res.code = code; res.headers = headers },
+    end: (d) => { if (d) chunks.push(d) },
+  }
+  await wings.handler({ url: '/jarvis-wings', method: 'GET' }, res)
+  assert.strictEqual(res.code, 200)
+  const html = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8')
+  assert.ok(html.includes('<!DOCTYPE html') || html.includes('<!doctype html'), '应返回 Wings 页面 HTML')
+  assert.ok(html.includes('orbital-system'), 'Wings 页面应包含全息核心结构')
+})
+
+test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效（ui/defaultWorkspace/voice）', async () => {
+  const mod = await import('../src/host/plugin.js')
+  assert.ok(mod.Config, '应导出 Config（DSH 设置面板 schema）')
+  // schemastery schema 是可调用对象：直接调用即解析默认值
+  const parsed = typeof mod.Config === 'function' ? mod.Config({}) : {}
+  assert.strictEqual(parsed.ui, 'wings')
+  assert.strictEqual(parsed.voice.provider, 'browser')
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  mod.apply(ctx, { ui: 'legacy', defaultWorkspace: '', voice: { provider: 'openai' } })
+  const ui = routes.find((r) => r.path === '/jarvis-ui')
+  const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
+  await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
+  assert.strictEqual(res.headers.location, '/jarvis-office/v2/index.html', 'config.ui=legacy 时默认 302 到 v2')
+  const res2 = { writeHead: (code, headers) => { res2.code = code; res2.headers = headers }, end: () => {} }
+  await ui.handler({ url: '/jarvis-ui?ui=wings', method: 'GET' }, res2)
+  assert.strictEqual(res2.headers.location, '/jarvis-wings', '查询参数可覆盖配置默认值')
+  // 语音合并：config.voice 为兜底，voice.json 保存值优先
+  const voice = routes.find((r) => r.path === '/api/jarvis/voice')
+  const vres = { writeHead: (code, headers) => { vres.code = code; vres.headers = headers }, end: (d) => { vres.body = d } }
+  await voice.handler({ method: 'GET', headers: {}, url: '/api/jarvis/voice' }, vres)
+  const vbody = JSON.parse(vres.body)
+  assert.strictEqual(vbody.ok, true)
+  assert.strictEqual(vbody.config.provider, 'openai', 'GET 应返回合并后的 provider')
+  // 恢复默认配置，避免污染后续测试（PLUGIN_CONFIG 是模块级单例）
+  mod.apply({ get: () => undefined, effect: () => {}, tools: { register: () => () => {} }, webServer: { register: () => {} }, systemPrompt: { section: () => () => {} } }, { ui: 'wings', defaultWorkspace: '', voice: {} })
+})
+
+test('T9d 跨站防护：/api/jarvis/command 拒绝不同源 Origin', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const cmd = routes.find((r) => r.path === '/api/jarvis/command')
+  const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: (d) => { res.body = d } }
+  await cmd.handler({ method: 'POST', headers: { origin: 'https://evil.example', host: '127.0.0.1:18771' }, url: '/api/jarvis/command' }, res)
+  assert.strictEqual(res.code, 403, '跨站 POST 应 403')
+  const res2 = { writeHead: (code, headers) => { res2.code = code; res2.headers = headers }, end: (d) => { res2.body = d } }
+  await cmd.handler({ method: 'POST', headers: { origin: 'http://127.0.0.1:18771', host: '127.0.0.1:18771' }, url: '/api/jarvis/command' }, res2)
+  assert.notStrictEqual(res2.code, 403, '同源 POST 不应 403')
 })
 
 // ── t10：F4 flowguard 真检查 / F4b fs 取值与 hasGlob 语义 / F5 首建队标记 ──
@@ -4738,7 +4821,7 @@ test('TTS 代理：未配置语音模型 → 400 + fallback=browser（前端据�
 })
 
 test('v2 增强 UI：静态资产齐备、接真实接口、开源场景接入、语音设置存在、无写死的演示文案', () => {
-  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
   const dir = path.join(repo, '../office/v2')
   for (const f of ['index.html', 'jarvis-v2.js']) {
     assert.ok(fs.existsSync(path.join(dir, f)), `缺少 v2 资产：${f}`)
@@ -4788,7 +4871,7 @@ test('v2 静态托管：/jarvis-office/v2/index.html 能取到（prefix 路由�
 })
 
 test('v2 会话输入不伪造执行（未接指令通道必须明说，而不是假装回复"收到/我会推进"）', () => {
-  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
   const js = fs.readFileSync(path.join(repo, '../office/v2/jarvis-v2.js'), 'utf8')
   assert.ok(!/我会按流程推进/.test(js), '不能出现假的执行承诺')
   assert.ok(/没有发出去|还没接|只做只读/.test(js), '必须明确告诉用户消息没发出去')
@@ -4947,7 +5030,7 @@ test('能力台路由：/api/jarvis/tools 返回 31 条；/api/jarvis/command �
 })
 
 test('v2 能力台界面：31 工具列表 + 表单 + 执行入口都在页面里', () => {
-  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
   const html = fs.readFileSync(path.join(repo, '../office/v2/index.html'), 'utf8')
   const js = fs.readFileSync(path.join(repo, '../office/v2/jarvis-v2.js'), 'utf8')
   for (const id of ['consoleView', 'cToolList', 'cForm', 'cRun', 'cResult', 'cSession', 'cSearch']) {

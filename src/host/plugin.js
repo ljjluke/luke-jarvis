@@ -21,6 +21,7 @@
 
 import { execSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 import { toPixOfficeSnapshot } from './office-bridge.js'
 import { Engine, reasonText } from './core/index.js'
 import { JsonTicketRepositories } from './adapters/json-tickets.js'
@@ -54,7 +55,7 @@ const _require = createRequire(import.meta.url)
 import { TOOLS, ensureAgentStageSection } from './tools/index.js'
 import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
 import { readEvents } from './state/events.js'
-import { VOICE_PRESETS, publicVoiceConfig, readVoiceConfig, saveVoiceConfig, speechEndpoint } from './state/voice.js'
+import { VOICE_PRESETS, publicVoiceConfig, readVoiceConfig, readVoiceConfigRaw, saveVoiceConfig, speechEndpoint } from './state/voice.js'
 import { pickAgent, runCommand, sessionFacts, toolSpecs } from './state/command.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
@@ -122,6 +123,32 @@ export function jarvisCommand(requirement) {
 
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
 export const inject = ['tools', 'webServer', 'agents', 'systemPrompt']
+
+// ── DSH 设置面板：Config schema（安装后在 DSH 设置里出现「luke-jarvis」配置区块）──
+// 约定与 @nanmicoder/dsh-agent-teams 一致：@deepseek-ai/schemastery 的 z.object 导出 Config。
+// 注意：这里声明的每一项都在 apply 里真实生效，不做"假设置"。
+import z from '@deepseek-ai/schemastery'
+export const Config = z.object({
+  /** 默认 UI：wings = 全息 Wings（3D 核心 + 真实任务点）；legacy = v2 数据适配页。 */
+  ui: z.union([z.const('wings'), z.const('legacy')]).default('wings'),
+  /** 默认工作区：HTTP 接口解析不到会话 cwd 时的回退项目目录（留空 = process.cwd()）。 */
+  defaultWorkspace: z.string().default(''),
+  /** 语音（TTS）默认值：voice.json 已保存的值优先，缺省字段用这里兜底。apiKey 只写 voice.json，不进设置面板。 */
+  voice: z.object({
+    provider: z.union([z.const('browser'), z.const('openai')]).default('browser'),
+    baseUrl: z.string().default('https://api.openai.com/v1'),
+    model: z.string().default('tts-1'),
+    voice: z.string().default('nova'),
+    speed: z.number().min(0.25).max(4).default(0.95),
+  }).default({}),
+}).default({})
+
+/** apply 期落定的运行配置（模块级，供路由/接口读取）。 */
+const PLUGIN_CONFIG = { ui: 'wings', defaultWorkspace: '', voice: null }
+
+// PixOffice 快照 seq 兜底：以进程启动时间为基线（秒），重启后仍单调递增，
+// 避免依赖无人写入的 state.__seq 导致 SSE 序号回退。
+const OFFICE_SEQ_BASE = Math.floor(Date.now() / 1000)
 let officeSeq = 0
 
 
@@ -188,8 +215,15 @@ function requestWorkspace(ctx, req) {
 
 export const name = 'luke-jarvis'
 
-export function apply(ctx) {
+export function apply(ctx, config) {
     setRuntimeContext(ctx)
+    // 设置面板配置落定（DSH 会把 Config 校验/默认化后的对象作为第二参传入）
+    try {
+      const c = config || {}
+      if (c.ui === 'legacy' || c.ui === 'wings') PLUGIN_CONFIG.ui = c.ui
+      if (typeof c.defaultWorkspace === 'string') PLUGIN_CONFIG.defaultWorkspace = c.defaultWorkspace
+      if (c.voice && typeof c.voice === 'object') PLUGIN_CONFIG.voice = c.voice
+    } catch { /* 配置异常不阻断启动 */ }
     resolveWorkspace(ctx) // 预热：apply 时即解析用户工作区（首个工具调用即用对路径）
 
     // ── T11：PixOffice relay 路由（方案B）──
@@ -210,6 +244,9 @@ export function apply(ctx) {
               if (v && (v.startsWith('/') || v.includes('/'))) return v
             }
           } catch { /* 忽略 */ }
+          if (PLUGIN_CONFIG.defaultWorkspace) {
+            try { if (fsm.statSync && fsm.statSync(PLUGIN_CONFIG.defaultWorkspace).isDirectory()) return PLUGIN_CONFIG.defaultWorkspace } catch { /* 配置目录不存在则继续兜底 */ }
+          }
           return resolveWorkspace(getRuntimeContext()) || process.cwd()
         }
         const relayReadState = async (req) => {
@@ -415,7 +452,8 @@ export function apply(ctx) {
       if (webSvc2 && typeof webSvc2.register === 'function') {
         const path = _require('node:path')
         const fsm = _require('node:fs')
-        const officeRoot = path.join(path.dirname(new URL(import.meta.url).pathname), '../../office')
+        const officeRoot = path.join(path.dirname(fileURLToPath(new URL(import.meta.url))), '../../office')
+        const webuiRoot = path.join(path.dirname(fileURLToPath(new URL(import.meta.url))), '../../webui')
         const MIME = {
           '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
           '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -431,13 +469,37 @@ export function apply(ctx) {
         const pluginMeta = (() => {
           try {
             // 插件自身 package.json（src/host → ../../package.json）；装成 bundle 后布局相同
-            const here = path.dirname(new URL(import.meta.url).pathname)
+            const here = path.dirname(fileURLToPath(new URL(import.meta.url)))
             const pkg = JSON.parse(fsm.readFileSync(path.join(here, '../../package.json'), 'utf8'))
             return { version: String(pkg.version || ''), tools: TOOLS.length }
           } catch {
             return { version: '', tools: TOOLS.length }
           }
         })()
+        // 写接口跨站防护：带 Origin 且与 Host 不同源的请求一律拒绝，
+        // 防止任意网页借 CORS:* 调本机工具执行或改写语音配置（CSRF）。
+        const crossSiteWrite = (req) => {
+          const origin = String((req && req.headers && req.headers.origin) || '')
+          if (!origin) return false
+          try {
+            return new URL(origin).host !== String((req && req.headers && req.headers.host) || '')
+          } catch { return true }
+        }
+        // 设置面板语音默认值：voice.json 显式保存的值优先，未保存字段用 Config.voice 兜底。
+        // 用 readVoiceConfigRaw（不注入内置默认）才能区分「用户显式保存 browser」和「从未保存」。
+        const effectiveVoiceConfig = (raw) => {
+          const d = PLUGIN_CONFIG.voice || {}
+          const s = raw && typeof raw === 'object' ? raw : {}
+          const pick = (v, fb) => (v === undefined || v === null || v === '') ? fb : v
+          return {
+            provider: pick(s.provider, d.provider || 'browser'),
+            baseUrl: pick(s.baseUrl, d.baseUrl || ''),
+            model: pick(s.model, d.model || ''),
+            voice: pick(s.voice, d.voice || 'nova'),
+            speed: pick(s.speed, d.speed != null ? d.speed : 0.95),
+            apiKey: s.apiKey || '',
+          }
+        }
         const sendJson = (res, status, body) => {
           try {
             res.writeHead(status, {
@@ -533,6 +595,7 @@ export function apply(ctx) {
               if (String(req.method || 'GET').toUpperCase() !== 'POST') {
                 return sendJson(res, 405, { ok: false, error: '只接受 POST' })
               }
+              if (crossSiteWrite(req)) return sendJson(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可调用）' })
               const body = await readJsonBody(req).catch((e) => ({ __error: String(e.message || e) }))
               if (body && body.__error) return sendJson(res, 400, { ok: false, error: body.__error })
               const tool = String((body && body.tool) || '').trim()
@@ -594,12 +657,13 @@ export function apply(ctx) {
             handler: async (req, res) => {
               try {
                 if (String(req.method || 'GET').toUpperCase() === 'PUT' || String(req.method || '').toUpperCase() === 'POST') {
+                  if (crossSiteWrite(req)) return sendJson(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可保存配置）' })
                   const body = await readJsonBody(req)
                   if (!body || typeof body !== 'object') return sendJson(res, 400, { ok: false, error: '请求体必须是 JSON' })
                   const saved = saveVoiceConfig(body)
-                  return sendJson(res, 200, { ok: true, config: publicVoiceConfig(saved), presets: VOICE_PRESETS })
+                  return sendJson(res, 200, { ok: true, config: publicVoiceConfig(effectiveVoiceConfig(saved)), presets: VOICE_PRESETS })
                 }
-                return sendJson(res, 200, { ok: true, config: publicVoiceConfig(readVoiceConfig()), presets: VOICE_PRESETS })
+                return sendJson(res, 200, { ok: true, config: publicVoiceConfig(effectiveVoiceConfig(readVoiceConfigRaw())), presets: VOICE_PRESETS })
               } catch (e) {
                 return sendJson(res, 500, { ok: false, error: String((e && e.message) || e) })
               }
@@ -611,11 +675,12 @@ export function apply(ctx) {
             kind: 'exact',
             path: '/api/jarvis/tts',
             handler: async (req, res) => {
+              if (crossSiteWrite(req)) return sendJson(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可调用）' })
               const body = await readJsonBody(req).catch(() => null)
               const text = String((body && body.text) || '').trim()
               if (!text) return sendJson(res, 400, { ok: false, error: '缺少 text' })
               if (text.length > 1200) return sendJson(res, 400, { ok: false, error: 'text 过长（>1200 字）' })
-              const cfg = readVoiceConfig()
+              const cfg = effectiveVoiceConfig(readVoiceConfigRaw())
               const endpoint = speechEndpoint(cfg)
               if (cfg.provider !== 'openai' || !endpoint || !cfg.apiKey) {
                 return sendJson(res, 400, {
@@ -660,6 +725,7 @@ export function apply(ctx) {
 
         // 0) 官方 UI 入口（T8/T9）：GET /jarvis-ui → 302 跳 /jarvis-office/jarvis.html。
         //    T9 起指向「本公司数据适配页」（左侧实时数据面板 + PixOffice 场景 iframe）；
+        //    Wings 起默认进全息 Wings UI（/jarvis-wings）；?ui=legacy 回退 v2 数据适配页。
         //    上游 demo 页 /jarvis-office/office/index.html 保持不动（仍可直接访问，用于对照）。
         //    必须是 exact route 且注册在 prefix 静态路由之前（否则前缀路由会先吃掉匹配）。
         ctx.effect(() =>
@@ -668,9 +734,31 @@ export function apply(ctx) {
             path: '/jarvis-ui',
             handler: async (req, res) => {
               try {
+                const wantLegacy = PLUGIN_CONFIG.ui === 'legacy' ? !/[?&]ui=wings/.test(String((req && req.url) || '')) : /[?&]ui=legacy/.test(String((req && req.url) || ''))
+                const dest = wantLegacy ? '/jarvis-office/v2/index.html' : '/jarvis-wings'
+                res.writeHead(302, { location: dest, 'cache-control': 'no-store' })
+                res.end(`→ ${dest}`)
+              } catch {}
+            },
+          })
+        )
+        // 0.99) Wings UI：GET /jarvis-wings → webui/jarvis-v2-wings.html（全息 3D 核心 + 真实任务点）。
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/jarvis-wings',
+            handler: async (req, res) => {
+              try {
+                const abs = path.join(webuiRoot, 'jarvis-v2-wings.html')
+                if (!abs.startsWith(webuiRoot)) { res.writeHead(403); return res.end('forbidden') }
+                const data = fsm.readFileSync(abs)
+                res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+                res.end(data)
+              } catch (e) {
+                // Wings 文件缺失时回退 v2，保证入口永不 404
                 res.writeHead(302, { location: '/jarvis-office/v2/index.html', 'cache-control': 'no-store' })
                 res.end('→ /jarvis-office/v2/index.html')
-              } catch {}
+              }
             },
           })
         )
@@ -689,7 +777,8 @@ export function apply(ctx) {
                 const target = path.join(cwd, '.jarvis/company-state.json')
                 let state = null
                 try { state = JSON.parse(fsm.readFileSync(target, 'utf8')) } catch { state = null }
-                const seq = Number(state && state.__seq) > 0 ? Number(state.__seq) : (officeSeq = (officeSeq || 0) + 1)
+                const rawSeq = Number(state && state.__seq) > 0 ? Number(state.__seq) : 0
+                const seq = rawSeq > OFFICE_SEQ_BASE ? rawSeq : OFFICE_SEQ_BASE + (++officeSeq)
                 const snap = toPixOfficeSnapshot(state || {}, { seq, workspaceId: 'jarvis-' + path.basename(cwd), workspaceName: (state && state.company && state.company.name) || 'Jarvis 数字员工公司' })
                 return send(200, { ok: true, active: Boolean(state), snapshot: snap })
               } catch (e) {

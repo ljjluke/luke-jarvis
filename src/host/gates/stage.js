@@ -244,7 +244,7 @@ export function captainExecutionGuard(exec) {
     // 临时诊断（确认 guard 是否全局生效/是否匹配 captain）→ /tmp/jarvis-captain-guard.log
     try {
       _require('node:fs').appendFileSync(
-        '/tmp/jarvis-captain-guard.log',
+        _require('node:path').join(_require('node:os').tmpdir(), 'jarvis-captain-guard.log'),
         `${new Date().toISOString()} tool=${name} sid=${sessionId} cwd=${cwd} captains=[${[..._captainIds(String(cwd))].join(',')}]\n`,
       )
     } catch {}

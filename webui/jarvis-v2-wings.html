@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DeepSeek Harness · JARVIS 全息任务中枢</title>
 <style>
-:root{--bg:#02070d;--cyan:#70eaff;--cyan2:#00bfe8;--deep:#071826;--text:#ecfbff;--soft:#9fc4d5;--dim:#547385;--green:#3cf2a5;--amber:#ffbd68;--red:#ff7189;--violet:#9a8cff;--mx:0px;--my:0px}
+:root{--bg:#02070d;--cyan:#70eaff;--cyan2:#00bfe8;--deep:#071826;--text:#ecfbff;--soft:#9fc4d5;--dim:#547385;--green:#3cf2a5;--amber:#ffbd68;--red:#ff7189;--violet:#9a8cff;--mx:0px;--my:0px;--rx:0deg;--ry:0deg}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text)}body{font-family:"Microsoft YaHei","Noto Sans SC",sans-serif;min-height:100dvh;overflow:hidden}button{ font:inherit;color:inherit;background:none;border:0;padding:0}button:focus-visible,[role=button]:focus-visible,summary:focus-visible{outline:1px solid var(--cyan);outline-offset:5px}
 #particles{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;opacity:.72}.nebula{position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,rgba(0,155,210,.18),transparent 30%),radial-gradient(circle at 18% 20%,rgba(0,122,180,.08),transparent 27%),radial-gradient(circle at 82% 78%,rgba(0,122,180,.08),transparent 27%)}.nebula:before{content:"";position:absolute;inset:0;background:linear-gradient(rgba(112,234,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(112,232,255,.018) 1px,transparent 1px);background-size:42px 42px;mask-image:radial-gradient(circle at center,#000,transparent 72%)}.nebula:after{content:"";position:absolute;inset:-20%;background:repeating-radial-gradient(circle at 50% 50%,transparent 0 74px,rgba(112,234,255,.025) 75px,transparent 76px);opacity:.7}
 .scanline{position:fixed;z-index:1;left:0;right:0;top:-14vh;height:14vh;pointer-events:none;background:linear-gradient(transparent,rgba(112,234,255,.035),transparent);animation:scan 10s linear infinite}@keyframes scan{to{transform:translateY(126vh)}}
 #app{position:relative;z-index:2;min-height:100dvh}.topbar{height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 38px;background:linear-gradient(180deg,rgba(2,10,16,.7),transparent);border-bottom:1px solid rgba(112,234,255,.06)}.brand{display:flex;gap:12px;align-items:center}.brand svg{width:27px;height:27px;filter:drop-shadow(0 0 9px rgba(112,234,255,.5))}.brand-copy{font:500 11px Consolas,monospace;letter-spacing:2.2px;color:#7fa8bb}.brand-copy b{font-weight:500;color:var(--cyan)}.clockbox{display:flex;gap:15px;align-items:center}.clock{font:700 23px Consolas,monospace;letter-spacing:1px;color:var(--cyan);text-shadow:0 0 18px rgba(112,234,255,.4)}.date{font-size:9px;line-height:1.7;color:var(--dim);text-align:right}.ok{display:inline-flex;gap:5px;align-items:center;color:var(--green)}.pulse-dot{width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:dotPulse 2s infinite}@keyframes dotPulse{50%{opacity:.45;transform:scale(.8)}}
 .view{display:none;position:relative;height:calc(100dvh - 72px);min-height:690px;overflow:hidden}.view.active{display:block;animation:viewIn .5s cubic-bezier(.16,1,.3,1)}@keyframes viewIn{from{transform:translateY(10px)}to{transform:none}}
 /* 主界面：空间全息中枢 */
-.holo-stage{position:absolute;inset:0;perspective:1200px}.orbital-system{position:absolute;left:50%;top:43%;width:700px;height:700px;transform:translate(-50%,-50%) translate3d(calc(var(--mx)*-1),calc(var(--my)*-1),0);transform-style:preserve-3d}.orbit{position:absolute;border-radius:50%;pointer-events:none}.orbit.o1{inset:0;border:1px dashed rgba(112,234,255,.22);animation:spin 46s linear infinite}.orbit.o2{inset:45px;border:1px solid rgba(112,234,255,.12);border-top-color:rgba(112,234,255,.72);border-left-color:rgba(112,234,255,.32);animation:spin 18s linear infinite reverse}.orbit.o3{inset:86px;border:1px dotted rgba(112,234,255,.25);animation:spin 26s linear infinite}.orbit.o4{inset:126px;border-radius:50%;box-shadow:0 0 70px rgba(0,187,232,.09),inset 0 0 60px rgba(0,187,232,.08)}.ticks{position:absolute;inset:22px;border-radius:50%;background:repeating-conic-gradient(rgba(112,234,255,.55) 0deg .45deg,transparent .45deg 5deg);mask:radial-gradient(transparent 68%,#000 68.5%,#000 69.1%,transparent 69.7%);animation:spin 58s linear infinite}.beam{position:absolute;left:50%;top:50%;width:1px;height:350px;transform-origin:top;background:linear-gradient(rgba(112,234,255,.3),transparent);opacity:.45}.beam.b1{transform:rotate(35deg)}.beam.b2{transform:rotate(144deg)}.beam.b3{transform:rotate(225deg)}.beam.b4{transform:rotate(322deg)}.progress-orbit{position:absolute;inset:20px;filter:drop-shadow(0 0 8px rgba(112,234,255,.55))}.progress-orbit svg{width:100%;height:100%;transform:rotate(-90deg)}.progress-orbit circle{fill:none;stroke-width:3}.progress-orbit .base{stroke:rgba(112,234,255,.08)}.progress-orbit .active{stroke:var(--cyan);stroke-linecap:round;stroke-dasharray:1436 1995}.satellite-dot{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 15px var(--cyan)}.sd1{left:96px;top:108px}.sd2{right:82px;top:182px;background:var(--green);box-shadow:0 0 15px var(--green)}.sd3{left:144px;bottom:92px}.sd4{right:130px;bottom:120px;background:var(--violet);box-shadow:0 0 15px var(--violet)}@keyframes spin{to{transform:rotate(360deg)}}
-.jarvis-core{position:absolute;left:50%;top:50%;width:336px;height:336px;transform:translate(-50%,-50%);display:grid;place-items:center}.core-halo{position:absolute;inset:-18px;border-radius:50%;border:1px solid rgba(112,234,255,.24);box-shadow:0 0 90px rgba(0,190,235,.22),inset 0 0 46px rgba(112,234,255,.12);animation:haloPulse 4s ease-in-out infinite}.core-halo.h2{inset:-48px;opacity:.45;animation-delay:1.2s}.core-halo.h3{inset:-78px;opacity:.18;animation-delay:2.4s}@keyframes haloPulse{50%{transform:scale(1.035);opacity:.75}}.jarvis-orb{position:relative;width:294px;height:294px;border-radius:50%;object-fit:cover;filter:brightness(1.08) saturate(.92);box-shadow:0 0 58px rgba(0,201,242,.48),0 0 150px rgba(0,126,170,.18);animation:coreBreathe 4.5s ease-in-out infinite}@keyframes coreBreathe{50%{transform:scale(1.025);filter:brightness(1.2) saturate(1)}}.core-state{position:absolute;left:50%;bottom:-52px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;white-space:nowrap;font:500 10px Consolas,monospace;letter-spacing:2px;color:var(--cyan)}.voice-ticks{display:flex;align-items:center;gap:3px;height:15px}.voice-ticks i{display:block;width:2px;height:5px;background:var(--cyan);animation:voice 1s ease-in-out infinite}.voice-ticks i:nth-child(2){animation-delay:.15s}.voice-ticks i:nth-child(3){animation-delay:.3s}.voice-ticks i:nth-child(4){animation-delay:.45s}@keyframes voice{50%{transform:scaleY(3);opacity:.45}}
+.holo-stage{position:absolute;inset:0;perspective:1200px}.orbital-system{position:absolute;left:50%;top:43%;width:700px;height:700px;transform:translate(-50%,-50%) translate3d(calc(var(--mx)*-1),calc(var(--my)*-1),0) rotateX(var(--rx)) rotateY(var(--ry));transform-style:preserve-3d}.orbit{position:absolute;border-radius:50%;pointer-events:none}.orbit.o1{inset:0;border:1px dashed rgba(112,234,255,.22);animation:orbitSpinA 46s linear infinite}.orbit.o2{inset:45px;border:1px solid rgba(112,234,255,.12);border-top-color:rgba(112,234,255,.72);border-left-color:rgba(112,234,255,.32);animation:orbitSpinB 18s linear infinite}.orbit.o3{inset:86px;border:1px dotted rgba(112,234,255,.25);animation:orbitSpinC 26s linear infinite}.orbit.o4{inset:126px;border-radius:50%;box-shadow:0 0 70px rgba(0,187,232,.09),inset 0 0 60px rgba(0,187,232,.08);transform:rotateX(76deg)}.ticks{position:absolute;inset:22px;border-radius:50%;background:repeating-conic-gradient(rgba(112,234,255,.55) 0deg .45deg,transparent .45deg 5deg);mask:radial-gradient(transparent 68%,#000 68.5%,#000 69.1%,transparent 69.7%);animation:orbitSpinA 58s linear infinite}.beam{position:absolute;left:50%;top:50%;width:1px;height:350px;transform-origin:top;background:linear-gradient(rgba(112,234,255,.3),transparent);opacity:.45}.beam.b1{transform:rotate(35deg)}.beam.b2{transform:rotate(144deg)}.beam.b3{transform:rotate(225deg)}.beam.b4{transform:rotate(322deg)}.progress-orbit{position:absolute;inset:20px;filter:drop-shadow(0 0 8px rgba(112,234,255,.55));transform:rotateX(74deg)}.progress-orbit svg{width:100%;height:100%;transform:rotate(-90deg)}.progress-orbit circle{fill:none;stroke-width:3}.progress-orbit .base{stroke:rgba(112,234,255,.08)}.progress-orbit .active{stroke:var(--cyan);stroke-linecap:round;stroke-dasharray:1436 1995}.satellite-dot{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 15px var(--cyan)}.sd1{left:96px;top:108px}.sd2{right:82px;top:182px;background:var(--green);box-shadow:0 0 15px var(--green)}.sd3{left:144px;bottom:92px}.sd4{right:130px;bottom:120px;background:var(--violet);box-shadow:0 0 15px var(--violet)}@keyframes spin{to{transform:rotate(360deg)}}
+.jarvis-core{position:absolute;left:50%;top:50%;width:336px;height:336px;transform:translate(-50%,-50%) translateZ(30px);transform-style:preserve-3d;display:grid;place-items:center}.core-halo{position:absolute;inset:-18px;border-radius:50%;border:1px solid rgba(112,234,255,.24);box-shadow:0 0 90px rgba(0,190,235,.22),inset 0 0 46px rgba(112,234,255,.12);animation:haloPulse 4s ease-in-out infinite}.core-halo.h2{inset:-48px;opacity:.45;animation-delay:1.2s}.core-halo.h3{inset:-78px;opacity:.18;animation-delay:2.4s}@keyframes haloPulse{50%{transform:scale(1.035);opacity:.75}}.jarvis-orb{position:relative;width:294px;height:294px;border-radius:50%;object-fit:cover;filter:brightness(1.08) saturate(.92);box-shadow:0 0 58px rgba(0,201,242,.48),0 0 150px rgba(0,126,170,.18);animation:coreBreathe 4.5s ease-in-out infinite}@keyframes coreBreathe{50%{transform:scale(1.025);filter:brightness(1.2) saturate(1)}}.core-state{position:absolute;left:50%;bottom:-52px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;white-space:nowrap;font:500 10px Consolas,monospace;letter-spacing:2px;color:var(--cyan)}.voice-ticks{display:flex;align-items:center;gap:3px;height:15px}.voice-ticks i{display:block;width:2px;height:5px;background:var(--cyan);animation:voice 1s ease-in-out infinite}.voice-ticks i:nth-child(2){animation-delay:.15s}.voice-ticks i:nth-child(3){animation-delay:.3s}.voice-ticks i:nth-child(4){animation-delay:.45s}@keyframes voice{50%{transform:scaleY(3);opacity:.45}}
 .link-lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.78}.link-lines path{stroke:rgba(112,234,255,.18);stroke-width:1;fill:none}.link-lines circle{fill:rgba(112,234,255,.5);filter:drop-shadow(0 0 4px rgba(112,234,255,.8))}.hud-node{position:absolute;z-index:3;width:310px;padding:17px 19px 15px;background:linear-gradient(115deg,rgba(7,28,43,.58),rgba(3,13,21,.22));border-top:1px solid rgba(112,234,255,.24);border-bottom:1px solid rgba(112,234,255,.09);clip-path:polygon(0 0,90% 0,100% 20%,100% 100%,10% 100%,0 80%);box-shadow:0 14px 50px rgba(0,0,0,.14);backdrop-filter:blur(12px);transform:translate3d(calc(var(--mx)*.45),calc(var(--my)*.45),0);transition:transform .22s ease,background .22s ease}.hud-node:before{content:"";position:absolute;left:0;top:0;width:18px;height:18px;border-left:1px solid rgba(112,234,255,.9);border-top:1px solid rgba(112,234,255,.9)}.hud-node:hover{background:linear-gradient(115deg,rgba(10,40,58,.75),rgba(4,17,27,.36))}.node-left-1{left:44px;top:92px}.node-left-2{left:82px;top:322px;width:270px}.node-left-3{left:138px;bottom:84px;width:260px}.node-right-1{right:44px;top:92px;width:330px}.node-right-2{right:74px;top:322px;width:290px}.node-right-3{right:138px;bottom:84px;width:260px}.node-kicker{display:flex;justify-content:space-between;align-items:center;font:600 8px Consolas,monospace;letter-spacing:1.6px;color:#628498}.node-kicker span:last-child{color:var(--green)}.node-title{margin-top:11px;font-size:15px;font-weight:400;letter-spacing:.3px}.node-copy{margin-top:6px;font-size:10px;line-height:1.7;color:#7696a7}.node-data{display:flex;align-items:end;gap:10px;margin-top:12px}.node-data b{font:700 28px Consolas,monospace;color:var(--cyan);line-height:1}.node-data span{font-size:9px;color:var(--dim);padding-bottom:3px}.thin-progress{height:2px;background:rgba(112,234,255,.1);margin-top:13px;overflow:hidden}.thin-progress i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan2),var(--cyan));box-shadow:0 0 9px rgba(112,234,255,.65)}.mission-node{cursor:pointer}.mission-node:hover .node-data b{text-shadow:0 0 14px rgba(112,234,255,.65)}.mission-node .node-link{position:absolute;right:18px;bottom:12px;font-size:9px;color:var(--cyan)}.report-node .node-title{color:#e6fff2}.report-stats{display:flex;gap:18px;margin-top:13px}.report-stats b{display:block;font:600 17px Consolas,monospace;color:var(--green)}.report-stats span{display:block;margin-top:4px;font-size:8px;color:var(--dim)}.mini-wave{display:flex;gap:4px;align-items:center;height:34px;margin-top:11px}.mini-wave i{width:2px;height:8px;background:var(--cyan);box-shadow:0 0 6px rgba(112,234,255,.5);animation:eq 1.6s ease-in-out infinite}.mini-wave i:nth-child(2n){animation-delay:.22s}.mini-wave i:nth-child(3n){animation-delay:.48s}@keyframes eq{50%{transform:scaleY(3.2);opacity:.45}}.channel-dots{display:flex;gap:10px;margin-top:15px}.channel-dots span{display:flex;gap:5px;align-items:center;font-size:9px;color:#7d9bad}.channel-dots i{width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green)}.channel-dots .warn i{background:var(--red);box-shadow:0 0 6px var(--red)}
 .jarvis-dialogue{position:absolute;z-index:4;left:50%;bottom:72px;transform:translateX(-50%) translate3d(calc(var(--mx)*-.2),calc(var(--my)*-.2),0);width:min(760px,60vw);text-align:center;pointer-events:none}.dialogue-line{position:relative;padding:0 28px}.dialogue-line:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:1px;background:linear-gradient(var(--cyan),transparent);opacity:.7}.dialogue-main{margin:0;font-size:26px;font-weight:300;letter-spacing:.6px;line-height:1.7;text-shadow:0 0 24px rgba(112,234,255,.14)}.dialogue-sub{margin:5px 0 0;font-size:15px;line-height:1.7;color:#91b7c8}.dialogue-meta{display:flex;justify-content:center;gap:18px;margin-top:13px;font-size:9px;color:#536f7f;letter-spacing:.5px}.dialogue-sub em{display:inline-block;width:5px;height:16px;margin-left:6px;vertical-align:-2px;background:var(--cyan);animation:blink 1s steps(1) infinite;font-style:normal}@keyframes blink{50%{opacity:0}}
 .jarvis-menu{position:absolute;right:34px;bottom:30px;z-index:8}.jarvis-menu summary{list-style:none;cursor:pointer;width:58px;height:58px;border-radius:50%;padding:4px;border:1px solid rgba(112,234,255,.55);background:#020b11;box-shadow:0 0 28px rgba(0,202,242,.35);transition:transform .25s}.jarvis-menu summary::-webkit-details-marker{display:none}.jarvis-menu summary:hover{transform:scale(1.07)}.jarvis-menu summary img{width:100%;height:100%;object-fit:cover;border-radius:50%}.menu-pop{position:absolute;right:0;bottom:76px;width:238px;padding:12px;background:rgba(3,16,25,.94);border:1px solid rgba(112,234,255,.24);clip-path:polygon(0 0,92% 0,100% 12%,100% 100%,8% 100%,0 88%);box-shadow:0 16px 50px rgba(0,0,0,.4),0 0 25px rgba(0,190,235,.08);backdrop-filter:blur(14px)}.menu-title{padding:3px 9px 10px;font:600 8px Consolas,monospace;letter-spacing:1.4px;color:var(--dim)}.menu-item{display:flex;align-items:center;gap:9px;width:100%;padding:10px 9px;font-size:11px;color:#8ba8b8;text-align:left;cursor:pointer}.menu-item:hover{background:rgba(112,234,255,.07);color:var(--cyan)}.menu-item.expert{color:var(--cyan);background:linear-gradient(90deg,rgba(0,177,216,.14),transparent)}.menu-item svg{width:14px;height:14px}.pro{margin-left:auto;padding:2px 5px;border:1px solid rgba(112,234,255,.22);font:700 7px Consolas,monospace}
@@ -25,7 +25,33 @@
 .jarvis-visual{position:absolute;inset:20px;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 50% 42%,rgba(120,246,255,.28),rgba(0,126,170,.16) 34%,rgba(1,11,19,.96) 72%);box-shadow:0 0 70px rgba(0,200,240,.42),inset 0 0 48px rgba(112,234,255,.2);transform-style:preserve-3d;transition:filter .25s,box-shadow .25s}.jarvis-orb{position:absolute;inset:0;width:100%;height:100%;opacity:.24;mix-blend-mode:screen;filter:brightness(1.15) saturate(.95) blur(.2px);animation:orbDrift 9s ease-in-out infinite}@keyframes orbDrift{50%{transform:scale(1.08) rotate(8deg);opacity:.34}}#coreWave{position:absolute;inset:0;width:100%;height:100%;z-index:4}.plasma-layer{position:absolute;inset:12%;border-radius:50%;pointer-events:none;mix-blend-mode:screen;filter:blur(.4px)}.plasma-layer.pa{background:conic-gradient(from 20deg,transparent 0 35deg,rgba(112,234,255,.5) 48deg,transparent 62deg,transparent 160deg,rgba(60,242,165,.32) 174deg,transparent 190deg);mask:radial-gradient(transparent 42%,#000 43%,#000 68%,transparent 69%);animation:spin 9s linear infinite}.plasma-layer.pb{inset:20%;background:conic-gradient(from 180deg,transparent,rgba(154,140,255,.42) 40deg,transparent 62deg,transparent 180deg,rgba(112,234,255,.58) 205deg,transparent 235deg);mask:radial-gradient(transparent 30%,#000 31%,#000 58%,transparent 59%);animation:spin 6s linear infinite reverse}.plasma-layer.pc{inset:31%;background:radial-gradient(circle,rgba(230,255,255,.85),rgba(112,234,255,.45) 18%,transparent 52%);filter:blur(7px);animation:plasmaBreath 3.6s ease-in-out infinite}.core-depth{position:absolute;inset:8%;border-radius:50%;border:1px solid rgba(112,234,255,.18);box-shadow:inset 18px 0 45px rgba(0,54,78,.45),inset -18px 0 45px rgba(0,130,180,.2);pointer-events:none}.arc-field i{position:absolute;border-radius:50%;border:1px solid transparent;pointer-events:none;mix-blend-mode:screen}.arc-field i:nth-child(1){inset:7%;border-top-color:rgba(112,234,255,.8);border-left-color:rgba(112,234,255,.22);animation:spin 4.8s linear infinite}.arc-field i:nth-child(2){inset:15%;border-right-color:rgba(60,242,165,.55);animation:spin 7s linear infinite reverse}.arc-field i:nth-child(3){inset:17%;border-bottom-color:rgba(154,140,255,.52);animation:spin 5.4s linear infinite}.arc-field i:nth-child(4){inset:27%;border-top-color:rgba(234,251,255,.7);animation:spin 3.8s linear infinite reverse}@keyframes plasmaBreath{50%{transform:scale(1.16);opacity:.72}}body.is-speaking .jarvis-visual{filter:brightness(1.22) saturate(1.16);box-shadow:0 0 105px rgba(112,234,255,.55),inset 0 0 72px rgba(112,234,255,.3)}body.is-speaking .plasma-layer.pa,body.is-speaking .plasma-layer.pb{animation-duration:1.4s;filter:blur(.2px) brightness(1.35)}body.is-speaking .plasma-layer.pc{animation-duration:1.1s;opacity:1}body.is-speaking .arc-field i{animation-duration:1.2s;filter:drop-shadow(0 0 6px rgba(112,234,255,.85))}body.jarvis-listening .jarvis-visual{box-shadow:0 0 92px rgba(60,242,165,.25),inset 0 0 60px rgba(112,234,255,.25)}body.jarvis-listening .core-state{color:var(--green)}
 .worker-model{position:relative;width:62px;height:96px;margin:auto;transform-style:preserve-3d;animation:workerFloat 4.6s ease-in-out infinite}.worker-shadow{position:absolute;left:8px;right:8px;bottom:-5px;height:11px;border-radius:50%;background:rgba(0,207,245,.15);filter:blur(5px)}.worker-head{position:absolute;left:15px;top:0;width:32px;height:34px;border-radius:48% 48% 44% 44%;background:radial-gradient(circle at 35% 28%,rgba(218,255,255,.75),rgba(74,160,190,.38) 35%,rgba(6,33,47,.9) 78%);border:1px solid rgba(112,234,255,.55);box-shadow:inset -5px -5px 10px rgba(0,0,0,.28),0 0 10px rgba(112,234,255,.2);animation:headScan 5s ease-in-out infinite}.worker-head:before,.worker-head:after{content:"";position:absolute;top:15px;width:4px;height:2px;border-radius:2px;background:var(--cyan);box-shadow:0 0 5px var(--cyan)}.worker-head:before{left:8px}.worker-head:after{right:8px}.worker-neck{position:absolute;left:26px;top:31px;width:10px;height:8px;background:linear-gradient(#4ea7bd,#14394c)}.worker-body{position:absolute;left:13px;top:38px;width:36px;height:39px;border-radius:13px 13px 8px 8px;background:linear-gradient(145deg,rgba(112,234,255,.38),rgba(9,43,61,.86));border:1px solid rgba(112,234,255,.34);box-shadow:inset 6px 0 12px rgba(255,255,255,.04),0 0 12px rgba(0,177,220,.12)}.worker-body:before{content:"";position:absolute;left:16px;top:6px;width:4px;height:18px;background:rgba(112,234,255,.5);box-shadow:0 0 6px rgba(112,234,255,.5)}.worker-arm{position:absolute;top:43px;width:8px;height:34px;border-radius:5px;background:linear-gradient(rgba(112,234,255,.42),rgba(12,46,65,.9));transform-origin:top}.worker-arm.left{left:7px;transform:rotate(18deg);animation:typingLeft 1.4s ease-in-out infinite}.worker-arm.right{right:7px;transform:rotate(-18deg);animation:typingRight 1.4s ease-in-out infinite}.worker-leg{position:absolute;top:73px;width:11px;height:25px;border-radius:5px;background:linear-gradient(rgba(32,83,105,.9),rgba(5,24,36,.95));border:1px solid rgba(112,234,255,.12)}.worker-leg.left{left:18px;transform:rotate(5deg)}.worker-leg.right{right:18px;transform:rotate(-5deg)}@keyframes workerFloat{50%{transform:translateY(-4px) rotateY(8deg)}}@keyframes headScan{50%{transform:rotate(5deg)}}@keyframes typingLeft{50%{transform:rotate(27deg) translateY(2px)}}@keyframes typingRight{50%{transform:rotate(-27deg) translateY(2px)}}.person .speech-bubble{position:absolute;z-index:6;left:50%;top:-40px;transform:translateX(-50%) translateY(8px);min-width:128px;max-width:170px;padding:7px 9px;background:rgba(4,20,30,.92);border:1px solid rgba(112,234,255,.26);clip-path:polygon(0 0,92% 0,100% 18%,100% 100%,8% 100%,0 82%);font-size:8px;line-height:1.6;color:#bce8f6;opacity:0;pointer-events:none;animation:bubbleTalk 16s linear infinite;animation-delay:var(--bubble-delay,0s)}.person .speech-bubble:after{content:"";position:absolute;left:50%;bottom:-5px;width:8px;height:8px;background:rgba(4,20,30,.92);border-right:1px solid rgba(112,234,255,.26);transform:translateX(-50%) rotate(45deg)}@keyframes bubbleTalk{0%,18%,100%{opacity:0;transform:translateX(-50%) translateY(8px)}4%,14%{opacity:1;transform:translateX(-50%) translateY(0)}}.person.remote .worker-model{opacity:.6}.person.remote .worker-model:before{content:"REMOTE";position:absolute;left:50%;top:43px;transform:translateX(-50%);font:600 6px Consolas,monospace;letter-spacing:1px;color:var(--dim)}
 .menu-item.active{color:var(--cyan);background:rgba(112,234,255,.07)}.menu-item.mic-live{color:var(--green);background:rgba(60,242,165,.06)}
-@media(max-width:1180px){.hud-node{width:250px}.node-left-1{left:22px}.node-right-1{right:22px}.node-left-2{left:35px}.node-right-2{right:35px}.node-left-3{left:70px}.node-right-3{right:70px}.orbital-system{transform:translate(-50%,-50%) scale(.82)}.jarvis-dialogue{bottom:48px}.mission-layout{grid-template-columns:330px 1fr}.mission-core-copy{padding:0 20px}.execution-zone{grid-template-columns:1fr}}
+/* 3D 陀螺仪全息层：倾斜轨道面 + 核心经线环 + 深度遮挡 */
+.orbital-system{transition:transform .25s ease-out}
+.jarvis-visual{transform:translateZ(0)}
+.gyro{position:absolute;border-radius:50%;pointer-events:none;transform-style:preserve-3d}
+.gyro.g1{inset:-10px;border:1px solid rgba(112,234,255,.42);box-shadow:0 0 14px rgba(112,234,255,.16);animation:gyroY 7s linear infinite}
+.gyro.g2{inset:-26px;border:1px dashed rgba(112,234,255,.26);animation:gyroX 11s linear infinite}
+.gyro.g3{inset:8px;border:1px solid rgba(154,140,255,.32);animation:gyroY 5.5s linear infinite reverse}
+@keyframes gyroY{from{transform:rotateX(10deg) rotateY(0)}to{transform:rotateX(10deg) rotateY(360deg)}}
+@keyframes gyroX{from{transform:rotateY(12deg) rotateX(0)}to{transform:rotateY(12deg) rotateX(360deg)}}
+@keyframes orbitSpinA{from{transform:rotateX(72deg) rotateZ(0)}to{transform:rotateX(72deg) rotateZ(360deg)}}
+@keyframes orbitSpinB{from{transform:rotateX(66deg) rotateY(14deg) rotateZ(360deg)}to{transform:rotateX(66deg) rotateY(14deg) rotateZ(0)}}
+@keyframes orbitSpinC{from{transform:rotateX(-68deg) rotateY(-16deg) rotateZ(0)}to{transform:rotateX(-68deg) rotateY(-16deg) rotateZ(360deg)}}
+.orbit .satellite-dot{left:50%;top:-4px;right:auto;bottom:auto;transform:translate(-50%,-50%)}
+.orbit .satellite-dot.sd2,.orbit .satellite-dot.sd4{top:auto;bottom:-4px;transform:translate(-50%,50%)}
+/* 语音心跳：Jarvis 说话时核心光球律动（双跳节律，类似心跳） */
+body.jarvis-speaking .jarvis-orb{animation:heartbeat 1.5s ease-in-out infinite}
+body.jarvis-speaking .jarvis-visual{animation:heartbeatGlow 1.5s ease-in-out infinite}
+body.jarvis-speaking .jarvis-core{animation:heartbeatCore 1.5s ease-in-out infinite}
+body.jarvis-speaking .core-halo{animation-duration:1.1s}
+body.jarvis-speaking .gyro.g1{animation-duration:3.5s}
+body.jarvis-speaking .gyro.g2{animation-duration:5.5s}
+body.jarvis-speaking .gyro.g3{animation-duration:2.8s}
+body.jarvis-speaking .plasma-layer{animation-duration:2.4s}
+@keyframes heartbeat{0%,100%{transform:scale(1);filter:drop-shadow(0 0 20px rgba(0,174,239,.5)) brightness(1)}12%{transform:scale(1.07);filter:drop-shadow(0 0 28px rgba(0,200,255,.7)) brightness(1.14)}24%{transform:scale(1.015);filter:drop-shadow(0 0 22px rgba(0,174,239,.55)) brightness(1.04)}38%{transform:scale(1.13);filter:drop-shadow(0 0 36px rgba(0,210,255,.85)) brightness(1.22)}60%{transform:scale(1);filter:drop-shadow(0 0 20px rgba(0,174,239,.5)) brightness(1)}}
+@keyframes heartbeatGlow{0%,100%{box-shadow:0 0 26px rgba(0,174,239,.35),inset 0 0 18px rgba(0,140,220,.25)}38%{box-shadow:0 0 72px rgba(0,200,255,.75),inset 0 0 34px rgba(0,180,255,.5)}}
+@keyframes heartbeatCore{0%,100%{transform:translate(-50%,-50%) translateZ(30px) scale(1)}12%{transform:translate(-50%,-50%) translateZ(30px) scale(1.025)}24%{transform:translate(-50%,-50%) translateZ(30px) scale(1.005)}38%{transform:translate(-50%,-50%) translateZ(30px) scale(1.045)}60%{transform:translate(-50%,-50%) translateZ(30px) scale(1)}}
+@media(max-width:1180px){.hud-node{width:250px}.node-left-1{left:22px}.node-right-1{right:22px}.node-left-2{left:35px}.node-right-2{right:35px}.node-left-3{left:70px}.node-right-3{right:70px}.orbital-system{transform:translate(-50%,-50%) scale(.82) rotateX(var(--rx)) rotateY(var(--ry))}.jarvis-dialogue{bottom:48px}.mission-layout{grid-template-columns:330px 1fr}.mission-core-copy{padding:0 20px}.execution-zone{grid-template-columns:1fr}}
 @media(max-width:900px){body{overflow:auto}.topbar{padding:0 20px}.view{min-height:900px;overflow:visible}.orbital-system{position:relative;left:auto;top:auto;transform:none;margin:15px auto 0}.hud-node{position:relative;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;width:calc(100% - 40px);margin:14px 20px}.link-lines{display:none}.jarvis-dialogue{position:relative;left:auto;bottom:auto;transform:none;width:calc(100% - 40px);margin:20px auto}.mission-room{padding:22px}.mission-layout{grid-template-columns:1fr;height:auto}.mission-core{min-height:470px}.room-head{align-items:flex-start}.room-percent{display:none}.chain{grid-template-columns:1fr}.chain:before{left:19px;right:auto;top:8%;bottom:8%;width:2px;height:auto;background:linear-gradient(var(--green),var(--cyan),rgba(112,234,255,.08))}.phase{display:grid;grid-template-columns:38px 1fr;text-align:left;gap:10px}.phase-name,.phase-time{margin-top:4px}.phase-current-desc{text-align:left}.mission-footer{flex-direction:column;gap:8px;align-items:flex-start}.jarvis-menu{position:fixed}}
 @media(max-width:1180px){.team-layout{grid-template-columns:205px minmax(430px,1fr) 275px}.team-room{padding-left:22px;padding-right:22px}.top-actions{gap:6px;margin-right:12px}.team-entry{display:none}.voice-toggle{padding:0 8px}.member-task{display:none}.member{grid-template-columns:34px 1fr}.decision-copy span{display:none}}
 @media(max-width:900px){.top-actions{margin-right:8px}.voice-toggle span{display:none}.voice-toggle{padding:0 8px}.team-layout{grid-template-columns:1fr;height:auto}.team-room{padding:18px}.team-head{align-items:flex-start}.team-presence{display:none}.team-panel{min-height:0}.office-floor{min-height:520px}.team-side{grid-template-rows:auto auto}.chat-panel{min-height:360px}.decision-bar{flex-direction:column;align-items:flex-start}.team-layout .team-panel:first-child{order:2}.team-layout .office-space{order:1}.team-layout .team-side{order:3}}
@@ -50,10 +76,9 @@
       <path d="M1200 754 C1095 670 1055 610 972 530"/><circle cx="1200" cy="754" r="3"/>
     </svg>
     <div class="orbital-system">
-      <div class="ticks"></div><div class="orbit o1"></div><div class="orbit o2"></div><div class="orbit o3"></div><div class="orbit o4"></div><div class="beam b1"></div><div class="beam b2"></div><div class="beam b3"></div><div class="beam b4"></div>
+      <div class="ticks"></div><div class="orbit o1"><i class="satellite-dot sd3"></i><i class="satellite-dot sd4"></i></div><div class="orbit o2"><i class="satellite-dot sd1"></i><i class="satellite-dot sd2"></i></div><div class="orbit o3"></div><div class="orbit o4"></div><div class="beam b1"></div><div class="beam b2"></div><div class="beam b3"></div><div class="beam b4"></div>
       <div class="progress-orbit"><svg viewBox="0 0 660 660"><circle class="base" cx="330" cy="330" r="318"/><circle class="active" cx="330" cy="330" r="318"/></svg></div>
-      <i class="satellite-dot sd1"></i><i class="satellite-dot sd2"></i><i class="satellite-dot sd3"></i><i class="satellite-dot sd4"></i>
-      <div class="jarvis-core"><div class="core-halo"></div><div class="core-halo h2"></div><div class="core-halo h3"></div><div class="jarvis-visual" aria-hidden="true"><img class="jarvis-orb" src="generated-images/JARVIS_AI_assistant_glowing_or_2026-11-05T01-56-27.png" alt=""><div class="plasma-layer pa"></div><div class="plasma-layer pb"></div><div class="plasma-layer pc"></div><div class="arc-field"><i></i><i></i><i></i><i></i></div><div class="core-depth"></div><canvas id="coreWave" width="320" height="320"></canvas></div><div class="core-state">JARVIS · 正在处理 <span class="voice-ticks"><i></i><i></i><i></i><i></i></span></div></div>
+      <div class="jarvis-core"><div class="gyro g1"></div><div class="gyro g2"></div><div class="gyro g3"></div><div class="core-halo"></div><div class="core-halo h2"></div><div class="core-halo h3"></div><div class="jarvis-visual" aria-hidden="true"><img class="jarvis-orb" src="generated-images/JARVIS_AI_assistant_glowing_or_2026-11-05T01-56-27.png" alt=""><div class="plasma-layer pa"></div><div class="plasma-layer pb"></div><div class="plasma-layer pc"></div><div class="arc-field"><i></i><i></i><i></i><i></i></div><div class="core-depth"></div><canvas id="coreWave" width="320" height="320"></canvas></div><div class="core-state">JARVIS · 正在处理 <span class="voice-ticks"><i></i><i></i><i></i><i></i></span></div></div>
     </div>
     <section class="hud-node mission-node node-left-1" role="button" tabindex="0" data-open-progress aria-label="查看任务完整进度">
       <div class="node-kicker"><span>ACTIVE MISSION · 当前任务</span><span>RUNNING</span></div><div class="node-title">全局服务巡检与优化</div><div class="node-copy">第 3 / 5 阶段 · 延迟分析与路由优化</div><div class="node-data"><b>72%</b><span>已完成 12 / 16 项</span></div><div class="thin-progress"><i style="width:72%"></i></div><span class="node-link">进入任务舱 →</span>
@@ -143,7 +168,7 @@ const speakerToggle=document.getElementById('speakerToggle'),voiceEngineLabel=do
 const preferredNames=['Microsoft Xiaoxiao Online (Natural)','Microsoft Xiaoyi Online (Natural)','Microsoft Xiaohan Online (Natural)','Microsoft Xiaomeng Online (Natural)','Microsoft Huihui','Microsoft Yaoyao'];
 function selectJarvisVoice(){if(!('speechSynthesis'in window))return null;const voices=speechSynthesis.getVoices();for(const name of preferredNames){const match=voices.find(v=>v.name.includes(name)&&/zh|Chinese|中文/i.test(`${v.lang} ${v.name}`));if(match){preferredVoice=match;break}}if(!preferredVoice)preferredVoice=voices.find(v=>/zh-CN/i.test(v.lang)&&/xiaoxiao|xiaoyi|xiaohan|xiaomeng|huihui|yaoyao|female|女/i.test(v.name))||voices.find(v=>/zh-CN/i.test(v.lang))||null;voiceEngineLabel.textContent=preferredVoice?`播报声音：${preferredVoice.name} · 语速 0.90 / 音调 0.86`:'将使用系统中文语音 · 成熟女声参数';return preferredVoice}
 function updateSpeakerUI(){speakerToggle.classList.toggle('active',voiceEnabled);speakerToggle.querySelector('span').textContent=voiceEnabled?'女声已开启':'启用女声';speakerToggle.setAttribute('aria-pressed',String(voiceEnabled))}
-function speak(text,force=false){if(!('speechSynthesis'in window)){voiceEngineLabel.textContent='当前浏览器不支持语音合成';return}if(!voiceEnabled&&!force)return;if(!preferredVoice)selectJarvisVoice();speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(text);utterance.lang='zh-CN';utterance.rate=.9;utterance.pitch=.86;utterance.volume=1;if(preferredVoice)utterance.voice=preferredVoice;utterance.onstart=()=>{voiceEngineLabel.textContent=`Jarvis 正在播报 · ${preferredVoice?preferredVoice.name:'系统中文语音'}`};utterance.onend=()=>{voiceEngineLabel.textContent=`播报声音：${preferredVoice?preferredVoice.name:'系统中文语音'} · 成熟女声参数`};speechSynthesis.speak(utterance)}
+function speak(text,force=false){if(!('speechSynthesis'in window)){voiceEngineLabel.textContent='当前浏览器不支持语音合成';return}if(!voiceEnabled&&!force)return;if(!preferredVoice)selectJarvisVoice();speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance(text);utterance.lang='zh-CN';utterance.rate=.9;utterance.pitch=.86;utterance.volume=1;if(preferredVoice)utterance.voice=preferredVoice;utterance.onstart=()=>{document.body.classList.add('jarvis-speaking');voiceEngineLabel.textContent=`Jarvis 正在播报 · ${preferredVoice?preferredVoice.name:'系统中文语音'}`};utterance.onend=utterance.onerror=()=>{document.body.classList.remove('jarvis-speaking');voiceEngineLabel.textContent=`播报声音：${preferredVoice?preferredVoice.name:'系统中文语音'} · 成熟女声参数`};speechSynthesis.speak(utterance)}
 speakerToggle.addEventListener('click',()=>{voiceEnabled=!voiceEnabled;updateSpeakerUI();if(voiceEnabled){selectJarvisVoice();speak(currentView==='main'?mainSpeech:currentView==='team'?teamSpeech:progressSpeech,true)}else{if('speechSynthesis'in window)speechSynthesis.cancel();voiceEngineLabel.textContent='Jarvis 语音播报已静音'}});
 if('speechSynthesis'in window){selectJarvisVoice();speechSynthesis.addEventListener?.('voiceschanged',selectJarvisVoice)}
 // 麦克风、实时声纹与中文语音指令。
@@ -157,15 +182,238 @@ function startRecognition(){const SR=window.SpeechRecognition||window.webkitSpee
 async function startMic(){if(!navigator.mediaDevices?.getUserMedia){setMicUI('error','当前浏览器不支持麦克风，请使用新版 Edge 或 Chrome。');return}setMicUI('waiting','请在浏览器提示中允许使用麦克风。');try{micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});audioContext=new(window.AudioContext||window.webkitAudioContext)();const source=audioContext.createMediaStreamSource(micStream);analyser=audioContext.createAnalyser();analyser.fftSize=256;analyser.smoothingTimeConstant=.82;source.connect(analyser);micData=new Uint8Array(analyser.fftSize);micActive=true;setMicUI('live','麦克风已连接。直接说出指令，我会用语音回应。');voiceTranscript.textContent='等待你的中文语音指令…';drawMicWave();startRecognition();if(!voiceEnabled){voiceEnabled=true;updateSpeakerUI();selectJarvisVoice()}speak('麦克风已连接。我在听，先生。',true)}catch(error){micActive=false;setMicUI('error',error?.name==='NotAllowedError'?'麦克风权限被拒绝。请在浏览器地址栏中重新允许。':'未检测到可用麦克风，请检查设备连接。');voiceTranscript.textContent='你可以继续使用文字点击操作';clearMicWave()}}
 function stopMic(announce=true){micActive=false;if(recognition){const r=recognition;recognition=null;try{r.stop()}catch{}}if(micStream){micStream.getTracks().forEach(track=>track.stop());micStream=null}if(audioContext){audioContext.close().catch(()=>{});audioContext=null}analyser=null;clearMicWave();setMicUI('offline','麦克风已断开，音频不会继续采集。');voiceTranscript.textContent='点击可重新连接麦克风';if(announce&&voiceEnabled)speak('麦克风已断开。',true)}
 function toggleMic(){if(micActive)stopMic();else startMic()}
-micToggle.addEventListener('click',toggleMic);voiceNode.addEventListener('click',toggleMic);voiceNode.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleMic()}});document.getElementById('micMenuToggle').addEventListener('click',()=>{document.querySelector('.jarvis-menu')?.removeAttribute('open');toggleMic()});clearMicWave();addEventListener('pagehide',()=>{stopMic(false);if('speechSynthesis'in window)speechSynthesis.cancel()});
+micToggle.addEventListener('click',toggleMic);voiceNode.addEventListener('click',toggleMic);voiceNode.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleMic()}});document.getElementById('micMenuToggle').addEventListener('click',()=>{document.querySelector('.jarvis-menu')?.removeAttribute('open');toggleMic()});clearMicWave();addEventListener('pagehide',()=>{stopMic(false);document.body.classList.remove('jarvis-speaking');if('speechSynthesis'in window)speechSynthesis.cancel()});
 // 员工协作：本地消息与审批反馈。
 const teamChatLog=document.getElementById('teamChatLog'),teamChatInput=document.getElementById('teamChatInput');
 function addTeamMessage(author,text){const item=document.createElement('div');item.className=`chat-message${author==='Jarvis'?' jarvis':''}`;const head=document.createElement('div');head.className='chat-author';const name=document.createElement('span');name.textContent=author;const time=document.createElement('time');time.textContent=new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});const body=document.createElement('p');body.textContent=text;head.append(name,time);item.append(head,body);teamChatLog.appendChild(item);teamChatLog.scrollTop=teamChatLog.scrollHeight}
 document.getElementById('teamChatForm').addEventListener('submit',e=>{e.preventDefault();const text=teamChatInput.value.trim();if(!text)return;addTeamMessage('你',text);teamChatInput.value='';if(voiceEnabled)speak('消息已发送到协作会话。',true)});
 document.querySelectorAll('[data-decision]').forEach(button=>button.addEventListener('click',()=>{const approved=button.dataset.decision==='approve';const result=approved?'已批准将新路由策略应用到全部通道。我会继续观察回归结果。':'已保留为测试策略，不会扩大到其他通道。';const bar=document.getElementById('decisionBar');bar.querySelector('.decision-copy b').textContent=approved?'决定已记录：应用到全部通道':'决定已记录：仅保留测试';bar.querySelector('.decision-copy span').textContent=result;bar.querySelector('.decision-actions').textContent=approved?'已批准':'已保留测试';addTeamMessage('Jarvis',result);if(voiceEnabled)speak(result,true)}));
-const root=document.documentElement;addEventListener('pointermove',e=>{if(matchMedia('(pointer:fine)').matches){root.style.setProperty('--mx',`${(e.clientX/innerWidth-.5)*18}px`);root.style.setProperty('--my',`${(e.clientY/innerHeight-.5)*12}px`)}},{passive:true});
+const root=document.documentElement;addEventListener('pointermove',e=>{if(matchMedia('(pointer:fine)').matches){root.style.setProperty('--mx',`${(e.clientX/innerWidth-.5)*18}px`);root.style.setProperty('--my',`${(e.clientY/innerHeight-.5)*12}px`);root.style.setProperty('--ry',`${(e.clientX/innerWidth-.5)*14}deg`);root.style.setProperty('--rx',`${(.5-e.clientY/innerHeight)*10}deg`)}},{passive:true});
 const canvas=document.getElementById('particles'),ctx=canvas.getContext('2d');let dots=[],raf=0;function resize(){const dpr=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*dpr;canvas.height=innerHeight*dpr;canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';ctx.setTransform(dpr,0,0,dpr,0,0);const count=Math.min(110,Math.floor(innerWidth/14));dots=Array.from({length:count},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-.5)*.1,vy:(Math.random()-.5)*.1,r:Math.random()*1.1+.2,a:Math.random()*.45+.06}))}function draw(){ctx.clearRect(0,0,innerWidth,innerHeight);for(const p of dots){p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=innerWidth;if(p.x>innerWidth)p.x=0;if(p.y<0)p.y=innerHeight;if(p.y>innerHeight)p.y=0;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=`rgba(112,234,255,${p.a})`;ctx.fill()}raf=requestAnimationFrame(draw)}resize();addEventListener('resize',resize);if(!matchMedia('(prefers-reduced-motion: reduce)').matches)draw();else{draw();cancelAnimationFrame(raf)}
 if(location.hash==='#progress')showProgress(false,false);else if(location.hash==='#team')showTeam(false);
+</script>
+<script>
+/* ══ JARVIS 数据接线层（契约 = luke-jarvis 插件 /api/jarvis/*，jarvis.snapshot/1）══
+   左右任务条款全部来自 jarvis 拆分的任务点（.agent-teams/<team>/team.json → snapshot.tasks.byAssignee）。
+   快照 5s 轮询、事件 3s 增量；连不上后端（file:// 直开或未启动 server.mjs）时保留内置演示内容，零回归。
+   本地联调：node server.mjs [--workspace <真实项目路径>]，然后访问 http://127.0.0.1:3080/ */
+(function(){
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+const clip=(s,n)=>{const t=String(s??'').trim();return t.length>n?t.slice(0,n)+'…':t};
+const setText=(sel,text,root=document)=>{const el=$(sel,root);if(el)el.textContent=text};
+const STATUS_LABEL={in_progress:'进行中',claimed:'已认领',pending:'待开工',completed:'已完成',failed:'失败',cancelled:'已取消',dropped:'已放弃'};
+const LIVE={snap:null,events:[],lastSeq:0,connected:false,demo:true};
+
+function eventLine(e){
+  const d=e.data||{};
+  if(e.type==='gate')return `通过「${d.step}」流程闸`;
+  if(e.type==='board')return `黑板更新 · 未决 ${d.open??'?'} 项`;
+  if(e.type==='meeting')return `会议${d.type||''} · ${clip(d.topic||'',30)}`;
+  if(e.type==='dispatch')return `派活给 ${d.assignee||'成员'}：${clip(d.subject,26)}`;
+  if(e.type==='command')return `能力台执行 ${d.tool||''} · ${d.ok?'成功':'失败'}`;
+  return e.type||'事件';
+}
+function eventTime(e){try{return new Date(e.at).toLocaleTimeString('zh-CN',{hour12:false})}catch{return ''}}
+
+/* 主界面：左右 HUD 节点 = jarvis 拆分的真实任务点 */
+function renderMain(snap){
+  const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
+  const stage=snap.stage||{index:0,total:6,label:'未开始',done:[],missing:[],next:''};
+  const board=snap.board||{open:[],blockers:[],needsUser:[]};
+  const doing=tasks.filter(t=>!['completed','cancelled','dropped'].includes(t.status));
+  const done=tasks.filter(t=>t.status==='completed');
+  const pct=tasks.length?Math.round(done.length/tasks.length*100):0;
+
+  // 左 1 · 当前任务：进行中的第一个任务点
+  const n1=$('.mission-node');
+  if(n1){
+    const cur=doing.find(t=>t.status==='in_progress')||doing[0];
+    setText('.node-kicker span:last-child',doing.length?'RUNNING':'IDLE',n1);
+    setText('.node-title',cur?cur.subject:'暂无进行中任务',n1);
+    setText('.node-copy',cur?`${cur.assignee||'未分配'} · ${STATUS_LABEL[cur.status]||cur.status} · 阶段 ${stage.index}/${stage.total} ${stage.label}`:'等待 jarvis 拆分新任务',n1);
+    setText('.node-data b',pct+'%',n1);
+    setText('.node-data span',`已完成 ${done.length} / ${tasks.length} 项`,n1);
+    const bar=$('.thin-progress i',n1);if(bar)bar.style.width=pct+'%';
+  }
+  // 左 3 · 任务队列：排队中的任务点（认领/待开工）
+  const n3=$('.node-left-3');
+  if(n3){
+    const queued=doing.filter(t=>t.status!=='in_progress');
+    const nxt=queued[0];
+    setText('.node-kicker span:first-child','TASK QUEUE · 任务队列',n3);
+    setText('.node-kicker span:last-child',queued.length?queued.length+' PENDING':'CLEAR',n3);
+    setText('.node-title',nxt?nxt.subject:'队列已清空',n3);
+    setText('.node-copy',nxt?`${nxt.assignee||'未分配'} · ${STATUS_LABEL[nxt.status]||nxt.status}${nxt.dependencies&&nxt.dependencies.length?` · 依赖 ${nxt.dependencies.join('/')}`:''}`:'所有拆分任务都已启动或完成。',n3);
+  }
+  // 右 1 · 完成汇报：最近完成的任务点
+  const r1=$('.report-node');
+  if(r1){
+    const last=done[done.length-1];
+    setText('.node-kicker span:last-child',last?'DONE':'—',r1);
+    setText('.node-title',last?last.subject:'尚无完成任务',r1);
+    setText('.node-copy',last?`${last.assignee||'成员'} 已交付${last.attempt>1?` · 第 ${last.attempt} 次尝试通过`:''} · 等待验收`:'任务完成后会在这里汇报。',r1);
+    const stats=$$('.report-stats > div',r1);
+    if(stats.length>=3){
+      setText('b',`${done.length}/${tasks.length}`,stats[0]);setText('span','任务完成',stats[0]);
+      setText('b',String(board.blockers.length),stats[1]);setText('span','阻塞',stats[1]);
+      setText('b',String(doing.length),stats[2]);setText('span','进行中',stats[2]);
+    }
+  }
+  // 右 2 · 团队通道：按负责人聚合的任务分布
+  const r2=$('.node-right-2');
+  if(r2){
+    const byPerson={};
+    for(const t of tasks)(byPerson[t.assignee||'未分配']=byPerson[t.assignee||'未分配']||[]).push(t);
+    const names=Object.keys(byPerson);
+    setText('.node-kicker span:first-child','TEAM CHANNEL · 团队通道',r2);
+    setText('.node-kicker span:last-child',names.length?names.length+' 人在线':'—',r2);
+    setText('.node-title',names.length?'团队任务分布':'尚未建队',r2);
+    setText('.node-copy',names.length?`按负责人聚合 · 共 ${tasks.length} 项拆分任务`:'建队后按负责人显示任务分布',r2);
+    const dots=$('.channel-dots',r2);
+    if(dots)dots.innerHTML=names.slice(0,6).map(n=>{
+      const arr=byPerson[n];
+      const busy=arr.some(t=>t.status==='in_progress'),bad=arr.some(t=>t.status==='failed');
+      return `<span class="${bad?'warn':''}"><i${busy?' style="background:var(--green);box-shadow:0 0 8px var(--green)"':''}></i>${esc(clip(n,8))} ${arr.filter(t=>t.status==='completed').length}/${arr.length}</span>`;
+    }).join('');
+  }
+  // 右 3 · 下一事件：会议/待答复/阶段下一步
+  const r3=$('.node-right-3');
+  if(r3){
+    const meeting=(snap.meetings&&snap.meetings.required||[])[0];
+    const needUser=(board.needsUser||[])[0];
+    const lastMeeting=snap.meetings&&snap.meetings.last;
+    setText('.node-kicker span:last-child',meeting?'MEETING':needUser?'REPLY':'NEXT',r3);
+    setText('.node-title',meeting?`必开会议：${meeting.type||''}`:needUser?'黑板有待你答复':clip(stage.next||'无待办',18),r3);
+    setText('.node-copy',meeting?clip(meeting.why||meeting.topic||'',60):needUser?clip(needUser.content,60):(lastMeeting?`最近会议：${clip(lastMeeting.topic||lastMeeting.type||'',44)}`:clip(stage.next||'等待下一步指令',60)),r3);
+  }
+  // 中央对话与核心状态
+  setText('.dialogue-main',stage.index?`${stage.label}阶段进行中：已过 ${(stage.done||[]).length}/${stage.total} 个阶段，当前 ${doing.length} 项任务在执行。`:'先生，接入一个需求，我就按六阶段流程开工。');
+  const sub=$('.dialogue-sub');
+  if(sub)sub.firstChild.textContent=stage.missing&&stage.missing.length?`当前缺口：${stage.missing.join('；')} `:`${stage.next||'等待下一步指令'} `;
+  const meta=$$('.dialogue-meta span');
+  if(meta.length>=3){
+    meta[0].textContent=`已完成 ${done.length} 项任务`;
+    meta[1].textContent=`未决 ${board.open.length} 项 · 阻塞 ${board.blockers.length} 项`;
+    meta[2].textContent=LIVE.events.length?`最新：${eventLine(LIVE.events[LIVE.events.length-1])}`:'事件流待接入';
+  }
+  const cs=$('.core-state');
+  if(cs)cs.firstChild.textContent=`JARVIS · ${stage.index?stage.label:'待接入'} · 未完成任务 ${doing.length} `;
+  // 顶栏连接状态（诚实标注 demo / 真实工作区）
+  const ok=$('.clockbox .ok');
+  if(ok)ok.innerHTML=`<i class="pulse-dot"></i>${LIVE.demo?'已连接 · 演示工作区':'已连接 · '+esc(clip(snap.workspace&&snap.workspace.name||'工作区',16))}`;
+}
+
+/* 进度页：六阶段能量链 + 真实事件控制台 + 任务完成率 */
+function renderProgress(snap){
+  const stage=snap.stage||{index:0,total:6,label:'未开始',done:[],missing:[],next:''};
+  const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
+  const done=tasks.filter(t=>t.status==='completed');
+  const pct=tasks.length?Math.round(done.length/tasks.length*100):0;
+  setText('.mission-title h1',(snap.company&&snap.company.company&&snap.company.company.mission)||snap.workspace&&snap.workspace.name||'JARVIS 任务舱');
+  setText('.mission-title p',`MISSION · ${(snap.tasks&&snap.tasks.teams||[]).map(t=>t.name).join(' / ')||'未建队'} · 阶段 ${stage.index}/${stage.total} ${stage.label}`);
+  setText('.room-percent b',pct+'%');
+  setText('.room-percent span',`执行中 · 已完成 ${done.length}/${tasks.length} 项拆分任务`);
+  setText('.mission-core-copy h2',`Jarvis 正在「${stage.label}」阶段盯控`);
+  setText('.mission-core-copy p',stage.missing&&stage.missing.length?`当前缺口：${stage.missing.join('；')}。${stage.next||''}`:(stage.next||'本阶段产物齐备，可继续下一步。'));
+  setText('.chain-title span:last-child',`${(stage.done||[]).length} / ${stage.total} STEPS`);
+  const chain=$('.chain');
+  if(chain){
+    const stages=(snap.plugin&&snap.plugin.stages)||[];
+    chain.innerHTML=stages.map((s,i)=>{
+      const isDone=(stage.done||[]).includes(s.id),isCur=stage.stage===s.id;
+      return `<div class="phase ${isDone?'done':isCur?'current':''}"><div class="phase-dot">${String(i+1).padStart(2,'0')}</div><div><div class="phase-name">${esc(s.label)}</div><div class="phase-time">${isDone?'已通过':isCur?'进行中':'待开始'}</div></div></div>`;
+    }).join('')+`<div class="phase-current-desc">${esc(stage.missing&&stage.missing.length?'当前缺口：'+stage.missing.join('；'):stage.next||'')}</div>`;
+  }
+  const consoleEl=$('.console');
+  if(consoleEl){
+    const rows=LIVE.events.slice(-6).reverse();
+    consoleEl.innerHTML=rows.length?rows.map(e=>`<div><span class="time">${eventTime(e)}</span>${esc(eventLine(e))}</div>`).join(''):'<div><span class="time">--:--</span>暂无事件（闸/黑板/会议/派活会写入事件流）</div>';
+  }
+  const metrics=$('.report-metrics');
+  if(metrics){
+    const board=snap.board||{open:[],blockers:[]};
+    const last=done[done.length-1];
+    metrics.innerHTML=[['任务完成',`${done.length} / ${tasks.length}`],['未决项',board.open.length],['阻塞',board.blockers.length],['最近交付',last?clip(last.subject,10):'—']].map(([k,v])=>`<div class="report-metric"><span>${k}</span><b>${esc(v)}</b></div>`).join('');
+  }
+  setText('.report-say',last_report_text(snap));
+}
+function last_report_text(snap){
+  const last=LIVE.events[LIVE.events.length-1];
+  const stage=snap.stage;
+  if(last)return `${eventTime(last)} ${eventLine(last)}。${stage?stage.next||'':''}`;
+  return '事件流接入后，Jarvis 的每次派活、过闸、会议都会在这里如实汇报。';
+}
+
+/* 团队页：成员 = company-state 员工，白板 = 拆分任务点 */
+function renderTeam(snap){
+  const company=snap.company;
+  const employees=(company&&company.employees)||[];
+  const list=$('.member-list');
+  if(list&&employees.length){
+    list.innerHTML=employees.map(e=>{
+      const cls=e.status==='working'?'':e.status==='meeting'?'busy':'away';
+      const stateLabel={working:'在线',idle:'空闲',meeting:'开会中',reporting:'汇报中',terminated:'已离任',on_probation:'考察期'}[e.status]||e.status||'未知';
+      return `<div class="member"><div class="avatar ${cls}">${esc(String(e.role||'?').slice(0,1))}</div><div><div class="member-name">${esc(e.role)}</div><div class="member-role">${esc(clip(e.persona||'数字员工',14))}${e.perfScore!==undefined?` · 绩效${e.perfScore}`:''}</div></div><div class="member-task">${esc(clip(e.currentWork||'—',10))}<br>${esc(stateLabel)}</div></div>`;
+    }).join('');
+    setText('.team-panel-head span',`MEMBERS · ${String(employees.length).padStart(2,'0')}`,$('.team-panel')||document);
+  }
+  const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
+  const board=$('.board-list');
+  if(board&&tasks.length){
+    board.innerHTML=tasks.map(t=>{
+      const isDone=t.status==='completed';
+      const p=isDone?100:t.status==='in_progress'?50:t.status==='claimed'?20:0;
+      return `<div class="board-item ${isDone?'done':''}"><div class="board-top"><span>${esc(clip(t.subject,16))}</span><span>${p}%</span></div><div class="board-meta">${esc(t.assignee||'未分配')} · ${esc(STATUS_LABEL[t.status]||t.status)}${t.attempt?` · 第${t.attempt}次`:''}</div><div class="board-bar"><i style="width:${p}%"></i></div></div>`;
+    }).join('');
+  }
+  const presence=$('.team-presence');
+  if(presence){
+    const online=employees.filter(e=>e.status==='working'||e.status==='meeting'||e.status==='reporting').length;
+    const doing=tasks.filter(t=>!['completed','cancelled','dropped'].includes(t.status)).length;
+    presence.innerHTML=`<i class="pulse-dot"></i>${online} 人在线 · 当前协同任务 ${doing} 项`;
+  }
+  const done=tasks.filter(t=>t.status==='completed');
+  const pct=tasks.length?Math.round(done.length/tasks.length*100):0;
+  setText('.whiteboard b',pct+'%');
+  setText('.whiteboard small',(snap.company&&snap.company.company&&snap.company.company.mission)||'共享任务白板');
+  const note=$('.team-note');
+  if(note)note.textContent=LIVE.demo?'成员与任务来自演示工作区（demo-workspace）的真实状态文件。启动时加 --workspace <项目路径> 即可切换为你的真实 Jarvis 项目。':'成员状态与任务来自当前 Jarvis 工作区的真实状态文件（company-state.json / team.json）。';
+}
+
+function renderAll(){
+  if(!LIVE.snap)return;
+  try{renderMain(LIVE.snap)}catch(e){console.warn('renderMain',e)}
+  try{renderProgress(LIVE.snap)}catch(e){console.warn('renderProgress',e)}
+  try{renderTeam(LIVE.snap)}catch(e){console.warn('renderTeam',e)}
+}
+async function loadState(){
+  try{
+    const r=await fetch('/api/jarvis/state'+location.search,{cache:'no-store'});
+    const body=await r.json();
+    if(!body.ok||!body.snapshot)return;
+    LIVE.snap=body.snapshot;LIVE.connected=true;LIVE.demo=body.demo!==false;
+    renderAll();
+  }catch{LIVE.connected=false}
+}
+async function loadEvents(){
+  try{
+    const r=await fetch(`/api/jarvis/events${location.search?location.search+'&':'?'}since=${LIVE.lastSeq}&limit=50`,{cache:'no-store'});
+    const body=await r.json();
+    if(!body.ok||!Array.isArray(body.events))return;
+    if(body.events.length){
+      LIVE.events.push(...body.events);
+      if(LIVE.events.length>200)LIVE.events=LIVE.events.slice(-200);
+      LIVE.lastSeq=body.lastSeq||LIVE.lastSeq;
+      if(LIVE.snap){renderMain(LIVE.snap);renderProgress(LIVE.snap)}
+    }
+  }catch{/* 事件失败不影响快照 */}
+}
+window.__JARVIS_UI__={live:LIVE,reload:loadState};
+loadState();loadEvents();
+setInterval(loadState,5000);
+setInterval(loadEvents,3000);
+})();
 </script>
 </body>
 </html>

@@ -33,7 +33,7 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}.scanline{display:none}}
 
 
-/* ── v2 增强：3D 协作空间 / 语音设置 / 动态节点 ── */
+/* ── v2 增强：协作空间（PixOffice 2D 像素场景）/ 语音设置 / 动态节点 ── */
 .office-floor{position:relative;min-height:420px;background:#02070d;overflow:hidden}
 /* 开源 PixOffice 场景：只做主题适配（色温/描边/光晕），不改它的画面结构与像素素材 */
 .team-scene{position:absolute;inset:0;width:100%;height:100%;border:0;display:block;background:#02070d}
@@ -189,7 +189,7 @@
       <button id="speakerToggle" class="menu-item" aria-label="启用或关闭 Jarvis 语音"><svg viewBox="0 0 24 24" fill="none"><path d="M5 10v4h4l5 4V6L9 10H5z" stroke="currentColor"/><path d="M17 9c1.5 1.5 1.5 4.5 0 6" stroke="currentColor"/></svg><span>启用语音</span></button>
       <button id="micToggle" class="menu-item" aria-label="连接或断开麦克风"><svg viewBox="0 0 24 24" fill="none"><rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor"/><path d="M5 11a7 7 0 0014 0M12 18v3" stroke="currentColor"/></svg><span>连接麦克风</span></button>
       <button class="menu-item" id="voiceSettingsBtn"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h13" stroke="currentColor"/><circle cx="18" cy="12" r="2" stroke="currentColor"/><circle cx="15" cy="18" r="2" stroke="currentColor"/></svg>语音设置 · 模型与音色</button>
-      <button class="menu-item" data-open-team><svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor"/><circle cx="17" cy="9" r="2" stroke="currentColor"/><path d="M3 20c.8-4 3-6 6-6s5.2 2 6 6M15 14c3 0 5 2 6 5" stroke="currentColor"/></svg>员工协作空间 · 3D</button>
+      <button class="menu-item" data-open-team><svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor"/><circle cx="17" cy="9" r="2" stroke="currentColor"/><path d="M3 20c.8-4 3-6 6-6s5.2 2 6 6M15 14c3 0 5 2 6 5" stroke="currentColor"/></svg>员工协作空间 · PixOffice</button>
       <button class="menu-item" data-open-progress><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor"/><path d="M12 7v5l3 2" stroke="currentColor"/></svg>任务执行进度</button>
       <a class="menu-item" href="/" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor"/><path d="M7 9l3 3-3 3M12 15h5" stroke="currentColor"/></svg>专家模式 · 原生 WebUI<span class="pro">DSH</span></a>
       <button class="menu-item" data-open-console><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor"/><path d="M7 9h4M7 13h7M7 17h5M16 9h1M17 13h1" stroke="currentColor"/></svg>能力台 · 31 个工具</button>
@@ -225,7 +225,7 @@
 
 <main id="teamView" class="view">
   <div class="team-room">
-    <div class="team-head"><div><button class="back" data-back>← 返回 JARVIS 总览</button><h1>员工协作空间</h1><p>3D WORKSPACE · 由插件实时数据驱动</p></div><div class="team-presence"><i class="pulse-dot"></i><span id="tPresence">—</span></div></div>
+    <div class="team-head"><div><button class="back" data-back>← 返回 JARVIS 总览</button><h1>员工协作空间</h1><p>PIXOFFICE WORKSPACE · 由插件实时数据驱动</p></div><div class="team-presence"><i class="pulse-dot"></i><span id="tPresence">—</span></div></div>
     <div class="team-layout">
       <aside class="team-panel"><div class="team-panel-head"><h2>团队成员</h2><span id="tMemberCount">MEMBERS · 00</span></div><div class="member-list" id="tMembers"><div class="empty-hint">还没有团队数据：建队后这里会出现真实成员与任务。</div></div><div class="team-note">成员/任务来自 `.agent-teams/*/team.json` 与快照接口，不是演示文案。</div></aside>
       <div class="team-panel office-space">

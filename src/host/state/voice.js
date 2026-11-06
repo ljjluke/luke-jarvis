@@ -51,6 +51,12 @@ export function readVoiceConfig() {
   }
 }
 
+/** 读原始 voice.json（不注入内置默认值）：用于区分「用户显式保存」与「默认填充」。 */
+export function readVoiceConfigRaw() {
+  const fs = _require('node:fs')
+  try { return JSON.parse(fs.readFileSync(voiceConfigPath(), 'utf8')) } catch { return {} }
+}
+
 /** 写入（apiKey 空 = 保留原值）；返回落盘后的配置。 */
 export function saveVoiceConfig(patch = {}) {
   const fs = _require('node:fs')

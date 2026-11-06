@@ -9,7 +9,7 @@
  *   ④ 每次调用落一条 `command` 事件，界面/时间轴/审计都能看到"谁在什么时候点了什么"。
  */
 import { TOOLS } from '../tools/index.js'
-import { appendEvent } from './events.js'
+import { createJarvisEngine } from '../engine.js'
 
 /** 工具分组（纯展示用，方便界面归类；未知工具落到 other）。 */
 export const TOOL_GROUPS = {
@@ -39,17 +39,6 @@ export function toolSpecs() {
 }
 
 const INVOKABLE = /^jarvis_[a-z_]+$/
-const MAX_TEXT = 20000
-
-/** 从工具执行结果里抽文本（ToolExecutionResult.content 是 ContentBlock[]）。 */
-function textOf(res) {
-  const blocks = (res && res.content) || []
-  const parts = []
-  for (const b of blocks) {
-    if (b && typeof b.text === 'string') parts.push(b.text)
-  }
-  return parts.join('\n').slice(0, MAX_TEXT)
-}
 
 /** 轻量参数校验/规整：只挡"明显不可能执行"的调用，深校验交给工具自己（并如实回传错误）。 */
 export function normalizeArgs(spec, rawArgs) {
@@ -136,41 +125,14 @@ export async function runCommand({ ctx, projectDir, tool, args, agent, signal })
   if (!agent) return { ok: false, tool: spec.name, error: '没有绑定活动会话：先在 DSH 里开一个会话（或带 ?agent=<会话id>）' }
   const startedAt = Date.now()
   const callId = `jarvis-ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-  try {
-    const res = await toolsSvc.execute({ callId, name: spec.name, arguments: norm, agent, signal: signal || AbortSignal.timeout(120000) })
-    const elapsedMs = Date.now() - startedAt
-    const isError = Boolean(res && res.isError)
-    const text = textOf(res)
-    const value = res && res.value
-    const out = {
-      ok: !isError,
-      tool: spec.name,
-      elapsedMs,
-      result: text,
-      value: safeValue(value),
-      args: norm,
-    }
-    if (isError) {
-      out.error = text || '工具执行失败'
-      out.denied = /【jarvis|闸|BLOCKED|不得|必须|拒绝/.test(text)
-    }
-    try { appendEvent(projectDir, 'command', { tool: spec.name, ok: out.ok, ms: elapsedMs }) } catch { /* 非致命 */ }
-    return out
-  } catch (e) {
-    const elapsedMs = Date.now() - startedAt
-    try { appendEvent(projectDir, 'command', { tool: spec.name, ok: false, ms: elapsedMs }) } catch { /* 非致命 */ }
-    return { ok: false, tool: spec.name, elapsedMs, error: String((e && e.message) || e) }
-  }
-}
-
-/** 只回传界面能安全渲染的结构（截断大对象，避免把整份快照重复塞进响应）。 */
-function safeValue(value) {
-  try {
-    const json = JSON.stringify(value)
-    if (!json) return null
-    if (json.length > 60000) return { truncated: true, note: `结果过大（${json.length} 字节），已省略，请看 result 文本` }
-    return JSON.parse(json)
-  } catch {
-    return null
-  }
+  // 架构变更（对齐 dsh-superagent）：执行与 command 事件审计统一走 core Engine
+  // （Engine 是 command 事件的唯一写者；本函数只保留 glue 职责：校验/规整/找会话）。
+  const engine = createJarvisEngine({ projectDir })
+  return engine.runCommand({
+    projectDir,
+    tool: spec.name,
+    args: norm,
+    startedAt,
+    execute: () => toolsSvc.execute({ callId, name: spec.name, arguments: norm, agent, signal: signal || AbortSignal.timeout(120000) }),
+  })
 }

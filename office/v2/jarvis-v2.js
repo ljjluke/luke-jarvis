@@ -307,7 +307,7 @@ function showProgress(announce = true) {
 }
 function showTeam(announce = true) {
   activate('team', '#team')
-  if (announce && STATE.voiceEnabled) speak('员工协作空间已打开，你可以拖拽旋转查看 3D 工位。')
+  if (announce && STATE.voiceEnabled) speak('员工协作空间已打开，像素工位会随团队状态实时联动。')
 }
 function buildMainSpeech() {
   const s = STATE.snapshot?.stage

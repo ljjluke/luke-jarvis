@@ -12,6 +12,7 @@
     "./presets/*": "./presets/*",
     "./skills/*": "./skills/*",
     "./office/*": "./office/*",
+    "./webui/*": "./webui/*",
     "./package.json": "./package.json",
     "./core": "./src/host/core/index.js",
     "./adapters/*": "./src/host/adapters/*",
@@ -38,6 +39,7 @@
     "scripts",
     "cordis.patch.yml",
     "office",
+    "webui",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -69,15 +71,8 @@
     "url": "https://github.com/ljjluke/luke-jarvis.git"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.5",
     "@nanmicoder/dsh-agent-teams": "^0.1.28"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/dsh-tools": ">=0.2.1-rc.1"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-tools": {
-      "optional": true
-    }
   },
   "bin": {
     "luke-jarvis": "./bin/luke-jarvis.mjs"

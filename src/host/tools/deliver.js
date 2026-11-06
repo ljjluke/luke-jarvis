@@ -320,7 +320,7 @@ export const DELIVER_TOOLS = [
         if (kind === 'docs' || kind === 'text') {
           // 文档类（任何领域的规范/SOP/需求/设计文档）：章节标题 + 文本条目
           for (const f of files) {
-            const rel = path.relative(projectDir, f)
+            const rel = path.relative(projectDir, f).split(path.sep).join('/')
             if (!/\.(md|markdown|txt|rst|adoc)$/i.test(f)) continue
             let txt = ''
             try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
@@ -339,7 +339,7 @@ export const DELIVER_TOOLS = [
           const OPENAPI_PATH = /^\s{0,8}['"]?(\/[A-Za-z0-9_\-./{}:]*?)['"]?\s*:\s*$/gm
           const CODE_ROUTE = /(?:\b(?:app|router|r|route|server|api|group|mux)\s*\.\s*(?:get|post|put|delete|patch|head|options|all|add|handle|HandleFunc)\s*\(\s*['"`]([^'"`]+)|@(?:Get|Post|Put|Delete|Patch|Request)Mapping\s*\(\s*(?:value\s*=\s*)?['"]([^'"]+)['"]|(?:path|url|endpoint)\s*[:=]\s*['"`](\/[^'"`]*))/gi
           for (const f of files) {
-            const rel = path.relative(projectDir, f)
+            const rel = path.relative(projectDir, f).split(path.sep).join('/')
             if (!/\.(js|jsx|ts|tsx|vue|py|go|java|kt|rb|php|cs|ya?ml|json)$/i.test(f)) continue
             let txt = ''
             try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
@@ -356,7 +356,7 @@ export const DELIVER_TOOLS = [
         } else if (kind === 'db') {
           // 数据库类：表/视图清单
           for (const f of files) {
-            const rel = path.relative(projectDir, f)
+            const rel = path.relative(projectDir, f).split(path.sep).join('/')
             if (!/\.(sql|ddl)$/i.test(f)) continue
             let txt = ''
             try { txt = fs.readFileSync(f, 'utf8') } catch { continue }
@@ -370,7 +370,7 @@ export const DELIVER_TOOLS = [
           const PAGE_HINT = /(^|[\\/])(pages|views|screens)[\\/]/i
           const EXT = /\.(js|jsx|ts|tsx|vue|html)$/
           for (const f of files) {
-            const rel = path.relative(projectDir, f)
+            const rel = path.relative(projectDir, f).split(path.sep).join('/')
             if (kind === 'web-ui' && !EXT.test(f)) continue
             const isRouteFile = ROUTE_HINT.test(rel)
             const isPage = PAGE_HINT.test(f)

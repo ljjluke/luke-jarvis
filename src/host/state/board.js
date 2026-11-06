@@ -5,6 +5,7 @@
  *  workspace 取当前会话 header.cwd（由 runtime 解析），process.cwd 仅兜底。
  */
 import { resolveWorkspace, getRuntimeContext, getLatestExec } from '../runtime.js'
+import { createJarvisEngine, registerRawIo } from '../engine.js'
 
 /** 公屏（统一黑板）持久化路径：<workspace>/.jarvis/board.json（项目级，与 RPC/HTTP 读取同一约定）
  * 工作区优先取当前会话 header.cwd（用户工作区），process.cwd 仅兜底——修复"写到服务目录非项目目录" */
@@ -34,9 +35,10 @@ export async function readBoardItems(fsSvc) {
   }
 }
 
-/** 原子写公屏：dsh-fs writeText + replaceIfVersion 乐观并发守卫。
- *  写失败（含 FS_STALE_VERSION 并发冲突）不吞：返回 { ok, error } 由调用方如实上报。 */
-export async function writeBoardItems(fsSvc, items, version) {
+/** 原子写公屏（原始 IO）：dsh-fs writeText + replaceIfVersion 乐观并发守卫。
+ *  写失败（含 FS_STALE_VERSION 并发冲突）不吞：返回 { ok, error } 由调用方如实上报。
+ *  （Engine 收编后由 engine.js 经 registerRawIo 调用；直接调用仅作 Engine 不可用时的回退。） */
+export async function rawWriteBoardItems(fsSvc, items, version) {
   if (!fsSvc || typeof fsSvc.writeText !== 'function') return { ok: false, error: 'fs.writeText 不可用' }
   try {
     const target = await fsSvc.resolve(boardFilePath())
@@ -51,6 +53,27 @@ export async function writeBoardItems(fsSvc, items, version) {
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) }
   }
+}
+
+// 把原始写注册进 Engine（Engine = 公屏唯一写者）
+registerRawIo('board', (fsSvc, _pd, items, version) => rawWriteBoardItems(fsSvc, items, version))
+
+/** 写公屏（Engine 门面）：守卫 → Engine.commitBoard（唯一写者 + 提交后 board 事件）。
+ *  Engine 不可用/守卫拒绝时回退原始写（保持既有调用方契约：{ ok, error? }）。 */
+export async function writeBoardItems(fsSvc, items, version) {
+  const pd = boardProjectDir()
+  try {
+    const eng = createJarvisEngine({ projectDir: pd, fsSvc })
+    return await eng.commitBoard({ projectDir: pd, items, version })
+  } catch {
+    return rawWriteBoardItems(fsSvc, items, version)
+  }
+}
+
+/** 从 boardFilePath 反推项目根（供 Engine 的守卫与事件使用）。 */
+function boardProjectDir() {
+  const p = boardFilePath()
+  return typeof p === 'string' && p.endsWith('/.jarvis/board.json') ? p.slice(0, -'/.jarvis/board.json'.length) : ''
 }
 
 /** 公屏条目 ID：基于磁盘最新 items 取 max 单调递增（修复并发撞 ID —— 纯函数无解，必须读持久化真源） */

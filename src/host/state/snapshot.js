@@ -54,7 +54,7 @@ function listTeams(projectDir, fs, path) {
   const teams = []
   let names = []
   try {
-    names = fs.readdirSync(td).filter((n) => !/^(archived|_archive|\.)|-archive$/i.test(n))
+    names = fs.readdirSync(td).filter((n) => !/^(archived?|_archive|\.)|-archive$/i.test(n))
   } catch {
     return { teams, open: 0, completed: 0 }
   }
