@@ -1,4 +1,4 @@
-# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.10.3`
+# luke-jarvis · 你的一句话，一家公司在替你干活  `v0.14.0`
 
 > **别再一句一句地"问 AI"了——把需求丢给一家替你干活的数字公司。**
 > 你说一句（哪怕模糊的）需求 → 它自动组建一支由**真实大佬思维驱动**的多角色 AI 团队，像真实公司一样澄清、拆解、分工、验证、返工——最后交给你**能逐条验收的成果**。
@@ -114,8 +114,10 @@
 | 记忆沉淀 | 角色/流程/经验存项目 `.jarvis/`，下次需求直接复用 |
 | 任务单内核 | `jarvis_ticket`：需求裁决→开单→派单→汇报→重试/停止 的持久化状态机（`.jarvis/tickets/`），语义移植自 `dsh-superagent-prototype` 的 Ticket/Assignment 领域模型；插件仓库拒写 |
 
-### 给未来的 3D 办公室
-- **底座已就绪**：公司状态结构化（employees/meetings/recruiting/tasks 表）+ 任务编排图 + 数据契约 `docs/3D-办公室-数据契约.md`（数据源/点击面板/8 个坑/诚实边界）——实施时直接照做，不用逆向
+### 像真实办公室一样协作（PixOffice，已落地）
+- **团队协作子页**即 **PixOffice 像素办公室**（`workbzw/pixoffice` 源码构建产物：人物精灵/动画/工位/会议室），经 `/api/pixoffice/events` relay 绑定本公司 `company-state` 快照——员工入职/派活/开会实时反映到场景，**不是自制静态二维画面**
+- 公司状态结构化（employees/meetings/recruiting/tasks 表）+ 任务编排图 + 数据契约 `docs/3D-办公室-数据契约.md`
+- ⚠️ 如实标注：PixOffice 是 **PixiJS 2D 像素风**场景（非 Three.js 3D）；artwork 第三方授权文件不完整，对外发布前需补齐授权或替换素材
 
 ---
 
@@ -124,7 +126,7 @@
 ```bash
 # 1) 装包（二选一）
 dsh plugin --profile web add luke-jarvis            # 发布后
-dsh plugin --profile web add file:/path/to/luke-jarvis   # 本地开发
+dsh plugin --profile web add file:/path/to/luke-jarvis   # 本地开发（Windows：file:C:/path/to/luke-jarvis）
 
 # 2) 一条命令收尾：技能落位 + bundle 登记（预设由 bundle patch 自带，无需落位）
 npx luke-jarvis setup --profile web
@@ -132,6 +134,8 @@ npx luke-jarvis setup --profile web
 # 3) 重启 dsh web，然后自检
 npx luke-jarvis doctor --profile web
 ```
+
+> ⚠️ **Windows 必须用本仓库 v0.14.0+**：上游 ≤0.13 的 `new URL().pathname` 在 Windows 会拼出非法路径（静态托管全 404、版本号读不到），且 `dsh-tools` 是 optional peer 被无条件 import（干净环境装完即崩）——两者均已在本版修复。
 
 `setup` 只做两件事（剩下的由 bundle patch 与宿主自己完成）：
 
@@ -155,22 +159,41 @@ npx luke-jarvis doctor --profile web
 > 预设说明：`jarvis-org` = 完整公司预设（Jarvis 人设 + jarvis_* 工具 + agent-teams）；
 > `jarvis-captain` = 严格预设（顶层只派发，无 bash/edit/write/subagent —— 不能自己干活）。
 
-### 🖥️ 官方 UI（PixOffice）：http://<dsh>/jarvis-ui
+### 🖥️ 增强界面（Wings UI）：http://<dsh>/jarvis-ui
 
-装好插件并重启 dsh web 后，公司画面就是 **PixOffice 像素办公室**（员工工位/会议室/任务看板/黑板，数据来自 `.jarvis/company-state.json`）：
+装好插件并重启 dsh web 后，`/jarvis-ui` 默认进入 **Wings 全息界面**（`/jarvis-wings`）：
 
-- **状态根唯一（T13）**：**一个工作区只有一个 `.jarvis` 状态根**；插件仓库自身不存 `.jarvis`（历史记忆/审计文档已移出仓库、不随包分发；`.gitignore` 仍保留排除规则兜底）。`jarvis_flowguard` 会拒绝向「插件仓库自身」写闸（返回 `STATE_ROOT_CONFLICT`），避免产生第二个状态根 → 假 PASS。
-- **归属作用域（T13）**：审计（开工须知/自领/卡死/ponder 核验/岗位卡）只统计**本项目归属团队** = `.jarvis/active-team.json` 标记内团队 ∪ 与当前 captainSessionId 相同的团队（单一 `resolveOwnedTeams()` 实现；别家团队/终态任务不参与）。归属标记带 `expiresAt`（默认 7 天），过期自动回退 72h 启发式并标 `source=mtime-fallback`；标记写入与闸结论**解耦**（build/execute 即使被自家缺口拦住也会写标记）。
-- **协调豁免统一（T13）**：`COORD_TASK_RE` 单一常量，`agent_teams_create_task` 闸与 `auditTeamBriefs` 共用——纯协调任务（subject 含【协调】/会议/汇报/验收等）不要求开工须知。
-- **入口**：`http://<你的 dsh 地址>/jarvis-ui`（302 → **`/jarvis-office/jarvis.html`**：本公司数据适配页）；上游 demo 页仍在 `/jarvis-office/`（对照/素材来源）
-- **场景层 relay（T11）**：`/api/pixoffice/{events,messages,ui,reply}` 由插件提供——`events` 是 SSE，首帧即公司快照（`type=snapshot`，`employees[].sceneActorId` 绑定上游 6 个演员，`seq` 单调、同 seq 同内容幂等、同 seq 内容变→409），后续每 4s 检测 company-state 变化推增量帧；`messages` 按上游白名单校验命令（越界明确 400，不静默吞）。场景页 `office/jarvis-scene.html` 通过 `office/jarvis-scene-config.js` 注入 `__PIXOFFICE_CONFIG__.relayUrl=''`（同源）——**原 demo 页的 `pixoffice-config.js` 零改动**。
-- ⚠️ **T11 硬边界**：relay 协议与页面接线已用 `bash scripts/check-pixoffice-scene.sh` 验证（本仓库代码本地挂载采 SSE 帧：含 `emp-ceo-4as972`、绑定合法、无 error 帧；DOM 面板 4/4 不回退；场景页/原 demo 页均 200）。**但「3D 画面里真换成本公司员工」需重装 profile + 重启 dsh 后目视确认**——运行副本仍旧代码，relay 路由在现网尚不存在，不得宣称已上线。
-- **双副本一致性**：`bash scripts/check-office-consistency.sh`（sha256 清单比对仓库 `office/` vs 运行副本 `office/`；缺文件/内容不一致 → exit 2 并给处置；`--copy` 为本地验证同步）。典型征兆：面板员工掉 0/4 = 运行副本 office/ 缺文件或旧版本。
-- **适配页（T9）**：`office/jarvis.html` + `office/jarvis-adapter.js` —— 左侧是**本公司实时数据面板**（角色/任务/阶段/会议招募，数据源 `GET /api/luke-jarvis/company`，每 4s 轮询，DOM 可机械校验、暴露 `window.__JARVIS_UI__`），右侧 iframe 是 PixOffice 场景渲染。⚠️ **诚实边界**：场景层仍是上游 demo 渲染，**未绑定本公司数据**（上游只认 `/api/pixoffice/{events,messages,ui,reply}` 协议，本插件未实现）；「画面里是本公司的人/任务」以左侧面板为准，不以场景动画为准。`bash scripts/check-pixoffice.sh` 会断言 DOM 含 ≥3 个本公司角色名并截图 `artifacts/pixoffice-company-<date>.png`。
-- **数据怎么进去**：CEO/成员每做关键动作（派活/汇报/开会/评估/开除/招募确认）调 `jarvis_company(mode=update|action)` → 写 `.jarvis/company-state.json` → 页面轮询 `/api/luke-jarvis/company` 投影渲染。
-- **落盘兜底（T8 修复）**：`jarvis_company` 以前只认宿主 `fs` 服务，服务不可用就**静默不落盘**（画面空白）；现在 fs 服务失败会自动用 `node:fs` 原子写（`mkdir` + `.tmp` + `rename`）落到 `<项目>/.jarvis/company-state.json`，返回值如实标明 `written` / `storageMode`（`fs-service` 或 `node-fs-fallback`）。
-- **自检**：`bash scripts/check-pixoffice.sh` —— 依次检查 页面/快照接口 HTTP 码、employees 非空且含 CEO、company-state 的 phase/员工数/任务数，并用 chromium 截图到 `artifacts/pixoffice-<date>.png`（默认 `BASE=http://127.0.0.1:3080`、`PROJECT_DIR=/opt/work/first`，可用环境变量覆盖）。
-- ⚠️ **`/jarvis-ui` 是新注册的 exact 路由，必须重装 profile + 重启 dsh web 才生效**（与安装一致性检查同一窗口，见 `scripts/check-install-consistency.sh`）。静态页 `/jarvis-office/` 与快照接口在旧副本上即可用——所以「页面 200 但 `/jarvis-ui` 404」是已知未生效，不是坏页面。
+- **中央 3D 全息核心**：倾斜轨道面 + 陀螺仪经线环 + 卫星点环绕（CSS 3D，随鼠标视角联动）；Jarvis 语音播报时光球呈心跳节律浮动
+- **左右节点 = jarvis 真实任务点**：来自 `GET /api/jarvis/state` 的 `tasks.byAssignee` 投影（进行中/队列/交付/按负责人聚合/下一步），快照 5s + 事件 3s 轮询，断线自动回退演示内容
+- **进度页 / 团队协作页 / 语音设置**全部数据化；团队协作子页 iframe 复用 **PixOffice 像素办公室**场景（源码构建产物 + `/api/pixoffice/events` relay，不是自制静态员工画面）
+
+回退与调试入口：
+
+| 入口 | 说明 |
+|---|---|
+| `/jarvis-ui` | 默认 302 → `/jarvis-wings`（DSH 设置 `ui=legacy` 时 → v2） |
+| `/jarvis-ui?ui=legacy` | 强制进入原 v2 数据适配页（左侧实时数据面板 + PixOffice iframe） |
+| `/jarvis-office/v2/index.html` | v2 页面直链 |
+| `/jarvis-office/jarvis-scene.html` | 仅看 PixOffice 场景本身 |
+
+**DSH 设置面板**（安装后设置里出现 luke-jarvis 区块，`export const Config`，与官方插件同约定）：
+
+| 配置项 | 作用 | 默认值 |
+|---|---|---|
+| `ui` | 增强界面：`wings`（默认）/ `legacy` | `wings` |
+| `defaultWorkspace` | 解析不到会话工作区时的回退项目目录 | 空（process.cwd） |
+| `voice.provider` | 语音来源：`browser` / `openai`（OpenAI 兼容语音模型） | `browser` |
+| `voice.baseUrl / model / voice / speed` | 语音模型地址 / 模型名 / 音色 / 语速 | api.openai.com / tts-1 / nova / 0.95 |
+
+> **API Key 有意不进设置面板**：属敏感信息，在 Wings 界面「语音设置」里填写，落盘 `~/.dsh/luke-jarvis/voice.json`（权限 0600）。设置面板的 voice 配置是**默认值层**——页面显式保存过的值优先，未保存字段用设置兜底。
+
+**安全**：`/api/jarvis/command`、语音保存、TTS 三个写端点拒绝跨站 Origin（防任意网页调用本机工具）。
+
+**数据怎么进去**：CEO/成员每做关键动作（派活/汇报/开会/评估/开除/招募确认）调 `jarvis_company(mode=update|action)` → Engine 单写者提交 → 写 `.jarvis/company-state.json` → 页面轮询 API 投影渲染。
+
+**PixOffice relay（T11）**：`/api/pixoffice/{events,messages,ui,reply}` 由插件提供——`events` 是 SSE，首帧即公司快照（`employees[].sceneActorId` 绑定上游演员，`seq` 单调、重启不回退）；`messages` 按上游白名单校验。双副本一致性：`bash scripts/check-office-consistency.sh`。
+
+- ⚠️ **运行副本需重启生效**：DSH profile 以 `file:` 依赖硬链安装，升级后用 `bash scripts/check-install-consistency.sh` 比对仓库与运行副本 sha256，「不一致」= 需重装 profile 并重启 `dsh web`（等全员空闲时做）。
 
 ### ⚠️ 团队协作依赖（agent-teams）——干净环境安装必读
 
@@ -221,6 +244,31 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ---
 
+## 🧬 核心架构（v0.14.0：移植 dsh-superagent-prototype）
+
+写路径不再由 31 个工具各自直写文件，而是统一走 **Engine 单写者**（架构移植自 [`deepseek-ai/dsh-superagent-prototype`](https://github.com/deepseek-ai/dsh-superagent-prototype)，领域模型保留 jarvis 虚拟公司）：
+
+```
+工具/UI 命令
+    │
+    ▼
+src/host/engine.js（组合根：Ports 适配 + Effects 落盘注册）
+    │
+    ▼
+src/core/（纯核心，零 IO）
+  ├─ engine.js   Engine 单写者：applyCompanyAction / commitBoard /
+  │              recordGateSync / runCommand——读 → 纯规则迁移 → 一次写提交 → 副作用
+  ├─ model.js    公司动作状态机（纯函数）+ settled 谓词
+  ├─ effects.js  副作用队列：同 kind+key 合并、指数退避、持久化重启重放
+  └─ errors.js   UserError + 固定拒绝码表
+```
+
+- **概念映射**：工具动作/命令=Trigger、阶段闸=Eval/Decision、任务点=Ticket、成员执行=Assignment、events.jsonl=Outbox（详见 [docs/CORE-ARCHITECTURE.md](docs/CORE-ARCHITECTURE.md)）
+- **已收编写路径**：公司状态、UI 命令、公屏（board）、阶段闸（gates）；`.jarvis/docs/*.md` 判定为工件不收编（与上游原型一致）
+- **如实差距**：无 SQLite/事务（靠单写者纪律 + 原子写 tmp+rename 保证）；无 Trigger 来源注册表（进程内调用）
+
+---
+
 ## 📚 文档导航（先看这三份）
 
 | 文档 | 用途 |
@@ -228,6 +276,7 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 | [docs/STRUCTURE.md](docs/STRUCTURE.md) | **结构**：目录树、分层职责、单一事实源、安装模型、迁移台账 |
 | [docs/CHAINS.md](docs/CHAINS.md) | **链路**：安装/挂载/预设/技能/工具/闸/状态/UI/测试/发布 11 条链路的唯一事实源与验证命令 |
 | [docs/CORE.md](docs/CORE.md) | **内核**：任务单/派单/汇报/阶段/裁决（`jarvis_ticket`） |
+| [docs/CORE-ARCHITECTURE.md](docs/CORE-ARCHITECTURE.md) | **核心架构**：Engine 单写者/Effects/与 superagent 的概念映射 |
 
 其余文档见 [docs/README.md](docs/README.md)（索引：入门/运维/设计/发布/归档）。
 
@@ -235,10 +284,31 @@ jarvis 的**公司团队功能**（建队/派活/成员/会议）依赖 `@nanmic
 
 ## 🧪 质量保证
 
-- 单测：数量**不写死**——以 `node --test test/plugin.test.js` 实测为准（`bash scripts/update-readme-count.sh` 可自动对账并回写下方标记）｜当前记录 `<!-- test-count:329 -->`
+- 单测：**362/362 全过**（`node --test test/plugin.test.js test/core.test.js test/core-engine.test.js`；含 13 项核心架构专项：单写者/状态机/UserError/Effects 合并退避重放/门面兼容）｜标记 `<!-- test-count:362 -->`
 - verify_host_pipeline **48 用例 0 VIOLATION**
-- selfcheck **15 项发布前自检**（含 core 分层、状态根隔离、归档隔离）
-- 部署双形态验证（仓库 + 实体部署）全链路跑通
+- selfcheck **15 项发布前自检**（含 core 分层、状态根隔离、归档隔离）——当前结论「可发布/可安装」
+- 临时 DSH Home 实测 `setup + doctor` 通过；`npm pack --dry-run` 核对发布物（webui/core/架构文档齐全）
+
+---
+
+## 🏷️ 版本与回退
+
+```text
+upstream-baseline-v0.14.0 (tag → 2635c22)   干净上游基线（重构前锚点，已推送 GitHub）
+        │
+0b4b307 refactor(core)                       全部重构（当前 main HEAD）
+```
+
+重构出问题时：
+
+```bash
+git stash                                    # 暂存本地未提交改动（可选）
+git checkout upstream-baseline-v0.14.0       # 临时回基线
+git revert 0b4b307                           # 反做重构提交（保留历史，推荐）
+git reset --hard upstream-baseline-v0.14.0   # 彻底硬回退（丢弃重构，慎用）
+```
+
+**v0.14.0 主要变更**：核心架构移植（Engine 单写者/Effects/UserError）；Wings UI 并入插件并成为 `/jarvis-ui` 默认入口；DSH 设置面板 Config schema；CORS 收紧（command/voice/tts 拒跨站）；dsh-tools 移入 dependencies（干净环境可装）；修复 9 处 Windows 路径 bug（`fileURLToPath`）；snapshot 归档正则补 `archive/`；PixOffice seq 重启不回退。
 
 ---
 
