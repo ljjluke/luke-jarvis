@@ -65,7 +65,7 @@
     "role-card"
   ],
   "scripts": {
-    "test": "node --test test/plugin.test.js test/core.test.js test/evolution.test.js test/settings-card.test.js",
+    "test": "node --test test/plugin.test.js test/core.test.js test/evolution.test.js test/settings-card.test.js test/client-runtime.test.mjs",
     "typecheck:manual": "node --check src/host/plugin.js",
     "selfcheck": "bash scripts/selfcheck.sh",
     "verify:evolution": "node scripts/verify-evolution-loop.mjs",
