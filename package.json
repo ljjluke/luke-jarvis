@@ -7,7 +7,7 @@
   "exports": {
     ".": "./src/host/plugin.js",
     "./host": "./src/host/plugin.js",
-    "./client": "./src/client/index.js",
+    "./client": "./src/client/index.factory.js",
     "./cli": "./bin/luke-jarvis.mjs",
     "./preset/*": "./preset/*",
     "./presets/*": "./presets/*",

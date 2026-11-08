@@ -654,6 +654,18 @@ export function apply(ctx, config) {
                 const since = Number((url.match(/[?&]since=(\d+)/) || [])[1] || 0)
                 const limit = Number((url.match(/[?&]limit=(\d+)/) || [])[1] || 100)
                 const r = readEvents(cwd, { since, limit })
+                if (!r.events.length) {
+                  try {
+                    const snap = buildSnapshot(cwd, pluginMeta)
+                    const syn = (snap.tasks && snap.tasks.byAssignee || []).slice(0, 40).map((t, i) => ({
+                      seq: i + 1,
+                      at: snap.generatedAt,
+                      type: t.status === 'completed' ? 'task.completed' : t.status === 'in_progress' || t.status === 'claimed' ? 'task.started' : 'task.assigned',
+                      data: { taskId: t.id, subject: t.subject, assignee: t.assignee, team: t.team, status: t.status },
+                    }))
+                    return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, events: syn, lastSeq: syn.length, total: syn.length, synthetic: true })
+                  } catch {}
+                }
                 return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, ...r })
               } catch (e) {
                 return sendJson(res, 200, { ok: false, events: [], error: String((e && e.message) || e) })
@@ -663,6 +675,64 @@ export function apply(ctx, config) {
         )
 
         // 0.96) 语音设置（全局）+ TTS 代理：
+        //   GET /api/jarvis/greeting → 大模型动态问候（工作区感知；失败回落真实数据模板，绝不返回固定的"早上好"）
+        let __greetCache = { key: '', at: 0, text: '', workspace: null }
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/greeting',
+            handler: async (req, res) => {
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return sendJson(res, 200, { ok: true, text: '', workspace: null, reason: 'no workspace' })
+                const snap = buildSnapshot(cwd, pluginMeta)
+                const ws = (snap && snap.workspace) || { cwd }
+                const hour = new Date().getHours()
+                const stage = (snap && snap.stage) || {}
+                const cacheKey = cwd + '|' + String(stage.stage || '') + '|' + hour
+                if (__greetCache.key === cacheKey && Date.now() - __greetCache.at < 5 * 60 * 1000) {
+                  return sendJson(res, 200, { ok: true, text: __greetCache.text, workspace: ws, cached: true })
+                }
+                const daytime = hour < 11 ? '上午' : hour < 14 ? '中午' : hour < 18 ? '下午' : '晚上'
+                const openTasks = (snap && snap.tasks && snap.tasks.open) || 0
+                const employees = (snap && snap.company && snap.company.employees) || (snap && snap.employees) || []
+                const empCount = Array.isArray(employees) ? employees.length : 0
+                const blockers = (snap && snap.board && snap.board.blockers) || []
+                const fallback = `${daytime === '晚上' ? '晚上好' : daytime === '上午' ? '早上好' : daytime + '好'}，先生。当前工作区 ${ws.name || ws.cwd || cwd}（${ws.cwd || cwd}），处于「${stage.label || '未接入'}」阶段（${stage.index || 0}/${stage.total || 6}），未完成任务 ${openTasks} 项、员工 ${empCount} 人${blockers.length ? '、阻塞 ' + blockers.length + ' 项' : ''}。`
+                let text = ''
+                try {
+                  const llm = ctx.get('llm')
+                  const dm = ctx.get('agentDefaultModel')
+                  const sel = dm && typeof dm.currentSelection === 'function' ? dm.currentSelection() : null
+                  if (llm && typeof llm.stream === 'function' && sel && sel.provider && sel.model) {
+                    const prompt = [
+                      `现在是${daytime}（本地时间 ${new Date().toLocaleString('zh-CN')}）。`,
+                      `你是贾维斯（数字员工公司主面板），正在工作区「${ws.name || ''}」（${ws.cwd || cwd}）。`,
+                      `当前阶段：${stage.label || '未接入'}（${stage.index || 0}/${stage.total || 6}）；未完成任务 ${openTasks} 项；员工 ${empCount} 人；` + (blockers.length ? `阻塞 ${blockers.length} 项。` : '无阻塞。'),
+                      '请用中文写 1 句符合当前时段的问候 + 1 句基于上述真实数据的工作简报（可提一句下一步该做什么）。不要编造任何数字或事件，不要超过 80 字。',
+                    ].join('\n')
+                    for await (const ch of llm.stream({
+                      provider: sel.provider,
+                      model: sel.model,
+                      temperature: 0.6,
+                      maxTokens: 160,
+                      system: '你是贾维斯，语气沉稳、简洁、只依据给定数据陈述。',
+                      messages: [{ role: 'user', content: prompt }],
+                    })) {
+                      if (ch && ch.type === 'text-delta' && typeof ch.text === 'string') text += ch.text
+                      if (ch && ch.type === 'finish' && ch.reason && ch.reason.kind === 'error') break
+                    }
+                  }
+                } catch (e) { text = '' }
+                const finalText = String(text || '').trim() || fallback
+                __greetCache = { key: cacheKey, at: Date.now(), text: finalText, workspace: ws }
+                return sendJson(res, 200, { ok: true, text: finalText, workspace: ws })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
         //   GET  /api/jarvis/voice  → 配置（apiKey 掩码）+ 音色/模型预设
         //   PUT  /api/jarvis/voice  → 保存（apiKey 空字符串 = 保留原值）
         //   POST /api/jarvis/tts    → 代理到 OpenAI 兼容 /audio/speech（key 不出本机）
@@ -755,6 +825,29 @@ export function apply(ctx, config) {
                 res.writeHead(302, { location: dest, 'cache-control': 'no-store' })
                 res.end(`→ ${dest}`)
               } catch {}
+            },
+          })
+        )
+        // 0.98) Wings 静态资源（页内相对图片/素材）：/jarvis-wings-assets/* → webui/*
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/jarvis-wings-assets',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '/')
+                let rel = decodeURIComponent(url.split('?')[0].replace(/^\/jarvis-wings-assets\/?/, ''))
+                if (!rel || rel.includes('..')) { res.writeHead(404); return res.end('not found') }
+                const abs = path.join(webuiRoot, rel)
+                if (!abs.startsWith(webuiRoot)) { res.writeHead(403); return res.end('forbidden') }
+                const ext = path.extname(abs).toLowerCase()
+                const types = { '.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.svg':'image/svg+xml','.mp3':'audio/mpeg','.wav':'audio/wav','.json':'application/json; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8' }
+                const data = fsm.readFileSync(abs)
+                res.writeHead(200, { 'content-type': types[ext] || 'application/octet-stream', 'cache-control': 'no-cache' })
+                return res.end(data)
+              } catch {
+                try { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found') } catch {}
+              }
             },
           })
         )

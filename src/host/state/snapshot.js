@@ -72,9 +72,43 @@ function listTeams(projectDir, fs, path) {
       attempt: Number(t.attempt || 0),
     }))
     for (const t of tasks) (TERMINAL.has(t.status) ? completed++ : open++)
-    teams.push({ name: String(name), captainSessionId: d.captainSessionId || '', tasks })
+    const shortRole = (raw) => {
+      const t = String(raw || '').trim()
+      if (!t) return ''
+      if (t.length <= 30) return t
+      const colon = t.search(/[：:]/)
+      const firstLine = t.split('\n')[0]
+      if (colon >= 0) {
+        const after = firstLine.slice(colon + 1).split(/[。；;，,]/)[0].trim()
+        if (after) return after.slice(0, 24)
+      }
+      return firstLine.slice(0, 24)
+    }
+    const members = (Array.isArray(d.members) ? d.members : []).map((m) => ({
+      name: String((m && m.name) || ''),
+      role: shortRole((m && m.role) || '') || String((m && m.name) || ''),
+      provider: String((m && m.provider) || ''),
+      model: String((m && m.model) || ''),
+    })).filter((m) => m.name || m.role)
+    let mtime = 0
+    try { mtime = fs.statSync(path.join(td, name, 'team.json')).mtimeMs } catch {}
+    teams.push({
+      name: String(name),
+      description: String(d.description || ''),
+      captainSessionId: d.captainSessionId || '',
+      members,
+      tasks,
+      mtime,
+    })
   }
-  return { teams, open, completed }
+  let activeNames = []
+  try {
+    const a = readJsonSafe(projectDir, '.jarvis/active-team.json', fs, path)
+    if (a && Array.isArray(a.teams)) activeNames = a.teams.map(String)
+  } catch {}
+  teams.sort((x, y) => (y.mtime || 0) - (x.mtime || 0))
+  const marked = teams.map((t) => ({ ...t, active: activeNames.includes(t.name) }))
+  return { teams: marked, open, completed, activeTeams: activeNames }
 }
 
 function boardSummary(projectDir, fs, path) {
@@ -165,6 +199,7 @@ export function buildSnapshot(projectDir, meta = {}) {
     tasks: {
       open: teams.open,
       completed: teams.completed,
+      activeTeams: teams.activeTeams || [],
       teams: teams.teams,
       byAssignee: teams.teams.flatMap((t) => t.tasks.map((x) => ({ ...x, team: t.name }))),
     },
@@ -180,7 +215,25 @@ export function buildSnapshot(projectDir, meta = {}) {
       : null,
     cards,
     memory,
-    company: company || null,
+    company: company || (teams.teams.length
+      ? {
+          company: { name: path.basename(dir) },
+          employees: teams.teams.flatMap((t) =>
+            (t.members || []).map((m) => {
+              const cur = t.tasks.find((x) => x.assignee === (m.name || m.role) && !['completed', 'cancelled', 'failed', 'dropped'].includes(x.status))
+              return {
+                id: m.name || m.role,
+                role: m.role || m.name,
+                persona: (m.name && m.role && m.name !== m.role) ? m.name : '',
+                status: cur ? 'working' : 'idle',
+                taskId: cur ? cur.id : '',
+                currentWork: cur ? cur.subject : '',
+                team: t.name,
+              }
+            }),
+          ),
+        }
+      : null),
     capabilities: {
       toolCount: Number(meta.tools || 0),
       version: String(meta.version || ''),
