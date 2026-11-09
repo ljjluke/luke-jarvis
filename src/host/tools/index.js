@@ -7,7 +7,8 @@
  *
  *  顺序沿用历史（intake→memory→distill→review→org→deliver），新增工具请放进对应域模块并在此登记。
  */
-import { assertObjectJsonSchema, assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
+// 本地断言：不依赖 @deepseek-ai/dsh-tools（它连带 peer 依赖会让插件在 profile 里加载失败）
+import { assertObjectJsonSchema, assertSupportedJsonSchema } from './schema.js'
 import { getRuntimeContext, setRuntimeContext, rememberExec, markJarvisSession } from '../runtime.js'
 import { renderStage } from '../gates/stage.js'
 import { renderResumeFacts } from '../state/resume.js'
