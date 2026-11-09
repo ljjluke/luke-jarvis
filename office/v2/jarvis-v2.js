@@ -63,7 +63,7 @@ function renderMain(snap) {
   if (bar) bar.style.width = `${pct}%`
   const orbit = $('orbitActive')
   if (orbit) orbit.style.strokeDashoffset = String(2000 - (2000 * pct) / 100)
-  setText('coreState', `JARVIS · ${stage.index ? stage.label : '待接入'} · 未完成任务 ${tasks.open}`)
+  setText('coreStateText', `JARVIS · ${stage.index ? stage.label : '待接入'} · 未完成任务 ${tasks.open}`)
 
   // 流程闸 / 记忆
   setText('mGateState', memory.stale ? 'STALE' : 'OK')
@@ -159,6 +159,14 @@ function renderProgress(snap) {
 //  数据经 relay（/api/pixoffice/events，读 .jarvis/company-state.json）喂给它。
 //  我们**不自己画场景**，只做两件事：① 主题适配（往 iframe 里注入 CSS：色温/描边/背景）② 与本页数据面板联动。
 const SCENE = { ready: false, iframe: null, theme: { grade: 'saturate(0.92) contrast(1.04) brightness(0.98) hue-rotate(-8deg)', bg: '#02070d' } }
+
+/** 统一带上工作区（多会话/多项目时避免改了 A 项目、界面看的却是 B）。
+ *  inline=true 用于拼第二个参数（events 的 since/limit 已在 URL 上）。 */
+function workspaceQuery(inline) {
+  const w = STATE.snapshot && STATE.snapshot.workspace
+  if (!w) return ''
+  return (inline ? '&workspace=' : '?workspace=') + encodeURIComponent(String(w))
+}
 
 function sceneDoc() {
   const f = SCENE.iframe
@@ -264,6 +272,7 @@ async function loadState() {
       return
     }
     STATE.snapshot = body.snapshot
+    setText('cWorkspace', String(body.snapshot.workspace || '—'))
     setText('sysState', `DSH 已连接 · v${(body.snapshot.capabilities || {}).version || '?'}`)
     renderMain(body.snapshot)
     renderProgress(body.snapshot)
@@ -275,17 +284,30 @@ async function loadState() {
 
 async function loadEvents() {
   try {
-    const r = await fetch(`/api/jarvis/events?since=${STATE.lastSeq}&limit=50`, { cache: 'no-store' })
-    const body = await r.json()
-    if (!body.ok) return
-    if (Array.isArray(body.events) && body.events.length) {
-      STATE.events.push(...body.events)
-      if (STATE.events.length > 200) STATE.events = STATE.events.slice(-200)
-      STATE.lastSeq = body.lastSeq || STATE.lastSeq
-      if (STATE.snapshot) {
-        renderMain(STATE.snapshot)
-        renderProgress(STATE.snapshot)
+    // since 用服务端回的 nextSeq（本次返回的最后一条），不是 lastSeq（全库最后一条）：
+    // 否则当积压事件多于 limit 时，中间事件会被静默跳过。首屏用 tail=1 直接拿最新一批。
+    let url = STATE.lastSeq
+      ? `/api/jarvis/events?since=${STATE.lastSeq}&limit=200` + workspaceQuery(true)
+      : '/api/jarvis/events?tail=1&limit=50' + workspaceQuery(true)
+    let changed = false
+    for (let page = 0; page < 5; page += 1) {
+      const r = await fetch(url, { cache: 'no-store' })
+      const body = await r.json()
+      if (!body.ok) return
+      if (Array.isArray(body.events) && body.events.length) {
+        STATE.events.push(...body.events)
+        if (STATE.events.length > 300) STATE.events = STATE.events.slice(-300)
+        changed = true
       }
+      const advanced = Number(body.nextSeq ?? 0)
+      if (advanced > STATE.lastSeq) STATE.lastSeq = advanced
+      else if (!STATE.lastSeq && body.lastSeq) STATE.lastSeq = Number(body.lastSeq)
+      if (!body.hasMore) break
+      url = `/api/jarvis/events?since=${STATE.lastSeq}&limit=200` + workspaceQuery(true)
+    }
+    if (changed && STATE.snapshot) {
+      renderMain(STATE.snapshot)
+      renderProgress(STATE.snapshot)
     }
   } catch { /* 事件失败不影响快照 */ }
 }
@@ -611,16 +633,35 @@ function addChat(who, text) {
   log.appendChild(div)
   log.scrollTop = log.scrollHeight
 }
-// 注意：这里**不伪造回复**。指令面（写操作/驱动会话）还没接，页面明说，别让用户以为发出去了。
-$('teamChatForm')?.addEventListener('submit', (e) => {
+// 指令面（0.15 起）：POST /api/jarvis/chat 真投递给 DSH 会话；仍不伪造回答（回答由模型下一轮产出）。
+$('teamChatForm')?.addEventListener('submit', async (e) => {
   e.preventDefault()
   const input = $('teamChatInput')
   const text = input?.value.trim()
   if (!text) return
+  const btn = e.target.querySelector('button')
+  if (btn) btn.disabled = true
   addChat('你', text)
   input.value = ''
-  addChat('Jarvis', '这条消息没有发出去：当前页面只接了只读数据面（快照/事件）+ 语音，指令通道（写板/派活/驱动会话）还没接。请到原生 DSH 会话里下指令；这里不会假装执行。')
-  if (STATE.voiceEnabled) speak('这条消息没有发出去。当前页面只做只读展示和语音，指令请到原生会话里下达。')
+  try {
+    const r = await fetch('/api/jarvis/chat' + workspaceQuery(), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, agent: $('cSession')?.value || undefined }),
+    })
+    const body = await r.json()
+    if (body.ok) {
+      addChat('Jarvis', `已投递到会话 ${body.sessionId || '(未知)'} 的输入队列（${body.chars} 字）。模型下一轮会看到这句话——这里不替它编回答。`)
+      if (STATE.voiceEnabled) speak('消息已投递到会话队列。')
+    } else {
+      addChat('Jarvis', `没有投递成功：${body.error || '未知原因'}`)
+      if (STATE.voiceEnabled) speak('消息没有投递成功。')
+    }
+  } catch (err) {
+    addChat('Jarvis', `没有投递成功：${err && err.message ? err.message : '网络错误'}`)
+  } finally {
+    if (btn) btn.disabled = false
+  }
 })
 setText('tChatTime', new Date().toLocaleTimeString('zh-CN'))
 

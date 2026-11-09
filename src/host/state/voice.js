@@ -134,6 +134,10 @@ export function saveVoiceConfig(patch = {}) {
     }
     return o
   })
+  for (const card of providers) {
+    if (card.protocol === 'browser') continue
+    card.baseUrl = assertSafeServiceUrl(card.baseUrl)
+  }
   const active = String(incoming.active ?? '').trim()
   const next = { active: providers.some((p) => p.name === active && p.protocol !== 'browser') ? active : '', providers }
   const file = voiceConfigPath()
@@ -141,6 +145,20 @@ export function saveVoiceConfig(patch = {}) {
   fs.writeFileSync(file, JSON.stringify(next, null, 2), { mode: 0o600 })
   try { fs.chmodSync(file, 0o600) } catch { /* 非 POSIX 忽略 */ }
   return next
+}
+
+
+/** 服务地址安全校验（0.15 审计修复，移植到多供应商模型）：
+ *  只允许 http/https；禁止 file:/data:/javascript: 与 URL 内嵌账号密码——
+ *  baseUrl 会被后端 TTS 代理真实请求，放任任意协议 = SSRF / 本地文件探测。 */
+export function assertSafeServiceUrl(raw) {
+  const v = String(raw || '').trim()
+  if (!v) return ''
+  let u = null
+  try { u = new URL(v) } catch { throw new Error('服务地址不是合法 URL') }
+  if (!/^(http|https):/.test(u.protocol)) throw new Error('服务地址只允许 http/https（拒绝 file:/data:/javascript:）')
+  if (u.username || u.password) throw new Error('服务地址不允许内嵌账号密码，请用 API Key 字段')
+  return v
 }
 
 /** 解析当前生效供应商 → 下游 TTS 用的扁平 cfg（provider=protocol）。无 active / browser → 浏览器语音。 */

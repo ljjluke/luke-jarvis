@@ -77,6 +77,11 @@ export function readEvents(projectDir, opts = {}, path = _require('node:path')) 
   }
   const total = all.length
   const lastSeq = total ? Number(all[total - 1].seq) : 0
-  const events = all.filter((e) => Number(e.seq) > since).slice(0, limit)
-  return { events, lastSeq, total }
+  // since 之后的增量；`tail:true` = 直接给最新的 limit 条（首屏用，否则拿到的是最旧的一批）
+  const picked = opts.tail ? all.slice(-limit) : all.filter((e) => Number(e.seq) > since).slice(0, limit)
+  // nextSeq = 本次返回的最后一条 seq（0=无）：UI 必须用它做下一次 since，
+  // 不能用 lastSeq —— 否则当 since 之后事件多于 limit 时，中间事件被静默跳过（真 bug）。
+  const nextSeq = picked.length ? Number(picked[picked.length - 1].seq) : Number(since || 0)
+  const hasMore = picked.length > 0 && nextSeq < lastSeq
+  return { events: picked, lastSeq, nextSeq, hasMore, total }
 }

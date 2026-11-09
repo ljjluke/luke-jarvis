@@ -22,7 +22,10 @@ const jarvisSessions = new Set()
 /** apply 时注入宿主 ctx（= 拆分前的 `moduleCtx = ctx`）。 */
 export function setRuntimeContext(ctx) { moduleCtx = ctx }
 /** 记录一次工具调用的 exec（= 拆分前的 `latestExec = latestExec || exec`，保持「首次为准」语义）。 */
-export function rememberExec(exec) { latestExec = latestExec || exec || null }
+/** 记住最近一次工具 exec（供无 exec 的路径解析工作区）。
+ *  修复：旧实现 `latestExec = latestExec || exec` 是「首次生效」，之后再也不更新——
+ *  多会话下所有后续调用都按第一个会话的 cwd 解析（能力台/HTTP 命令会写错项目）。 */
+export function rememberExec(exec) { if (exec) latestExec = exec }
 /** 读宿主 ctx（= 拆分前的 moduleCtx；只读，改它必须走 setRuntimeContext）。 */
 export function getRuntimeContext() { return moduleCtx }
 /** 最近一次工具 exec（= 拆分前的 latestExec）。 */
@@ -126,27 +129,61 @@ export function getFsService(exec) {
   try { return pick(moduleCtx) } catch { return null }
 }
 
+/**
+ * 解析工作区。优先级（越低越不可信，越靠后）：
+ *   ① exec.agent.session.header.cwd —— 本次调用的会话（最权威）
+ *   ② ctx scope 指向的 agent 的 cwd —— 当前插件上下文所属会话
+ *   ③ 最近一次工具调用（rememberExec 在工具体执行前写入，UI 能力台也走这里）
+ *   ④ _resolvedWorkspace（apply 期预热：**已知会漂移**——systemd 下可能预热成 '/'，不能压过真实会话）
+ *   ⑤ agents.list() 最后一个会话
+ *   ⑥ process.cwd
+ * 为什么把 ④ 降到 ②③ 之后：能力台/HTTP 命令没有 exec，旧实现会拿预热的 '/' 或 profile 目录，
+ * 导致「闸按 A 项目判、文件写 B 项目」——多会话/多项目下必现的错位。
+ */
 export function resolveWorkspace(ctx, exec) {
+  const cwdOf = (a) => {
+    try {
+      const w = a && a.session && a.session.header && a.session.header.cwd
+      return w && typeof w === 'string' && w.length > 0 ? w : ''
+    } catch { return '' }
+  }
   if (exec) {
     try {
-      // 工具调用标准：exec.agent = 调用工具的会话 agent（agent-teams 同款：
-      //   agent.session.header.cwd = 用户工作区，process.cwd 仅兜底）
+      // 工具调用标准：exec.agent = 调用工具的会话 agent（agent-teams 同款）
       const agent = exec.agent || (exec.session && { session: exec.session })
-      const w = agent && agent.session && agent.session.header && agent.session.header.cwd
-      if (w && typeof w === 'string' && w.length > 0) return w
+      const w = cwdOf(agent)
+      if (w) return w
     } catch { /* 拿不到则继续 */ }
+  }
+  try {
+    const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
+    const me = agents && typeof agents.get === 'function'
+      ? (agents.get(ctx.scope?.sessionId) || agents.get(ctx.sessionId))
+      : undefined
+    const w = cwdOf(me)
+    if (w) return w
+  } catch { /* 继续 */ }
+  const latest = typeof getLatestExec === 'function' ? getLatestExec() : null
+  const latestAgent = latest && (latest.agent || (latest.session && { session: latest.session }))
+  const latestCwd = cwdOf(latestAgent)
+  if (latestCwd) {
+    // 只信「还活着的会话」的 last exec：残留的旧 exec（会话已关/跨项目）会把解析带到别的项目。
+    // 没有 agents 服务（纯单测/无宿主）时按可信处理。
+    const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
+    if (!agents || typeof agents.get !== 'function') return latestCwd
+    const sid = ((latestAgent && latestAgent.session && latestAgent.session.id) || '')
+    if (!sid || agents.get(sid)) return latestCwd
+    /* 会话已不在 → 落到下面的兜底（缓存/agents.list/process.cwd） */
   }
   if (_resolvedWorkspace) return _resolvedWorkspace
   try {
     const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
-    const me = agents && typeof agents.get === 'function'
-      ? (agents.get(ctx.scope?.sessionId) || agents.get(ctx.sessionId) || (agents.list && agents.list()?.[0]))
-      : undefined
-    const w = me && me.session && me.session.header && me.session.header.cwd
-    if (w && typeof w === 'string' && w.length > 0) { _resolvedWorkspace = w; return w }
+    const list = agents && typeof agents.list === 'function' ? agents.list() : []
+    const last = Array.isArray(list) && list.length ? list[list.length - 1] : undefined
+    const w = cwdOf(last)
+    if (w) return w
   } catch { /* 拿不到会话则用兜底 */ }
-  _resolvedWorkspace = (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
-  return _resolvedWorkspace
+  return (typeof process !== 'undefined' && process.cwd ? process.cwd() : '')
 }
 
 /**

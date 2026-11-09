@@ -58,9 +58,10 @@ import { TOOLS, ensureAgentStageSection } from './tools/index.js'
 import { bindJarvisPermission } from './adapters/permission.js'
 import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
 import { maybeAutoGc } from './tools/gc.js'
-import { readEvents } from './state/events.js'
+import { appendEvent, readEvents } from './state/events.js'
 import { VOICE_PRESETS, normalizeVoiceState, publicVoiceState, publicVoiceConfig, readVoiceConfig, readVoiceConfigRaw, resolveActiveVoice, saveVoiceConfig, speechEndpoint } from './state/voice.js'
 import { pickAgent, runCommand, sessionFacts, toolSpecs } from './state/command.js'
+import { deliverChat } from './state/chat.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
 export { TOOLS }
@@ -221,6 +222,19 @@ function readJsonBody(req, limit = 256 * 1024) {
   })
 }
 
+/** 跨站写校验（0.15 审计修复，模块级：relay 与 /api/jarvis 都要用，避免 TDZ）。
+ *  浏览器跨站请求必带 Origin/Referer → host 必须等于请求 Host；无 Origin（curl/同源 document）= 放行。 */
+export function sameOriginOk(req) {
+  try {
+    const headers = (req && req.headers) || {}
+    const host = String(headers.host || '').toLowerCase()
+    const origin = String(headers.origin || headers.referer || '')
+    if (!origin) return true
+    const u = new URL(origin)
+    return u.host.toLowerCase() === host
+  } catch { return false }
+}
+
 function requestWorkspace(ctx, req) {
   try {
     const m = String((req && req.url) || '').match(/[?&]workspace=([^&]+)/)
@@ -229,11 +243,8 @@ function requestWorkspace(ctx, req) {
       if (v.startsWith('/') || /^[A-Za-z]:[\\/]/.test(v)) return v
     }
   } catch { /* 非法 query：忽略 */ }
-  try {
-    const ag = getLatestExec() && getLatestExec().agent
-    const w = ag && ag.session && ag.session.header && ag.session.header.cwd
-    if (typeof w === 'string' && w.length > 0) return w
-  } catch { /* 没 exec：继续 */ }
+  // HTTP 路由的工作区：只信本服务的 live 会话（或显式 ?workspace=）。
+  // 不吃"最近一次工具 exec"：那是别的会话/别的时间点的事实，会把读接口带到别的项目。
   const live = firstSessionCwd(ctx)
   if (live) return live
   // 不吃 apply 期缓存：它是 process.cwd()（systemd 下 '/'、测试里是插件仓库），拿它拼出的 .jarvis 必错。
@@ -369,6 +380,7 @@ export function apply(ctx, config) {
               const send = (status, body) => {
                 try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
               }
+              if (!sameOriginOk(req)) return send(403, { ok: false, error: 'cross-origin-denied' })
               if (!req || req.method !== 'POST') return send(405, { ok: false, error: 'method-not-allowed' })
               let body = null
               try {
@@ -418,6 +430,7 @@ export function apply(ctx, config) {
               const send = (status, body) => {
                 try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
               }
+              if (!sameOriginOk(req)) return send(403, { ok: false, error: 'cross-origin-denied' })
               if (!req || req.method !== 'POST') return send(405, { ok: false, error: 'method-not-allowed' })
               return send(200, { ok: true, at: new Date().toISOString() })
             },
@@ -535,6 +548,17 @@ export function apply(ctx, config) {
             res.end(JSON.stringify(body))
           } catch {}
         }
+        // jarvis 数据接口（任务/黑板/记忆/卡片/事件）不回通配 CORS：
+        // 本页与接口同源，不需要；放任 `*` = 任意站点能读走你的项目内容（0.15 审计修复）。
+        const sendJsonLocal = (res, status, body) => {
+          try {
+            res.writeHead(status, {
+              'content-type': 'application/json; charset=utf-8',
+              'cache-control': 'no-store',
+            })
+            res.end(JSON.stringify(body))
+          } catch {}
+        }
         ctx.effect(() =>
           webSvc2.register({
             kind: 'exact',
@@ -542,11 +566,11 @@ export function apply(ctx, config) {
             handler: async (req, res) => {
               try {
                 const cwd = requestWorkspace(ctx, req)
-                if (!cwd) return sendJson(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA, reason: 'no workspace' })
+                if (!cwd) return sendJsonLocal(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA, reason: 'no workspace' })
                 try { maybeAutoGc(cwd) } catch { /* 自动 GC 失败不影响快照 */ }
-                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, demo: false, snapshot: buildSnapshot(cwd, pluginMeta) })
+                return sendJsonLocal(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, demo: false, snapshot: buildSnapshot(cwd, pluginMeta) })
               } catch (e) {
-                return sendJson(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
+                return sendJsonLocal(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
               }
             },
           })
@@ -558,11 +582,11 @@ export function apply(ctx, config) {
             handler: async (req, res) => {
               try {
                 const cwd = requestWorkspace(ctx, req)
-                if (!cwd) return sendJson(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA })
+                if (!cwd) return sendJsonLocal(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA })
                 try { maybeAutoGc(cwd) } catch { /* 自动 GC 失败不影响摘要 */ }
-                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, summary: snapshotSummary(buildSnapshot(cwd, pluginMeta)) })
+                return sendJsonLocal(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, summary: snapshotSummary(buildSnapshot(cwd, pluginMeta)) })
               } catch (e) {
-                return sendJson(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
+                return sendJsonLocal(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
               }
             },
           })
@@ -572,7 +596,7 @@ export function apply(ctx, config) {
             kind: 'exact',
             path: '/api/jarvis/capabilities',
             handler: async (req, res) => {
-              return sendJson(res, 200, {
+              return sendJsonLocal(res, 200, {
                 ok: true,
                 schema: SNAPSHOT_SCHEMA,
                 plugin: pluginMeta,
@@ -593,9 +617,9 @@ export function apply(ctx, config) {
             path: '/api/jarvis/tools',
             handler: async (req, res) => {
               try {
-                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, tools: toolSpecs() })
+                return sendJsonLocal(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, tools: toolSpecs() })
               } catch (e) {
-                return sendJson(res, 200, { ok: false, tools: [], error: String((e && e.message) || e) })
+                return sendJsonLocal(res, 200, { ok: false, tools: [], error: String((e && e.message) || e) })
               }
             },
           })
@@ -607,9 +631,9 @@ export function apply(ctx, config) {
             handler: async (req, res) => {
               try {
                 const agents = ctx.get('agents')
-                return sendJson(res, 200, { ok: true, sessions: sessionFacts(agents) })
+                return sendJsonLocal(res, 200, { ok: true, sessions: sessionFacts(agents) })
               } catch (e) {
-                return sendJson(res, 200, { ok: false, sessions: [], error: String((e && e.message) || e) })
+                return sendJsonLocal(res, 200, { ok: false, sessions: [], error: String((e && e.message) || e) })
               }
             },
           })
@@ -620,16 +644,16 @@ export function apply(ctx, config) {
             path: '/api/jarvis/command',
             handler: async (req, res) => {
               if (String(req.method || 'GET').toUpperCase() !== 'POST') {
-                return sendJson(res, 405, { ok: false, error: '只接受 POST' })
+                return sendJsonLocal(res, 405, { ok: false, error: '只接受 POST' })
               }
-              if (crossSiteWrite(req)) return sendJson(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可调用）' })
+              if (crossSiteWrite(req)) return sendJsonLocal(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可调用）' })
               const body = await readJsonBody(req).catch((e) => ({ __error: String(e.message || e) }))
-              if (body && body.__error) return sendJson(res, 400, { ok: false, error: body.__error })
+              if (body && body.__error) return sendJsonLocal(res, 400, { ok: false, error: body.__error })
               const tool = String((body && body.tool) || '').trim()
-              if (!tool) return sendJson(res, 400, { ok: false, error: '缺少 tool' })
+              if (!tool) return sendJsonLocal(res, 400, { ok: false, error: '缺少 tool' })
               let projectDir = ''
               try { projectDir = requestWorkspace(ctx, req) } catch { projectDir = '' }
-              if (!projectDir) return sendJson(res, 200, { ok: false, tool, error: '没有解析到工作区（带 ?workspace=<项目绝对路径>）' })
+              if (!projectDir) return sendJsonLocal(res, 200, { ok: false, tool, error: '没有解析到工作区（带 ?workspace=<项目绝对路径>）' })
               let agent = null
               try {
                 const agents = ctx.get('agents')
@@ -638,6 +662,12 @@ export function apply(ctx, config) {
                 const hit = wanted ? list.find((s) => s.id === wanted) : null
                 agent = hit ? (agents.list() || []).find((a) => a && a.session && a.session.id === hit.id) : pickAgent(agents, projectDir)
               } catch { agent = null }
+              // 工作区以绑定的 agent 的 cwd 为准：工具按该 cwd 落盘，闸也按该会话判定，
+              // 不能出现"闸判 A 工作区、文件写 B 工作区"的错位（多会话时必现）。
+              try {
+                const agentCwd = String((agent && agent.session && agent.session.header && agent.session.header.cwd) || '')
+                if (agentCwd && agentCwd !== projectDir) projectDir = agentCwd
+              } catch { /* 保持原值 */ }
               const out = await runCommand({
                 ctx,
                 projectDir,
@@ -646,7 +676,7 @@ export function apply(ctx, config) {
                 agent,
                 signal: AbortSignal.timeout(120000),
               })
-              return sendJson(res, 200, out)
+              return sendJsonLocal(res, 200, { ...out, workspace: projectDir })
             },
           })
         )
@@ -660,11 +690,12 @@ export function apply(ctx, config) {
             handler: async (req, res) => {
               try {
                 const cwd = requestWorkspace(ctx, req)
-                if (!cwd) return sendJson(res, 200, { ok: true, active: false, events: [], lastSeq: 0, total: 0 })
+                if (!cwd) return sendJsonLocal(res, 200, { ok: true, active: false, events: [], lastSeq: 0, total: 0 })
                 const url = String((req && req.url) || '')
                 const since = Number((url.match(/[?&]since=(\d+)/) || [])[1] || 0)
                 const limit = Number((url.match(/[?&]limit=(\d+)/) || [])[1] || 100)
-                const r = readEvents(cwd, { since, limit })
+                const tail = /[?&]tail=1/.test(String((req && req.url) || ''))
+                const r = readEvents(cwd, { since, limit, tail })
                 if (!r.events.length) {
                   try {
                     const snap = buildSnapshot(cwd, pluginMeta)
@@ -674,13 +705,46 @@ export function apply(ctx, config) {
                       type: t.status === 'completed' ? 'task.completed' : t.status === 'in_progress' || t.status === 'claimed' ? 'task.started' : 'task.assigned',
                       data: { taskId: t.id, subject: t.subject, assignee: t.assignee, team: t.team, status: t.status },
                     }))
-                    return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, events: syn, lastSeq: syn.length, total: syn.length, synthetic: true })
+                    return sendJsonLocal(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, events: syn, lastSeq: syn.length, nextSeq: syn.length, hasMore: false, total: syn.length, synthetic: true })
                   } catch {}
                 }
-                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, ...r })
+                return sendJsonLocal(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, ...r })
               } catch (e) {
-                return sendJson(res, 200, { ok: false, events: [], error: String((e && e.message) || e) })
+                return sendJsonLocal(res, 200, { ok: false, events: [], error: String((e && e.message) || e) })
               }
+            },
+          })
+        )
+
+        // 0.945) 指令面：把界面上的一句话真投递进 DSH 会话（不是前端假回复）
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/chat',
+            handler: async (req, res) => {
+              if (String(req.method || 'GET').toUpperCase() !== 'POST') {
+                return sendJsonLocal(res, 405, { ok: false, error: '只接受 POST' })
+              }
+              if (!sameOriginOk(req)) return sendJsonLocal(res, 403, { ok: false, error: '跨站消息被拒绝（同源校验失败）' })
+              const body = await readJsonBody(req).catch((e) => ({ __error: String(e.message || e) }))
+              if (body && body.__error) return sendJsonLocal(res, 400, { ok: false, error: body.__error })
+              let projectDir = ''
+              try { projectDir = requestWorkspace(ctx, req) } catch { projectDir = '' }
+              const agents = (() => { try { return ctx.get('agents') } catch { return undefined } })()
+              const list = (agents && typeof agents.list === 'function' ? agents.list() : []) || []
+              if (!list.length) {
+                return sendJsonLocal(res, 200, { ok: false, error: '没有活动会话：先在 DSH 里打开一个会话，界面才能把话投递给它' })
+              }
+              const wanted = String((body && body.agent) || '')
+              const agent = wanted
+                ? list.find((a) => String((a.session && a.session.id) || '') === wanted)
+                : pickAgent(agents, projectDir) || list[list.length - 1]
+              if (!agent) return sendJsonLocal(res, 200, { ok: false, error: `找不到会话：${wanted || '(自动匹配失败)'}` })
+              const out = deliverChat(agent, body && body.text)
+              if (out.ok) {
+                try { appendEvent(projectDir || '', 'chat', { sessionId: out.sessionId, chars: out.chars, messageId: out.messageId }) } catch {}
+              }
+              return sendJsonLocal(res, 200, out)
             },
           })
         )
@@ -695,14 +759,14 @@ export function apply(ctx, config) {
             handler: async (req, res) => {
               try {
                 const cwd = requestWorkspace(ctx, req)
-                if (!cwd) return sendJson(res, 200, { ok: true, text: '', workspace: null, reason: 'no workspace' })
+                if (!cwd) return sendJsonLocal(res, 200, { ok: true, text: '', workspace: null, reason: 'no workspace' })
                 const snap = buildSnapshot(cwd, pluginMeta)
                 const ws = (snap && snap.workspace) || { cwd }
                 const hour = new Date().getHours()
                 const stage = (snap && snap.stage) || {}
                 const cacheKey = cwd + '|' + String(stage.stage || '') + '|' + hour
                 if (__greetCache.key === cacheKey && Date.now() - __greetCache.at < 5 * 60 * 1000) {
-                  return sendJson(res, 200, { ok: true, text: __greetCache.text, workspace: ws, cached: true })
+                  return sendJsonLocal(res, 200, { ok: true, text: __greetCache.text, workspace: ws, cached: true })
                 }
                 const daytime = hour < 11 ? '上午' : hour < 14 ? '中午' : hour < 18 ? '下午' : '晚上'
                 const openTasks = (snap && snap.tasks && snap.tasks.open) || 0
@@ -737,9 +801,9 @@ export function apply(ctx, config) {
                 } catch (e) { text = '' }
                 const finalText = String(text || '').trim() || fallback
                 __greetCache = { key: cacheKey, at: Date.now(), text: finalText, workspace: ws }
-                return sendJson(res, 200, { ok: true, text: finalText, workspace: ws })
+                return sendJsonLocal(res, 200, { ok: true, text: finalText, workspace: ws })
               } catch (e) {
-                return sendJson(res, 200, { ok: false, error: String((e && e.message) || e) })
+                return sendJsonLocal(res, 200, { ok: false, error: String((e && e.message) || e) })
               }
             },
           })
@@ -754,9 +818,9 @@ export function apply(ctx, config) {
                 const name = String((PLUGIN_CONFIG && PLUGIN_CONFIG.name) || 'Jarvis').trim() || 'Jarvis'
                 const lang = (PLUGIN_CONFIG && PLUGIN_CONFIG.lang) === 'en' ? 'en' : 'zh'
                 const voiceEnabled = !(PLUGIN_CONFIG && PLUGIN_CONFIG.voiceEnabled === false)
-                return sendJson(res, 200, { ok: true, name, lang, voiceEnabled })
+                return sendJsonLocal(res, 200, { ok: true, name, lang, voiceEnabled })
               } catch (e) {
-                return sendJson(res, 200, { ok: true, name: 'Jarvis', lang: 'zh', voiceEnabled: true })
+                return sendJsonLocal(res, 200, { ok: true, name: 'Jarvis', lang: 'zh', voiceEnabled: true })
               }
             },
           })
@@ -771,15 +835,15 @@ export function apply(ctx, config) {
             handler: async (req, res) => {
               try {
                 if (String(req.method || 'GET').toUpperCase() === 'PUT' || String(req.method || '').toUpperCase() === 'POST') {
-                  if (crossSiteWrite(req)) return sendJson(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可保存配置）' })
+                  if (crossSiteWrite(req)) return sendJsonLocal(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可保存配置）' })
                   const body = await readJsonBody(req)
-                  if (!body || typeof body !== 'object') return sendJson(res, 400, { ok: false, error: '请求体必须是 JSON' })
+                  if (!body || typeof body !== 'object') return sendJsonLocal(res, 400, { ok: false, error: '请求体必须是 JSON' })
                   const saved = saveVoiceConfig(body)
-                  return sendJson(res, 200, { ok: true, config: publicVoiceState(effectiveVoiceState(saved)), presets: VOICE_PRESETS })
+                  return sendJsonLocal(res, 200, { ok: true, config: publicVoiceState(effectiveVoiceState(saved)), presets: VOICE_PRESETS })
                 }
-                return sendJson(res, 200, { ok: true, config: publicVoiceState(effectiveVoiceState(readVoiceConfigRaw())), presets: VOICE_PRESETS })
+                return sendJsonLocal(res, 200, { ok: true, config: publicVoiceState(effectiveVoiceState(readVoiceConfigRaw())), presets: VOICE_PRESETS })
               } catch (e) {
-                return sendJson(res, 500, { ok: false, error: String((e && e.message) || e) })
+                return sendJsonLocal(res, 500, { ok: false, error: String((e && e.message) || e) })
               }
             },
           })
@@ -789,15 +853,15 @@ export function apply(ctx, config) {
             kind: 'exact',
             path: '/api/jarvis/tts',
             handler: async (req, res) => {
-              if (crossSiteWrite(req)) return sendJson(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可调用）' })
+              if (crossSiteWrite(req)) return sendJsonLocal(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可调用）' })
               const body = await readJsonBody(req).catch(() => null)
               const text = String((body && body.text) || '').trim()
-              if (!text) return sendJson(res, 400, { ok: false, error: '缺少 text' })
-              if (text.length > 1200) return sendJson(res, 400, { ok: false, error: 'text 过长（>1200 字）' })
+              if (!text) return sendJsonLocal(res, 400, { ok: false, error: '缺少 text' })
+              if (text.length > 1200) return sendJsonLocal(res, 400, { ok: false, error: 'text 过长（>1200 字）' })
               const cfg = effectiveVoiceConfig(readVoiceConfigRaw())
               // ── 阿里云百炼（DashScope）qwen-tts / CosyVoice：非 OpenAI 协议，单独适配 ──
               if (cfg.provider === 'aliyun') {
-                if (!cfg.apiKey) return sendJson(res, 400, { ok: false, error: '未配置阿里云百炼 API Key', fallback: 'browser', hint: '在设置里填 DashScope API Key（百炼控制台 → API-KEY），有免费额度' })
+                if (!cfg.apiKey) return sendJsonLocal(res, 400, { ok: false, error: '未配置阿里云百炼 API Key', fallback: 'browser', hint: '在设置里填 DashScope API Key（百炼控制台 → API-KEY），有免费额度' })
                 try {
                   const base = String(cfg.baseUrl || 'https://dashscope.aliyuncs.com').replace(/\/+$/, '')
                   const modelName = String((body && body.model) || cfg.model || 'qwen-tts')
@@ -817,20 +881,20 @@ export function apply(ctx, config) {
                     res.end(buf)
                     return undefined
                   }
-                  if (!audioUrl) return sendJson(res, 502, { ok: false, error: 'DashScope 未返回音频', detail: JSON.stringify(j || {}).slice(0, 300) })
+                  if (!audioUrl) return sendJsonLocal(res, 502, { ok: false, error: 'DashScope 未返回音频', detail: JSON.stringify(j || {}).slice(0, 300) })
                   const audio = await fetch(audioUrl, { signal: AbortSignal.timeout(45000) })
-                  if (!audio.ok) return sendJson(res, 502, { ok: false, error: `音频下载失败 ${audio.status}` })
+                  if (!audio.ok) return sendJsonLocal(res, 502, { ok: false, error: `音频下载失败 ${audio.status}` })
                   const buf = Buffer.from(await audio.arrayBuffer())
                   res.writeHead(200, { 'content-type': audio.headers.get('content-type') || 'audio/wav', 'content-length': String(buf.length), 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
                   res.end(buf)
                   return undefined
                 } catch (e) {
-                  return sendJson(res, 502, { ok: false, error: '阿里云 TTS 调用失败', detail: String((e && e.message) || e), fallback: 'browser' })
+                  return sendJsonLocal(res, 502, { ok: false, error: '阿里云 TTS 调用失败', detail: String((e && e.message) || e), fallback: 'browser' })
                 }
               }
               const endpoint = speechEndpoint(cfg)
               if (cfg.provider !== 'openai' || !endpoint || !cfg.apiKey) {
-                return sendJson(res, 400, {
+                return sendJsonLocal(res, 400, {
                   ok: false,
                   error: '未配置语音模型（provider/baseUrl/apiKey 不全）',
                   fallback: 'browser',
@@ -852,7 +916,7 @@ export function apply(ctx, config) {
                 })
                 if (!upstream.ok) {
                   const detail = await upstream.text().catch(() => '')
-                  return sendJson(res, 502, { ok: false, error: `上游 TTS ${upstream.status}`, detail: detail.slice(0, 300) })
+                  return sendJsonLocal(res, 502, { ok: false, error: `上游 TTS ${upstream.status}`, detail: detail.slice(0, 300) })
                 }
                 const buf = Buffer.from(await upstream.arrayBuffer())
                 res.writeHead(200, {
@@ -864,7 +928,7 @@ export function apply(ctx, config) {
                 res.end(buf)
                 return undefined
               } catch (e) {
-                return sendJson(res, 502, { ok: false, error: 'TTS 调用失败', detail: String((e && e.message) || e), fallback: 'browser' })
+                return sendJsonLocal(res, 502, { ok: false, error: 'TTS 调用失败', detail: String((e && e.message) || e), fallback: 'browser' })
               }
             },
           })
