@@ -276,8 +276,14 @@ function JarvisPanelIcon({ size, active }) {
 }
 
 function JarvisMainPage() {
+  let src = '/jarvis-wings?embedded=1'
+  try {
+    const sid = window.__jarvisPanelSession ? '&session=' + encodeURIComponent(window.__jarvisPanelSession) : ''
+    src = '/jarvis-wings?embedded=1' + sid
+  } catch (e) { /* 忽略 */ }
   return h('iframe', {
-    src: '/jarvis-wings?embedded=1',
+    id: 'jarvisFrame',
+    src,
     title: '贾维斯主页面',
     style: { width: '100%', height: '100%', border: '0', display: 'block', background: '#02070d' },
   })
@@ -311,6 +317,31 @@ function JarvisFloatingBlock({ size, active, onOpen }) {
       transform: hover ? 'scale(1.06)' : 'none', transition: 'transform .18s ease, box-shadow .18s ease',
     },
   }, '贾')
+}
+
+// ── 会话级入口（关键：主面板是 root 作用域，拿不到当前会话 → 用会话头部按钮把 sessionId 传进去）──
+function registerSessionEntry(ctx) {
+  const OpenJarvis = (props) => {
+    const sid = String((props && props.sessionId) || '')
+    return h('button', {
+      type: 'button',
+      title: '打开贾维斯增强 UI（绑定当前会话的工作区）',
+      'aria-label': '打开贾维斯增强 UI',
+      onClick: () => {
+        try { window.__jarvisPanelSession = sid } catch (e) {}
+        try {
+          const f = document.getElementById('jarvisFrame')
+          if (f && sid) f.src = '/jarvis-wings?embedded=1&session=' + encodeURIComponent(sid)
+        } catch (e) {}
+        try { ctx.layout.selectPanel('jarvis') } catch (e) {}
+      },
+      style: { display: 'inline-flex', alignItems: 'center', gap: '5px', height: '24px', padding: '0 8px', cursor: 'pointer', border: '1px solid rgba(112,234,255,.22)', borderRadius: '4px', background: 'rgba(5,20,31,.45)', color: '#9fd9ea', font: '9px/1 "Microsoft YaHei", sans-serif' },
+    }, h('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: '#70eaff', boxShadow: '0 0 6px #70eaff' } }), '贾维斯')
+  }
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register(
+    { name: 'conversation.session.header.actions', id: 'jarvis-open', order: 60, label: '贾维斯' },
+    OpenJarvis,
+  ))
 }
 
 function registerMainPanel(ctx) {
@@ -601,6 +632,7 @@ exports.apply = function apply(ctx) {
   registerConfigCard(ctx)
   registerSettingsSection(ctx)
   registerMainPanel(ctx)
+  registerSessionEntry(ctx)
 }
 
   })(module, module.exports, require);

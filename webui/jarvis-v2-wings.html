@@ -63,7 +63,7 @@ body.jarvis-speaking .plasma-layer{animation-duration:2.4s}
 <div id="app">
 <header class="topbar">
   <div class="brand"><svg viewBox="0 0 32 32" fill="none"><path d="M16 2l12.1 7v14L16 30 3.9 23V9L16 2z" stroke="#70EAFF" stroke-width="1.6"/><circle cx="16" cy="16" r="5.5" stroke="#70EAFF" stroke-width="1.4"/><circle cx="16" cy="16" r="2" fill="#70EAFF"/></svg><div class="brand-copy">DEEPSEEK HARNESS <b>· JARVIS</b></div></div>
-  <div class="clockbox"><div class="clock">09:55</div><div class="date">11月5日 星期四<br><span class="ok"><i class="pulse-dot"></i>全部系统正常</span></div></div>
+  <div class="clockbox"><span id="bindInfo" style="font:9px Consolas,monospace;color:#5f8ea1;max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:8px"></span><div class="clock">09:55</div><div class="date">11月5日 星期四<br><span class="ok"><i class="pulse-dot"></i>全部系统正常</span></div></div>
 </header>
 <main id="mainView" class="view active">
   <div class="holo-stage">
@@ -309,6 +309,11 @@ function renderMain(snap){
   // 顶栏连接状态（诚实标注 demo / 真实工作区）
   const ok=$('.clockbox .ok');
   if(!LIVE.demo){['.node-right-1','.node-right-2'].forEach(sel=>{const el=$(sel);if(el)el.style.display='none'})}
+  const bind=document.getElementById('bindInfo');
+  if(bind){
+    const sid=(window.__activeSessionId||'').replace('session-','').slice(0,8);
+    bind.textContent=`会话 ${sid||'?'} · 工作区 ${(snap.workspace&&snap.workspace.cwd)||'?'} · 团队 ${(window.__teamSel||((snap.tasks&&snap.tasks.teams||[]).find(t=>t.active)||{}).name||((snap.tasks&&snap.tasks.teams||[])[0]||{}).name||'?')}`;
+  }
   if(ok)ok.innerHTML=`<i class="pulse-dot"></i>${LIVE.demo?'已连接 · 演示工作区':'已连接 · '+esc(clip(snap.workspace&&snap.workspace.name||'工作区',16))+(snap.workspace&&snap.workspace.cwd?' · '+esc(clip(snap.workspace.cwd,28)):'')}`;
   try{
     const ws=(snap.workspace&&(snap.workspace.name||snap.workspace.cwd))||'当前工作区';
@@ -369,7 +374,7 @@ function renderTeam(snap){
   const activeNames=(snap.tasks&&snap.tasks.activeTeams)||[];
   let picked=null;
   try{picked=teams.find(t=>t.name===window.__teamSel)||null}catch(e){}
-  const sid=window.__activeSessionId||'';
+  const sid=qsSession||window.__activeSessionId||'';
   picked=picked||teams.find(t=>sid&&String(t.captainSessionId)===sid)||teams.find(t=>t.active)||teams[0]||null;
   const tasks=(picked&&picked.tasks)||[];
   const members=(picked&&picked.members)||[];
@@ -437,6 +442,15 @@ function sanitizeSpeech(text){
     .replace(/\s{2,}/g,' ')
     .trim()
 }
+function parentSessionId(){
+  const pat=/(?:session[-/])?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+  const tryUrls=[];
+  try{if(window.parent&&window.parent!==window)tryUrls.push(String(window.parent.location.href))}catch(e){}
+  try{if(document.referrer)tryUrls.push(String(document.referrer))}catch(e){}
+  for(const u of tryUrls){const m=u.match(pat);if(m)return 'session-'+m[1]}
+  return '';
+}
+const qsSession=(()=>{try{return new URLSearchParams(location.search).get('session')||''}catch(e){return ''}})();
 let wsOverride=(()=>{try{return localStorage.getItem('jarvis.workspace')||''}catch(e){return ''}})();
 function apiUrl(path){try{const q=new URLSearchParams(location.search);if(wsOverride)q.set('workspace',wsOverride);const qs=q.toString();return path+(qs?(path.includes('?')?'&':'?')+qs:'')}catch(e){return path}}
 async function initWorkspacePicker(){
@@ -451,13 +465,11 @@ async function initWorkspacePicker(){
     sel.innerHTML='<option value="">自动（最近会话工作区）</option>'+cwds.map(c=>`<option value="${c}">${c.split('/').filter(Boolean).pop()||c} — ${c}</option>`).join('');
     // 未显式选择时：自动绑定 DSH 中「活跃会话」所在工作区（真实工作区，不是随便取一个）
     let picked='';
-    if(!wsOverride){
-      const sessions=(b&&b.sessions)||[];
-      const active=sessions.find(x=>String(x.status||'')!=='idle'&&String(x.status||'')!=='unknown')||sessions[0];
-      if(active){window.__activeSessionId=String(active.id||'')}
-      if(active&&active.cwd)picked=String(active.cwd);
-      if(picked)wsOverride=picked;
-    }
+    const sessions=(b&&b.sessions)||[];
+    const pSid=parentSessionId();
+    const active=sessions.find(x=>qsSession&&String(x.id)===qsSession)||sessions.find(x=>pSid&&String(x.id)===pSid)||sessions.find(x=>String(x.status||'')!=='idle'&&String(x.status||'')!=='unknown')||sessions[0];
+    if(active)window.__activeSessionId=String(active.id||'');
+    if(!wsOverride&&active&&active.cwd){picked=String(active.cwd);wsOverride=picked}
     if(wsOverride&&cwds.includes(wsOverride))sel.value=wsOverride;
     else if(picked&&cwds.includes(picked))sel.value=picked;
     sel.onchange=()=>{wsOverride=sel.value;try{localStorage.setItem('jarvis.workspace',wsOverride);localStorage.setItem('jarvis.workspace.manual','1')}catch(e){};location.reload()};
@@ -502,7 +514,7 @@ async function loadState(){
     const r=await fetch(apiUrl('/api/jarvis/state'),{cache:'no-store'});
     const body=await r.json();
     if(!body.ok||!body.snapshot)return;
-    LIVE.snap=body.snapshot;LIVE.connected=true;LIVE.demo=body.demo!==false;
+    LIVE.snap=body.snapshot;LIVE.connected=true;LIVE.demo=body.demo===true;
     renderAll();
     loadGreeting();
   }catch{LIVE.connected=false}

@@ -534,7 +534,7 @@ export function apply(ctx, config) {
               try {
                 const cwd = requestWorkspace(ctx, req)
                 if (!cwd) return sendJson(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA, reason: 'no workspace' })
-                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, snapshot: buildSnapshot(cwd, pluginMeta) })
+                return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, demo: false, snapshot: buildSnapshot(cwd, pluginMeta) })
               } catch (e) {
                 return sendJson(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
               }
