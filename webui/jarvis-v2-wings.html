@@ -310,11 +310,12 @@ const I18N={
 'detail.kicker':['{n} · 详情','{n} · DETAILS'],'detail.title':['详情','Details'],'empty.generic':['暂无内容','No content'],'empty.more':['暂无更多信息。','No more information.'],
 'detail.demo':['{n} · 演示','{n} · DEMO'],'detail.democopy':['这是演示内容。连接真实工作区后，这里会显示该卡片的完整信息。','Demo content. Connect a real workspace to see the full card details here.'],
 'cap.gap':['当前缺口：','Current gaps: '],'cap.gap.j':['当前缺口：{g}','Current gaps: {g}'],
+'cap.need':['需要你决定：{s}','Need your decision: {s}'],'cap.need.more':['（还有{q}件）',' (+{q} more)'],'cap.doing':['正在做：{a} · {s}','Working: {a} · {s}'],'cap.done':['刚完成：{s}','Just completed: {s}'],
 'cap.stage':['{l}阶段 · 已过 {d}/{t} 个阶段 · {k} 项任务执行中','{l} stage · {d}/{t} stages passed · {k} tasks executing'],
 'cap.idle':['先生，接入一个需求，我就按六阶段流程开工。',"Sir, give me a requirement and I'll start the six-stage pipeline."],
 'bind.info':['会话 {s} · 工作区 {w} · 团队 {t2}','Session {s} · Workspace {w} · Team {t2}'],
 'bind.demo':['已连接 · 演示工作区','Connected · demo workspace'],'bind.live':['已连接 · ','Connected · '],'bind.ws':['当前工作区','current workspace'],
-'sp.ws':['当前工作区：{w}。','Current workspace: {w}. '],'sp.stage':['阶段 {i}/{t}：{l}。','Stage {i}/{t}: {l}. '],'sp.tasks':['未完成任务 {k} 项，员工 {e} 人。','{k} open tasks, {e} employees. '],
+'sp.ws':['当前工作区：{w}。','Current workspace: {w}. '],'sp.need':['有{k}件事需要你决定，比如：{s}。','{k} items need your decision, e.g.: {s}. '],'sp.doing':['当前{a}正在做：{s}。','{a} is currently working on: {s}. '],'sp.done':['{s}已完成。','{s} is done. '],
 'sp.board':['黑板上有 {k} 项需要你决定。','{k} board items need your decision. '],'sp.gap':['当前有 {k} 项缺口待补齐。','{k} gaps to close. '],'sp.next':['下一步：{s}。','Next: {s}. '],
 'stage.none':['未开始','Not started'],'stage.na':['未接入','Not connected'],
 'prog.fallback':['{n} 任务舱','{n} Mission Room'],'prog.sub':['任务 · {tm} · 阶段 {i}/{t} {l}','MISSION · {tm} · Stage {i}/{t} {l}'],
@@ -396,7 +397,7 @@ const speakerToggle=document.getElementById('speakerToggle'),voiceEngineLabel=do
 const preferredNames=['Microsoft Xiaoxiao Online (Natural)','Microsoft Xiaoyi Online (Natural)','Microsoft Xiaohan Online (Natural)','Microsoft Xiaomeng Online (Natural)','Microsoft Huihui','Microsoft Yaoyao'];
 function selectJarvisVoice(){if(!('speechSynthesis'in window))return null;const isEn=window.JARVIS_LANG==='en';const voices=speechSynthesis.getVoices();let match=null;if(isEn){match=voices.find(v=>/^en(-|_|$)/i.test(v.lang)&&/natural|aria|zira|samantha|google uk english female|google us english/i.test(v.name))||voices.find(v=>/^en/i.test(v.lang))||null}else{for(const name of preferredNames){const m=voices.find(v=>v.name.includes(name)&&/zh|Chinese|中文/i.test(`${v.lang} ${v.name}`));if(m){match=m;break}}if(!match)match=voices.find(v=>/zh-CN/i.test(v.lang)&&/xiaoxiao|xiaoyi|xiaohan|xiaomeng|huihui|yaoyao|female|女/i.test(v.name))||voices.find(v=>/zh-CN/i.test(v.lang))||null}preferredVoice=match;voiceEngineLabel.textContent=match?t('voice.using').replace('{v}',match.name):t('voice.fallback');return match}
 function updateSpeakerUI(){if(!speakerToggle)return}
-let speakQueue=[],speakingNow=false,lastSpokenText='';
+let speakQueue=[],speakingNow=false,lastSpokenText='',capGreeted=false;
 function splitSentences(t){return String(t||'').replace(/\s+/g,' ').split(/(?<=[。！？!?；;])/).map(s=>s.trim()).filter(Boolean)}
 function speakServer(s){return fetch('/api/jarvis/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:s})}).then(async r=>{if(!r.ok)return false;const blob=await r.blob();const url=URL.createObjectURL(blob);const audio=new Audio(url);await new Promise(res=>{audio.onended=res;audio.onerror=res;audio.play().catch(res)});URL.revokeObjectURL(url);return true}).catch(()=>false)}
 function speakBrowser(s){return new Promise(resolve=>{if(!('speechSynthesis'in window))return resolve();const u=new SpeechSynthesisUtterance(s);u.lang='zh-CN';u.rate=.9;u.pitch=.86;u.volume=1;if(preferredVoice)u.voice=preferredVoice;u.onend=()=>resolve();u.onerror=()=>resolve();speechSynthesis.speak(u)})}
@@ -655,12 +656,19 @@ function renderMain(snap){
   const doing=tasks.filter(t=>!['completed','cancelled','dropped'].includes(t.status));
   const done=tasks.filter(t=>t.status==='completed');
   renderCards(snap);
-  // 唯一字幕：空闲时显示状态摘要，播报中不覆盖
+  // 唯一字幕：只报有用信息（待你决定 > 正在做 > 刚完成 > 空闲），不做任务计数/缺口清单；
+  // 内容与当前一致就不重写 DOM，杜绝轮询反复触发导致的"来回变"
   const cap=document.getElementById('captionText');
   if(cap&&!speakingNow){
-    if(stage.missing&&stage.missing.length)cap.textContent=t('cap.gap.j').replace('{g}',humanize(stage.missing.join('；')));
-    else if(stage.index)cap.textContent=t('cap.stage').replace('{l}',stage.label).replace('{d}',(stage.done||[]).length).replace('{t}',stage.total).replace('{k}',doing.length);
-    else cap.textContent=t('cap.idle');
+    const need=(board.needsUser&&board.needsUser[0])||null;
+    const busy=doing.find(x=>x.status==='in_progress')||doing.find(x=>x.status==='claimed')||null;
+    const lastDone=done.length?done[done.length-1]:null;
+    let capText='';
+    if(need&&need.content)capText=t('cap.need').replace('{s}',clip(humanize(String(need.content)),42))+(board.needsUser.length>1?t('cap.need.more').replace('{q}',board.needsUser.length-1):'');
+    else if(busy&&busy.subject)capText=t('cap.doing').replace('{a}',busy.assignee||t('st.member')).replace('{s}',clip(humanize(String(busy.subject)),42));
+    else if(lastDone&&lastDone.subject)capText=t('cap.done').replace('{s}',clip(humanize(String(lastDone.subject)),42));
+    else capText=t('cap.idle');
+    if(cap.textContent!==capText)cap.textContent=capText;
   }
   // 顶栏连接状态（诚实标注 demo / 真实工作区）
   const ok=$('.clockbox .ok');
@@ -674,11 +682,11 @@ function renderMain(snap){
     const ws=(snap.workspace&&(snap.workspace.name||snap.workspace.cwd))||t('bind.ws');
     const lines=[];
     lines.push(t('sp.ws').replace('{w}',ws));
-    lines.push(t('sp.stage').replace('{i}',stage.index||0).replace('{t}',stage.total||6).replace('{l}',stage.label||t('stage.na')));
-    lines.push(t('sp.tasks').replace('{k}',doing.length).replace('{e}',((snap.company&&snap.company.employees)||[]).length));
-    if(board.needsUser&&board.needsUser.length)lines.push(t('sp.board').replace('{k}',board.needsUser.length));
-    else if(stage.missing&&stage.missing.length)lines.push(t('sp.gap').replace('{k}',stage.missing.length));
-    else if(stage.next)lines.push(t('sp.next').replace('{s}',clip(humanize(String(stage.next)),40)));
+    if(board.needsUser&&board.needsUser.length&&board.needsUser[0]&&board.needsUser[0].content){lines.push(t('sp.need').replace('{s}',clip(humanize(String(board.needsUser[0].content)),40)).replace('{k}',board.needsUser.length))}
+    else{const busy2=doing.find(x=>x.status==='in_progress')||doing.find(x=>x.status==='claimed')||null;
+      if(busy2&&busy2.subject)lines.push(t('sp.doing').replace('{a}',busy2.assignee||t('st.member')).replace('{s}',clip(humanize(String(busy2.subject)),48)));
+      else if(stage.next)lines.push(t('sp.next').replace('{s}',clip(humanize(String(stage.next)),40)))}
+    if(done.length&&done[done.length-1]&&done[done.length-1].subject)lines.push(t('sp.done').replace('{s}',clip(humanize(String(done[done.length-1].subject)),40)));
     mainSpeech=sanitizeSpeech(lines.join(''));
   }catch(e){}
 }
@@ -848,7 +856,7 @@ async function loadGreeting(){
     const clean=sanitizeSpeech(b.text);
     const sentences=splitSentences(clean).slice(0,3);
     const shortText=sentences[0]?sentences[0].slice(0,64):'';
-    const cap=document.getElementById('captionText');if(cap&&!speakingNow)cap.textContent=shortText;
+    const cap=document.getElementById('captionText');if(cap&&!speakingNow&&!capGreeted&&shortText){cap.textContent=shortText;capGreeted=true}
     if(sentences.length)mainSpeech=sentences.join('');
     // 播报稿仍以阶段摘要短句为准（loadGreeting 不覆盖 mainSpeech、不自动播报）
   
