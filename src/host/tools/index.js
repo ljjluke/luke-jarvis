@@ -37,6 +37,9 @@ function agentCwd(agent) {
  * 两个注册时机（都要）：① apply 里 agent/created（首个请求就有阶段——新会话/压缩后重建也生效）
  * ② 首次执行 jarvis_* 工具（兜底：宿主不派发 agent/created 时仍能补上）。按 agent 幂等。
  */
+
+const DYNAMIC_PAGES_HINT = '\n\n[动态页面·现写现用] 需要给用户展示可视化详情（看板/报告/图表/长表格）时，把完整、可独立打开的 HTML 写到 <工作区>/.jarvis/pages/<id>.html（id 用小写字母数字连字符，≤64 字符；同一主题更新内容就覆盖同一 id）。用户在 Wings UI「动态页面」卡里点击查看；页面闲置 24 小时自动回收，无需手动清理。主页面/团队办公室/任务看板三个固定页之外的所有详情页都走这个通道。'
+
 export function ensureAgentStageSection(agent) {
   if (!agent || agent[STAGE_SECTION]) return
   const sp = agent.ctx && agent.ctx.systemPrompt
@@ -57,7 +60,7 @@ export function ensureAgentStageSection(agent) {
           } catch {
             facts = ''
           }
-          return facts ? stage + '\n\n' + facts : stage
+          return (facts ? stage + '\n\n' + facts : stage) + DYNAMIC_PAGES_HINT
         } catch {
           return ''
         }

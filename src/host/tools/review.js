@@ -193,7 +193,7 @@ export const REVIEW_TOOLS = [
         const protocolRefresh = [
           '【协议刷新 · 贾维斯】你所在工作区已升级到新版 jarvis——以下是升级后的成员协议（与你的角色卡不冲突，是新增的团队级约束），请立即纳入你的工作方式：',
           '① **深度思考（ponder 十阶段，可用资源不是闸）**：要做判断时（分析需求/方案决策/难点定位/返工根因/分歧/变更影响/收口判定/回应质疑）值得用它跑一轮（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis）；执行已定方案/汇报/查资料不必跑。插件不校验、不记录——交付里体现得出思考（反方攻击/失效边界/置信度）就行。',
-          '② ponder 执行：export PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ → node <ponder技能>/scripts/step-guard.cjs init "<问题>" → 逐阶段 before/after → verify 自检 → 回报 run_id+dataDir+evidenceDir（派活方用 jarvis_ponder_check 核验：顺序/完整性/子agent数/产出文件）。',
+          '② ponder 执行：export PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ → 成员会话再加 export PONDER_SOLO=1（成员是 depth-1 子agent 起不了孙agent，SOLO=主线程按 stages/<阶段>.json 逐维度自模拟独立成文）→ node <ponder技能>/scripts/step-guard.cjs init "<问题>" → 逐阶段 before/after → verify 自检 → 回报 run_id+dataDir+evidenceDir（派活方用 jarvis_ponder_check 核验：顺序/完整性/产出文件；SOLO run 的 agent 数按 0 核验不算缺陷）。',
           '③ 黑板即真相：问题/发现/决策/风险/阻塞/接口变更/资源需求 → jarvis_board 写公屏；资源需求（尤其只有客户能给的）必须上公屏闭环。',
           '④ 问题上行三件套：绕不开/无法抉择 → jarvis_escalate（问题+已尝试+风险细节+需决策什么），缺项打回。',
           '⑤ 卡住限时上报：同一问题约20-30分钟无进展必须上报；生产操作卡住立即上报。',
@@ -297,14 +297,15 @@ export const REVIEW_TOOLS = [
         '# 1) 起一个隔离数据目录（防与其他成员互相覆盖）',
         `export PONDER_DATA_DIR="${dataDirHint}"`,
         'mkdir -p "$PONDER_DATA_DIR"',
+        `export PONDER_SOLO=1  # 成员会话（无 subagent 权限）必加：SOLO 自模拟模式，主线程逐维度成文；captain/有 subagent 权限的会话不加`,
         '# 2) 初始化本次 run（记下返回的 run_id）',
         `node ${sg} init "<本次任务/决策摘要>"`,
         '# 3) 逐阶段执行：每阶段前 before、做完 after（阶段名与顺序固定）',
         `node ${sg} before interview`,
         `#    …按 ${ponderDir}/stages/<阶段>.json 的提示跑该阶段（配合 engine/*.md 的方法）…`,
         `node ${sg} after interview 0 0.45`,
-        '#    …shensi/divergence/bagua/plans/converge/score/simulate/debate/synthesis 依次同样处理',
-        '#      （子 agent 下限：bagua≥8、plans≥5、score≥3、simulate≥3、debate≥3）…',
+        '#      …shensi/divergence/bagua/plans/converge/score/simulate/debate/synthesis 依次同样处理',
+        '#      （有 subagent 权限：bagua≥8、plans≥5、score≥3、simulate≥3、debate≥3；PONDER_SOLO=1 时按 stages/<阶段>.json 逐维度自模拟独立成文，agent 数闸自动放宽）…',
         '# 4) 提交前自检（自己核对阶段是否跑完）',
         `node ${sg} verify <run_id> --evidence "$PONDER_DATA_DIR"`,
         '```',
@@ -530,7 +531,7 @@ export const REVIEW_TOOLS = [
         interview: '需求打磨', shensi: '神思', divergence: '发散', bagua: '八卦镜', plans: '方案',
         converge: '收敛', score: '方案评分', simulate: '推演', debate: '辩论', synthesis: '综合',
       }
-      const MIN_AGENTS = { interview: 0, shensi: 0, divergence: 0, bagua: 8, plans: 5, converge: 0, score: 3, simulate: 3, debate: 3, synthesis: 0 }
+      const MIN_AGENTS = { interview: 0, shensi: 0, divergence: 0, bagua: 8, plans: 5, converge: 0, score: 3, simulate: 3, debate: 3, synthesis: 0 } // SOLO run（state.solo=true，成员环境无子agent）agent 数按 0 核验
       const EXPECT_FILES = {
         interview: ['stage-interview.json', 'context.md'], shensi: ['stage-shensi.json'],
         divergence: ['stage-divergence.json'], bagua: ['stage-bagua.json'], plans: ['stage-plans.json'],
@@ -601,6 +602,7 @@ export const REVIEW_TOOLS = [
         issues.push('无顺序记录（completed 只是集合、看不出先后）——**顺序无法核验**，不能判定"按序跑完十阶段"')
       }
 
+      const soloMode = state.solo === true
       const agentShortfalls = []
       STEPS.forEach((s) => {
         if (!completed.includes(s)) return
@@ -608,7 +610,8 @@ export const REVIEW_TOOLS = [
         const got = Number((state.agents && state.agents[s]) || 0)
         if (got < need) agentShortfalls.push(`${LABELS[s]}(${s}) 需 ${need} 个，实际 ${got} 个`)
       })
-      if (agentShortfalls.length > 0) issues.push(`子 agent 数不足：${agentShortfalls.join('；')}`)
+      if (agentShortfalls.length > 0 && !soloMode) issues.push(`子 agent 数不足：${agentShortfalls.join('；')}`)
+      else if (agentShortfalls.length > 0 && soloMode) issues.push(`SOLO 自模拟 run（state.solo=true）：${agentShortfalls.join('；')} —— 成员环境无子agent，按十阶段顺序+产出文件核验，不算缺陷`)
 
       const evidenceMissing = []
       // 各阶段产出文件的关键字段（防"文件存在但空壳/无实质内容"——fs.existsSync 只看存在，不看内容）

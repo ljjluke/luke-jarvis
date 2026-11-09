@@ -20,10 +20,13 @@ export function readConfigValue(v) {
   return v
 }
 
-const DEFAULTS = { ui: 'wings', defaultWorkspace: '', voice: null }
+const DEFAULTS = { ui: 'wings', defaultWorkspace: '', name: 'Jarvis', lang: 'zh', voiceEnabled: true, voice: null }
 const VALIDATORS = {
   ui: (v) => v === 'wings' || v === 'legacy',
   defaultWorkspace: (v) => typeof v === 'string',
+  name: (v) => typeof v === 'string' && v.trim() !== '',
+  lang: (v) => v === 'zh' || v === 'en',
+  voiceEnabled: (v) => typeof v === 'boolean',
   voice: (v) => !!v && typeof v === 'object',
 }
 

@@ -57,7 +57,7 @@ const _require = createRequire(import.meta.url)
 import { TOOLS, ensureAgentStageSection } from './tools/index.js'
 import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
 import { readEvents } from './state/events.js'
-import { VOICE_PRESETS, publicVoiceConfig, readVoiceConfig, readVoiceConfigRaw, saveVoiceConfig, speechEndpoint } from './state/voice.js'
+import { VOICE_PRESETS, normalizeVoiceState, publicVoiceState, publicVoiceConfig, readVoiceConfig, readVoiceConfigRaw, resolveActiveVoice, saveVoiceConfig, speechEndpoint } from './state/voice.js'
 import { pickAgent, runCommand, sessionFacts, toolSpecs } from './state/command.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
@@ -138,13 +138,24 @@ export const Config = z.object({
   ui: z.union([z.const('wings'), z.const('legacy')]).default('wings').volatile(),
   /** 默认工作区：HTTP 接口解析不到会话 cwd 时的回退项目目录（留空 = process.cwd()）。 */
   defaultWorkspace: z.string().default('').volatile(),
+  /** 助手名字：界面称呼与语音唤醒词（默认 Jarvis），设置里可自定义。 */
+  name: z.string().default('Jarvis').volatile(),
+  /** 增强界面语言：zh=纯中文 / en=纯英文（Wings 页全量国际化）。 */
+  lang: z.union([z.const('zh'), z.const('en')]).default('zh').volatile(),
+  /** 语音播报开关：关闭后 Wings 不做任何 TTS 播报（语音识别/唤醒不受影响）。 */
+  voiceEnabled: z.boolean().default(true).volatile(),
   /** 语音（TTS）默认值：voice.json 已保存的值优先，缺省字段用这里兜底。apiKey 只写 voice.json，不进设置面板。 */
   voice: z.object({
-    provider: z.union([z.const('browser'), z.const('openai')]).default('browser'),
-    baseUrl: z.string().default('https://api.openai.com/v1'),
-    model: z.string().default('tts-1'),
-    voice: z.string().default('nova'),
-    speed: z.number().min(0.25).max(4).default(0.95),
+    active: z.string().default(''),
+    providers: z.array(z.object({
+      name: z.string().default(''),
+      protocol: z.union([z.const('browser'), z.const('openai'), z.const('aliyun')]).default('openai'),
+      baseUrl: z.string().default(''),
+      apiKey: z.string().default(''),
+      model: z.string().default(''),
+      voice: z.string().default('nova'),
+      speed: z.number().min(0.5).max(1.5).default(0.95),
+    })).default([]),
   }).default({}).volatile(),
   /** 实例角色：user=用户实例（上报+检测升级）/ dev=研发实例（工作区=源码仓，解锁 issue 巡检+修复链路）。 */
   workspaceMode: z.union([z.const('user'), z.const('dev')]).default('user').volatile(),
@@ -159,7 +170,7 @@ export const Config = z.object({
 }).default({})
 
 /** apply 期落定的运行配置（模块级，供路由/接口读取）。 */
-const PLUGIN_CONFIG = { ui: 'wings', defaultWorkspace: '', voice: null }
+const PLUGIN_CONFIG = { ui: 'wings', defaultWorkspace: '', name: 'Jarvis', lang: 'zh', voiceEnabled: true, voice: null }
 
 // PixOffice 快照 seq 兜底：以进程启动时间为基线（秒），重启后仍单调递增，
 // 避免依赖无人写入的 state.__seq 导致 SSE 序号回退。
@@ -503,19 +514,15 @@ export function apply(ctx, config) {
         }
         // 设置面板语音默认值：voice.json 显式保存的值优先，未保存字段用 Config.voice 兜底。
         // 用 readVoiceConfigRaw（不注入内置默认）才能区分「用户显式保存 browser」和「从未保存」。
-        const effectiveVoiceConfig = (raw) => {
-          const d = PLUGIN_CONFIG.voice || {}
-          const s = raw && typeof raw === 'object' ? raw : {}
-          const pick = (v, fb) => (v === undefined || v === null || v === '') ? fb : v
-          return {
-            provider: pick(s.provider, d.provider || 'browser'),
-            baseUrl: pick(s.baseUrl, d.baseUrl || ''),
-            model: pick(s.model, d.model || ''),
-            voice: pick(s.voice, d.voice || 'nova'),
-            speed: pick(s.speed, d.speed != null ? d.speed : 0.95),
-            apiKey: s.apiKey || '',
-          }
+        // 语音多供应商：voice.json 是事实源；Config.voice 只在 voice.json 为空时兜底。
+        const effectiveVoiceState = (raw) => {
+          const d = PLUGIN_CONFIG.voice && typeof PLUGIN_CONFIG.voice === 'object' ? PLUGIN_CONFIG.voice : {}
+          const s = normalizeVoiceState(raw)
+          const providers = (s.providers && s.providers.length) ? s.providers : normalizeVoiceState(d).providers
+          const active = s.active || normalizeVoiceState(d).active || ''
+          return { active, providers }
         }
+        const effectiveVoiceConfig = (raw) => resolveActiveVoice(effectiveVoiceState(raw))
         const sendJson = (res, status, body) => {
           try {
             res.writeHead(status, {
@@ -733,6 +740,23 @@ export function apply(ctx, config) {
             },
           })
         )
+        //   GET /api/jarvis/persona → 助手名字（设置里可配置，默认 Jarvis；wings 页称呼与唤醒词共用）
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/persona',
+            handler: async (req, res) => {
+              try {
+                const name = String((PLUGIN_CONFIG && PLUGIN_CONFIG.name) || 'Jarvis').trim() || 'Jarvis'
+                const lang = (PLUGIN_CONFIG && PLUGIN_CONFIG.lang) === 'en' ? 'en' : 'zh'
+                const voiceEnabled = !(PLUGIN_CONFIG && PLUGIN_CONFIG.voiceEnabled === false)
+                return sendJson(res, 200, { ok: true, name, lang, voiceEnabled })
+              } catch (e) {
+                return sendJson(res, 200, { ok: true, name: 'Jarvis', lang: 'zh', voiceEnabled: true })
+              }
+            },
+          })
+        )
         //   GET  /api/jarvis/voice  → 配置（apiKey 掩码）+ 音色/模型预设
         //   PUT  /api/jarvis/voice  → 保存（apiKey 空字符串 = 保留原值）
         //   POST /api/jarvis/tts    → 代理到 OpenAI 兼容 /audio/speech（key 不出本机）
@@ -747,9 +771,9 @@ export function apply(ctx, config) {
                   const body = await readJsonBody(req)
                   if (!body || typeof body !== 'object') return sendJson(res, 400, { ok: false, error: '请求体必须是 JSON' })
                   const saved = saveVoiceConfig(body)
-                  return sendJson(res, 200, { ok: true, config: publicVoiceConfig(effectiveVoiceConfig(saved)), presets: VOICE_PRESETS })
+                  return sendJson(res, 200, { ok: true, config: publicVoiceState(effectiveVoiceState(saved)), presets: VOICE_PRESETS })
                 }
-                return sendJson(res, 200, { ok: true, config: publicVoiceConfig(effectiveVoiceConfig(readVoiceConfigRaw())), presets: VOICE_PRESETS })
+                return sendJson(res, 200, { ok: true, config: publicVoiceState(effectiveVoiceState(readVoiceConfigRaw())), presets: VOICE_PRESETS })
               } catch (e) {
                 return sendJson(res, 500, { ok: false, error: String((e && e.message) || e) })
               }
@@ -767,6 +791,39 @@ export function apply(ctx, config) {
               if (!text) return sendJson(res, 400, { ok: false, error: '缺少 text' })
               if (text.length > 1200) return sendJson(res, 400, { ok: false, error: 'text 过长（>1200 字）' })
               const cfg = effectiveVoiceConfig(readVoiceConfigRaw())
+              // ── 阿里云百炼（DashScope）qwen-tts / CosyVoice：非 OpenAI 协议，单独适配 ──
+              if (cfg.provider === 'aliyun') {
+                if (!cfg.apiKey) return sendJson(res, 400, { ok: false, error: '未配置阿里云百炼 API Key', fallback: 'browser', hint: '在设置里填 DashScope API Key（百炼控制台 → API-KEY），有免费额度' })
+                try {
+                  const base = String(cfg.baseUrl || 'https://dashscope.aliyuncs.com').replace(/\/+$/, '')
+                  const modelName = String((body && body.model) || cfg.model || 'qwen-tts')
+                  const voiceName = String((body && body.voice) || cfg.voice || 'Cherry')
+                  const upstream = await fetch(base + '/api/v1/services/aigc/multimodal-generation/generation', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+                    body: JSON.stringify({ model: modelName, input: { text, voice: voiceName }, parameters: {} }),
+                    signal: AbortSignal.timeout(45000),
+                  })
+                  const j = await upstream.json().catch(() => null)
+                  const audioUrl = j && j.output && j.output.audio && j.output.audio.url
+                  const b64 = j && j.output && j.output.audio && j.output.audio.data
+                  if (b64) {
+                    const buf = Buffer.from(String(b64), 'base64')
+                    res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': String(buf.length), 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
+                    res.end(buf)
+                    return undefined
+                  }
+                  if (!audioUrl) return sendJson(res, 502, { ok: false, error: 'DashScope 未返回音频', detail: JSON.stringify(j || {}).slice(0, 300) })
+                  const audio = await fetch(audioUrl, { signal: AbortSignal.timeout(45000) })
+                  if (!audio.ok) return sendJson(res, 502, { ok: false, error: `音频下载失败 ${audio.status}` })
+                  const buf = Buffer.from(await audio.arrayBuffer())
+                  res.writeHead(200, { 'content-type': audio.headers.get('content-type') || 'audio/wav', 'content-length': String(buf.length), 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
+                  res.end(buf)
+                  return undefined
+                } catch (e) {
+                  return sendJson(res, 502, { ok: false, error: '阿里云 TTS 调用失败', detail: String((e && e.message) || e), fallback: 'browser' })
+                }
+              }
               const endpoint = speechEndpoint(cfg)
               if (cfg.provider !== 'openai' || !endpoint || !cfg.apiKey) {
                 return sendJson(res, 400, {
@@ -867,6 +924,91 @@ export function apply(ctx, config) {
                 // Wings 文件缺失时回退 v2，保证入口永不 404
                 res.writeHead(302, { location: '/jarvis-office/v2/index.html', 'cache-control': 'no-store' })
                 res.end('→ /jarvis-office/v2/index.html')
+              }
+            },
+          })
+        )
+
+        // 0.995) Wings 动态页面：Jarvis 现写现用、用完即回收。
+        //   写入：Jarvis 用文件写工具把完整 HTML 写到 <workspace>/.jarvis/pages/<id>.html；
+        //   读取：GET /jarvis-wings/dyn/<id>（touch lastAccess）；列表：GET /api/luke-jarvis/pages；
+        //   回收：闲置( now-max(lastAccess,created) )>24h 的页面在每次访问时清扫；
+        //         dsh-gc 再以 48h 阈值对 .jarvis/pages 整目录兜底入墓园。
+        const JARVIS_PAGE_TTL_MS = 24 * 3600 * 1000
+        const jarvisPagesDirOf = (cwd) => path.join(String(cwd || ''), '.jarvis', 'pages')
+        const jarvisPageIdOk = (id) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(String(id || ''))
+        const jarvisPagesReadJson = (file) => { try { return JSON.parse(fsm.readFileSync(file, 'utf8')) } catch { return {} } }
+        const jarvisPagesWriteJson = (file, obj) => { try { fsm.mkdirSync(path.dirname(file), { recursive: true }); fsm.writeFileSync(file, JSON.stringify(obj, null, 1)) } catch {} }
+        const jarvisPagesSweep = (dir) => {
+          try {
+            if (!fsm.existsSync(dir)) return
+            const manFile = path.join(dir, 'manifest.json')
+            const man = jarvisPagesReadJson(manFile)
+            const now = Date.now()
+            let changed = false
+            for (const [id, meta] of Object.entries(man)) {
+              const f = path.join(dir, id + '.html')
+              if (!fsm.existsSync(f)) { delete man[id]; changed = true; continue }
+              const last = Math.max(Number(meta && meta.lastAccess) || 0, Number(meta && meta.created) || 0)
+              if (now - last > JARVIS_PAGE_TTL_MS) {
+                try { fsm.unlinkSync(f) } catch {}
+                delete man[id]; changed = true
+                console.log('[luke-jarvis] 动态页面回收（闲置>24h）:', id)
+              }
+            }
+            if (changed) jarvisPagesWriteJson(manFile, man)
+          } catch { /* 清扫失败不影响读取 */ }
+        }
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/jarvis-wings/dyn',
+            handler: async (req, res) => {
+              try {
+                const raw = decodeURIComponent(String((req && req.url) || '').split('?')[0].replace(/^\/jarvis-wings\/dyn\//, '').replace(/\.html$/, ''))
+                if (!jarvisPageIdOk(raw)) { res.writeHead(403); return res.end('forbidden') }
+                const cwd = requestWorkspace(ctx, req)
+                const dir = jarvisPagesDirOf(cwd)
+                const file = path.join(dir, raw + '.html')
+                if (!cwd || !file.startsWith(dir) || !fsm.existsSync(file)) {
+                  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+                  return res.end('页面不存在或已被回收（闲置 24 小时自动清理）')
+                }
+                jarvisPagesSweep(dir)
+                const manFile = path.join(dir, 'manifest.json')
+                const man = jarvisPagesReadJson(manFile)
+                man[raw] = Object.assign({}, man[raw] || { title: raw, created: Date.now() }, { lastAccess: Date.now() })
+                jarvisPagesWriteJson(manFile, man)
+                const data = fsm.readFileSync(file)
+                res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+                return res.end(data)
+              } catch (e) {
+                try { res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }); res.end('error') } catch {}
+              }
+            },
+          })
+        )
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/luke-jarvis/pages',
+            handler: async (req, res) => {
+              const send = (status, body) => {
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+              }
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return send(200, { ok: true, active: false, pages: [] })
+                const dir = jarvisPagesDirOf(cwd)
+                jarvisPagesSweep(dir)
+                const man = jarvisPagesReadJson(path.join(dir, 'manifest.json'))
+                const pages = Object.entries(man)
+                  .map(([id, m]) => ({ id, title: String((m && m.title) || id), created: Number((m && m.created) || 0), lastAccess: Number((m && m.lastAccess) || 0) }))
+                  .sort((a, b) => b.created - a.created)
+                  .slice(0, 12)
+                return send(200, { ok: true, active: true, pages })
+              } catch (e) {
+                return send(200, { ok: false, pages: [], error: String((e && e.message) || e) })
               }
             },
           })

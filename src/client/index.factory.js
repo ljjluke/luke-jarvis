@@ -52,22 +52,29 @@ const zh = {
   'section.basic': '基本',
   'section.voice': '语音（TTS）',
   'section.evolution': 'GitHub 自进化闭环',
-  'field.ui.label': '默认 UI',
-  'field.ui.hint': 'wings = 全息 Wings（3D 核心 + 真实任务点）；legacy = v2 数据适配页。',
-  'field.defaultWorkspace.label': '默认工作区',
-  'field.defaultWorkspace.hint': '解析不到会话目录时的回退项目路径，留空 = 进程当前目录。',
+  'field.name.label': '助手名字',
+  'field.name.hint': '界面称呼与语音唤醒词。默认 Jarvis；叫它的名字即可唤醒对话，无需手动开启麦克风。',
+  'field.lang.label': '界面语言',
+  'field.lang.hint': '增强 UI（Wings）显示语言：zh = 纯中文，en = 纯英文。保存后刷新页面生效。',
+  'field.voiceEnabled.label': '语音功能',
+  'field.voiceEnabled.hint': '总开关：开启后可用语音唤醒待命与语音播报；关闭后不自动开麦、不播报，一切通过文字交互。保存后刷新页面生效。',
   'field.workspaceMode.label': '实例角色',
   'field.workspaceMode.hint': 'user = 用户实例（上报 + 检测升级）；dev = 研发实例（工作区是源码仓，解锁 issue 巡检与修复链路）。',
-  'field.voiceProvider.label': '语音提供方',
-  'field.voiceProvider.hint': 'browser = 浏览器内置语音；openai = OpenAI 兼容 TTS 接口。',
-  'field.voiceBaseUrl.label': 'TTS 接口地址',
-  'field.voiceBaseUrl.hint': 'OpenAI 兼容接口的 base URL（仅 openai 提供方使用）。',
-  'field.voiceModel.label': 'TTS 模型',
-  'field.voiceModel.hint': '如 tts-1。留空回落部署默认。',
-  'field.voiceVoice.label': '音色',
-  'field.voiceVoice.hint': '如 nova。留空回落部署默认。',
-  'field.voiceSpeed.label': '语速',
-  'field.voiceSpeed.hint': '0.25 ~ 4，默认 0.95。',
+  'field.voiceProviders.label': '语音模型（供应商卡片）',
+  'field.voiceProviders.hint': '供应商不锁死，按协议接入：browser = 浏览器本地语音；openai = 任意 OpenAI 兼容 /audio/speech（换厂商只改 Base URL）；aliyun = DashScope。点「＋ 添加供应商」加卡片，点卡片上的「设为当前」即切换。API Key 只写不读，空 = 保留原值。',
+  'field.voiceProviders.add': '＋ 添加供应商',
+  'field.voiceProviders.use': '设为当前',
+  'field.voiceProviders.active': '当前 ✓',
+  'field.voiceProviders.useHint': '将此供应商设为当前生效（浏览器协议卡片不可设为当前）',
+  'field.voiceProviders.useBrowserHint': 'browser 协议即浏览器本地语音，无需设为当前',
+  'field.voiceProviders.del': '删除',
+  'field.voiceProviders.namePh': '供应商名称（必填，如：我的OpenAI）',
+  'field.voiceProviders.protocol': '协议',
+  'field.voiceProviders.baseUrl': 'Base URL',
+  'field.voiceProviders.apiKey': 'API Key',
+  'field.voiceProviders.model': '模型',
+  'field.voiceProviders.voice': '音色',
+  'field.voiceProviders.speed': '语速',
   'field.githubRepo.label': 'GitHub 仓库',
   'field.githubRepo.hint': 'owner/name，自进化闭环上报与巡检的目标仓库。',
   'field.githubToken.label': 'GitHub Token',
@@ -94,22 +101,29 @@ const en = {
   'section.basic': 'General',
   'section.voice': 'Voice (TTS)',
   'section.evolution': 'GitHub self-evolution',
-  'field.ui.label': 'Default UI',
-  'field.ui.hint': 'wings = holographic Wings (3D core + live tasks); legacy = v2 data page.',
-  'field.defaultWorkspace.label': 'Default workspace',
-  'field.defaultWorkspace.hint': 'Fallback project directory when no session cwd resolves; empty = process cwd.',
+  'field.name.label': 'Assistant name',
+  'field.name.hint': 'Display name and wake word. Default Jarvis; call the name to start talking, no mic button needed.',
+  'field.lang.label': 'UI language',
+  'field.lang.hint': 'Wings UI language: zh = Chinese, en = English. Refresh the page after saving.',
+  'field.voiceEnabled.label': 'Voice',
+  'field.voiceEnabled.hint': 'Master switch: when on, wake-word standby and speech are available; when off, the mic never auto-starts and nothing is spoken — use text instead. Refresh the page after saving.',
   'field.workspaceMode.label': 'Instance role',
   'field.workspaceMode.hint': 'user = report issues + check upgrades; dev = source-checkout instance (issue triage + fix pipeline).',
-  'field.voiceProvider.label': 'Voice provider',
-  'field.voiceProvider.hint': 'browser = built-in speech; openai = OpenAI-compatible TTS endpoint.',
-  'field.voiceBaseUrl.label': 'TTS base URL',
-  'field.voiceBaseUrl.hint': 'OpenAI-compatible base URL (openai provider only).',
-  'field.voiceModel.label': 'TTS model',
-  'field.voiceModel.hint': 'e.g. tts-1. Empty = deployment default.',
-  'field.voiceVoice.label': 'Voice',
-  'field.voiceVoice.hint': 'e.g. nova. Empty = deployment default.',
-  'field.voiceSpeed.label': 'Speech rate',
-  'field.voiceSpeed.hint': '0.25 – 4, default 0.95.',
+  'field.voiceProviders.label': 'Voice models (provider cards)',
+  'field.voiceProviders.hint': 'Protocol-based, vendor-free: browser = built-in speech; openai = any OpenAI-compatible /audio/speech (switch vendor by Base URL); aliyun = DashScope. Click "Add provider" for a new card, "Set active" on a card to switch. API Keys are write-only; empty keeps the saved value.',
+  'field.voiceProviders.add': '+ Add provider',
+  'field.voiceProviders.use': 'Set active',
+  'field.voiceProviders.active': 'Active ✓',
+  'field.voiceProviders.useHint': 'Make this provider active (browser cards cannot be set active)',
+  'field.voiceProviders.useBrowserHint': 'browser protocol means local browser speech; no need to activate',
+  'field.voiceProviders.del': 'Delete',
+  'field.voiceProviders.namePh': 'Provider name (required, e.g. My OpenAI)',
+  'field.voiceProviders.protocol': 'Protocol',
+  'field.voiceProviders.baseUrl': 'Base URL',
+  'field.voiceProviders.apiKey': 'API Key',
+  'field.voiceProviders.model': 'Model',
+  'field.voiceProviders.voice': 'Voice',
+  'field.voiceProviders.speed': 'Speed',
   'field.githubRepo.label': 'GitHub repository',
   'field.githubRepo.hint': 'owner/name used by the self-evolution loop.',
   'field.githubToken.label': 'GitHub token',
@@ -124,21 +138,19 @@ const en = {
 
 // ── 表单字段描述器（与 host Config 的 volatile 字段一一对应）──
 const FIELDS = [
-  { id: 'ui', section: 'basic', path: ['ui'], type: 'select', options: ['wings', 'legacy'], fallback: 'wings', label: 'field.ui' },
-  { id: 'defaultWorkspace', section: 'basic', path: ['defaultWorkspace'], type: 'text', label: 'field.defaultWorkspace' },
-  { id: 'workspaceMode', section: 'basic', path: ['workspaceMode'], type: 'select', options: ['user', 'dev'], fallback: 'user', label: 'field.workspaceMode' },
-  { id: 'voiceProvider', section: 'voice', path: ['voice', 'provider'], type: 'select', options: ['browser', 'openai'], fallback: 'browser', label: 'field.voiceProvider' },
-  { id: 'voiceBaseUrl', section: 'voice', path: ['voice', 'baseUrl'], type: 'text', label: 'field.voiceBaseUrl' },
-  { id: 'voiceModel', section: 'voice', path: ['voice', 'model'], type: 'text', label: 'field.voiceModel' },
-  { id: 'voiceVoice', section: 'voice', path: ['voice', 'voice'], type: 'text', label: 'field.voiceVoice' },
-  { id: 'voiceSpeed', section: 'voice', path: ['voice', 'speed'], type: 'number', min: 0.25, max: 4, step: 0.05, label: 'field.voiceSpeed' },
-  { id: 'githubRepo', section: 'evolution', path: ['selfEvolution', 'githubRepo'], type: 'text', label: 'field.githubRepo' },
-  { id: 'githubToken', section: 'evolution', path: ['selfEvolution', 'githubToken'], type: 'password', label: 'field.githubToken' },
-  { id: 'reportMode', section: 'evolution', path: ['selfEvolution', 'reportMode'], type: 'select', options: ['confirm', 'auto'], fallback: 'confirm', label: 'field.reportMode' },
-  { id: 'approvalRequired', section: 'evolution', path: ['selfEvolution', 'approvalRequired'], type: 'checkbox', label: 'field.approvalRequired' },
-  { id: 'releaseChannel', section: 'evolution', path: ['selfEvolution', 'releaseChannel'], type: 'select', options: ['stable', 'latest'], fallback: 'stable', label: 'field.releaseChannel' },
+  // 2026-11-09 精简：默认UI 只有一套（wings）不再可配；工作区由进入的会话决定（切换归 DSH），不做配置项。
+  // 2026-11-09 名字可自定义：界面称呼 + 语音唤醒词共用。
+  { id: 'name', section: 'basic', path: ['name'], type: 'text', fallback: 'Jarvis', label: 'field.name' },
+  // 2026-11-09 界面语言：增强 UI 全量国际化（zh/en）。
+  { id: 'lang', section: 'basic', path: ['lang'], type: 'select', options: ['zh', 'en'], fallback: 'zh', label: 'field.lang' },
+  // 2026-11-09 语音播报开关：TTS 总开关移入设置（原 UI 内按钮已移除）。
+  { id: 'voiceEnabled', section: 'basic', path: ['voiceEnabled'], type: 'checkbox', fallback: true, label: 'field.voiceEnabled' },
+  // 2026-11-09 精简：只暴露核心字段；TTS 细节（apiKey/baseUrl/model/voice/speed）
+  // 不再出现在设置卡片，已保存的值仍从服务端 accepted 配置读取并生效。
+  // 2026-11-09 语音供应商不锁死：按协议接入，多卡片可增删与切换（事实源 voice.json）。
+  { id: 'voiceProviders', section: 'voice', path: ['voice'], type: 'providers', label: 'field.voiceProviders' },
 ]
-const SECTIONS = ['basic', 'voice', 'evolution']
+const SECTIONS = ['basic', 'voice']
 
 // ── 配置模型：settings scope 快照 → 页面快照（组件里没有任何订阅机制）──
 const UNSERVED = { status: 'unavailable', writable: false, revision: undefined, value: {}, base: {}, user: {} }
@@ -333,7 +345,9 @@ function registerSessionEntry(ctx) {
           const f = document.getElementById('jarvisFrame')
           if (f && sid) f.src = '/jarvis-wings?embedded=1&session=' + encodeURIComponent(sid)
         } catch (e) {}
-        try { ctx.layout.selectPanel('jarvis') } catch (e) {}
+        let switched = true
+        try { ctx.layout.selectPanel('jarvis') } catch (e) { switched = false }
+        if (!switched) { try { window.open('/jarvis-wings?embedded=1&session=' + encodeURIComponent(sid), '_blank', 'noopener') } catch (e) {} }
       },
       style: { display: 'inline-flex', alignItems: 'center', gap: '5px', height: '24px', padding: '0 8px', cursor: 'pointer', border: '1px solid rgba(112,234,255,.22)', borderRadius: '4px', background: 'rgba(5,20,31,.45)', color: '#9fd9ea', font: '9px/1 "Microsoft YaHei", sans-serif' },
     }, h('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: '#70eaff', boxShadow: '0 0 6px #70eaff' } }), '贾维斯')
@@ -345,22 +359,12 @@ function registerSessionEntry(ctx) {
 }
 
 function registerMainPanel(ctx) {
-  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
-    { name: 'sidebar.panellist', id: 'jarvis', order: 50, label: '贾维斯' },
-    JarvisPanelIcon,
-  ))
+  // 2026-11-09 单入口化：移除侧栏面板图标（sidebar.panellist）与悬浮浮动块（shell.overlay）。
+  // 只保留会话头部按钮（conversation.session.header.actions）作为唯一入口；
+  // main 面板保留，供会话按钮 selectPanel('jarvis') 后作为 iframe 容器显示。
   ctx.slots.inject('main', () => ctx.slots.register(
     { name: 'main', key: 'jarvis' },
     JarvisMainPage,
-  ))
-  // 悬浮浮动块（shell.overlay）+ 侧栏底部按钮（sidebar.footer.action）——保证「有入口」
-  const Floating = (props) => {
-    const size = Number(props && props.size) || 56
-    return h(JarvisFloatingBlock, { size, active: props && props.active, onOpen: () => openJarvis(ctx) })
-  }
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register(
-    { name: 'shell.overlay', id: 'jarvis-floating-block', order: 100, label: '贾维斯浮动块' },
-    Floating,
   ))
 }
 
@@ -385,6 +389,24 @@ function registerConfigCard(ctx) {
 }
 
 // ── 草稿读写 ──
+/** voice 配置 → 草稿（apiKey 只写不读：草稿里恒空，保存时空 = 按 name 保留原值）。 */
+function normProvidersDraft(v) {
+  const o = v && typeof v === 'object' && !Array.isArray(v) ? v : {}
+  const list = Array.isArray(o.providers) ? o.providers : []
+  return {
+    active: typeof o.active === 'string' ? o.active : '',
+    providers: list.map((p) => ({
+      name: String((p && p.name) || '').trim(),
+      protocol: ['browser', 'openai', 'aliyun'].includes(String(p && p.protocol)) ? String(p.protocol) : 'openai',
+      baseUrl: String((p && p.baseUrl) || '').trim(),
+      apiKey: '',
+      model: String((p && p.model) || '').trim(),
+      voice: String((p && p.voice) || '').trim(),
+      speed: Math.max(0.5, Math.min(1.5, Number(p && p.speed) || 0.95)),
+    })),
+  }
+}
+
 function readDraft(accepted) {
   const draft = {}
   for (const f of FIELDS) {
@@ -392,6 +414,7 @@ function readDraft(accepted) {
     if (f.type === 'checkbox') draft[f.id] = v === true
     else if (f.type === 'select') draft[f.id] = typeof v === 'string' && v ? v : f.fallback
     else if (f.type === 'number') draft[f.id] = typeof v === 'number' ? String(v) : ''
+    else if (f.type === 'providers') draft[f.id] = normProvidersDraft(v)
     else draft[f.id] = typeof v === 'string' ? v : ''
   }
   return draft
@@ -413,13 +436,21 @@ function isOverridden(user, path) {
 /** 草稿值 → 写入值；空文本/空数字 = undefined（清除覆盖，回落部署默认）。 */
 function draftValue(f, draft) {
   const raw = draft[f.id]
-  if (f.type === 'checkbox' || f.type === 'select') return raw
+  if (f.type === 'checkbox' || f.type === 'select' || f.type === 'providers') return raw
   if (raw === '') return undefined
   if (f.type === 'number') return Number(raw)
   return raw
 }
 
 function validField(f, draft) {
+  if (f.type === 'providers') {
+    const v = draft[f.id] || { active: '', providers: [] }
+    const names = (v.providers || []).map((p) => String(p.name || '').trim())
+    if (names.some((n) => !n)) return false
+    if (new Set(names).size !== names.length) return false
+    if (v.active && !names.includes(v.active)) return false
+    return true
+  }
   if (f.type !== 'number') return true
   const raw = draft[f.id]
   if (raw === '') return true
@@ -545,6 +576,42 @@ function renderField({ f, t, draft, setDraft, snapshot, editable, key }) {
     ])
   }
 
+  if (f.type === 'providers') {
+    const val = draft[f.id] || { active: '', providers: [] }
+    const upd = (next) => set({ ...val, ...next })
+    const updCard = (idx, patch) => upd({ providers: val.providers.map((x, i) => (i === idx ? { ...x, ...patch } : x)) })
+    const isBrowser = (p) => p.protocol === 'browser'
+    const cards = val.providers.map((p, idx) => h('div', { key: `card-${idx}`, className: 'lkj-prov-card' }, [
+      h('div', { key: 'head', className: 'lkj-prov-head' }, [
+        h('input', { key: 'name', className: 'lkj-prov-name', type: 'text', value: p.name, placeholder: t('field.voiceProviders.namePh'), disabled: !editable, onChange: (e) => updCard(idx, { name: e.currentTarget.value }) }),
+        h('button', { key: 'use', type: 'button', className: `lkj-prov-use${val.active === p.name ? ' on' : ''}`, disabled: !editable || isBrowser(p), title: isBrowser(p) ? t('field.voiceProviders.useBrowserHint') : t('field.voiceProviders.useHint'), onClick: () => upd({ active: val.active === p.name ? '' : p.name }) }, val.active === p.name ? t('field.voiceProviders.active') : t('field.voiceProviders.use')),
+        h('button', { key: 'del', type: 'button', className: 'lkj-prov-del', disabled: !editable, onClick: () => upd({ providers: val.providers.filter((_, i) => i !== idx), active: val.active === p.name ? '' : val.active }) }, t('field.voiceProviders.del')),
+      ]),
+      h('div', { key: 'grid', className: 'lkj-prov-grid' }, [
+        h('label', { key: 'lp' }, t('field.voiceProviders.protocol'),
+          h('select', { value: p.protocol, disabled: !editable, onChange: (e) => updCard(idx, { protocol: e.currentTarget.value }) },
+            ['browser', 'openai', 'aliyun'].map((op) => h('option', { key: op, value: op }, op)))),
+        h('label', { key: 'lu' }, t('field.voiceProviders.baseUrl'),
+          h('input', { type: 'text', value: p.baseUrl, placeholder: 'https://api.openai.com/v1', disabled: !editable || isBrowser(p), onChange: (e) => updCard(idx, { baseUrl: e.currentTarget.value }) })),
+        h('label', { key: 'lk' }, t('field.voiceProviders.apiKey'),
+          h('input', { type: 'password', value: p.apiKey, placeholder: isBrowser(p) ? '' : 'sk-…（空 = 保留原值）', disabled: !editable || isBrowser(p), autoComplete: 'off', onChange: (e) => updCard(idx, { apiKey: e.currentTarget.value }) })),
+        h('label', { key: 'lm' }, t('field.voiceProviders.model'),
+          h('input', { type: 'text', value: p.model, placeholder: isBrowser(p) ? '' : 'gpt-4o-mini-tts / cosyvoice-v2 / …', disabled: !editable || isBrowser(p), onChange: (e) => updCard(idx, { model: e.currentTarget.value }) })),
+        h('label', { key: 'lv' }, t('field.voiceProviders.voice'),
+          h('input', { type: 'text', value: p.voice, placeholder: 'nova', disabled: !editable || isBrowser(p), onChange: (e) => updCard(idx, { voice: e.currentTarget.value }) })),
+        h('label', { key: 'ls' }, t('field.voiceProviders.speed'),
+          h('input', { type: 'number', min: 0.5, max: 1.5, step: 0.05, value: p.speed, disabled: !editable || isBrowser(p), onChange: (e) => updCard(idx, { speed: Number(e.currentTarget.value) || 0.95 }) })),
+      ]),
+    ]))
+    return h('div', { key, className: 'lkj-field' }, [
+      h('div', { key: 'label', className: 'lkj-field-label' }, [h('label', { key: 'l' }, label), badge]),
+      h('span', { key: 'hint', className: 'lkj-field-hint', id: `${id}-hint` }, hint),
+      h('div', { key: 'list', className: 'lkj-prov-list' }, cards),
+      h('button', { key: 'add', type: 'button', className: 'lkj-prov-add', disabled: !editable, onClick: () => upd({ providers: [...val.providers, { name: '', protocol: 'openai', baseUrl: '', apiKey: '', model: '', voice: 'nova', speed: 0.95 }] }) }, t('field.voiceProviders.add')),
+      !validField(f, draft) ? h('span', { key: 'invalid', className: 'lkj-invalid' }, t('card.invalid')) : null,
+    ])
+  }
+
   let input
   if (f.type === 'select') {
     input = h('select', {
@@ -582,9 +649,30 @@ function renderField({ f, t, draft, setDraft, snapshot, editable, key }) {
   ])
 }
 
-// ── 样式：主题令牌（--dsw-alias-*）+ 全局唯一 lkj- 前缀 ──
+// ── 样式：主题令牌 + 全局唯一 lkj- 前缀 ──
+// 主题策略：DSH 通过 body[data-ds-dark-theme] 属性切换深浅色；这里定义本地令牌层
+// --lkj-*（DSH 原生 dsw-alias 令牌优先，字面色兜底），属性切换时浏览器即时重算，
+// 无需任何 JS 监听。color-scheme 让原生 <select> 弹出层（option 列表）也跟随主题。
 const CSS = `
-.lkj-form { display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 1.6; }
+.lkj-form {
+  display: flex; flex-direction: column; gap: 12px; font-size: 13px; line-height: 1.6;
+  --lkj-text: var(--dsw-alias-label-primary, #1f2328);
+  --lkj-text-dim: var(--dsw-alias-label-tertiary, rgba(31,35,40,0.65));
+  --lkj-bg: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base, #ffffff));
+  --lkj-border: var(--dsw-alias-border-l2, rgba(31,35,40,0.28));
+  --lkj-hover: var(--dsw-alias-bg-layer-2, rgba(31,35,40,0.06));
+  --lkj-danger: var(--dsw-alias-state-error-primary, #d64545);
+  color-scheme: light;
+}
+body[data-ds-dark-theme] .lkj-form {
+  --lkj-text: var(--dsw-alias-label-primary, #f9fafb);
+  --lkj-text-dim: var(--dsw-alias-label-tertiary, rgba(249,250,251,0.62));
+  --lkj-bg: var(--dsw-alias-bg-layer-1, var(--dsw-alias-bg-base, #2b2f36));
+  --lkj-border: var(--dsw-alias-border-l2, rgba(249,250,251,0.26));
+  --lkj-hover: var(--dsw-alias-bg-layer-2, rgba(249,250,251,0.10));
+  --lkj-danger: var(--dsw-alias-state-error-primary, #ff8080);
+  color-scheme: dark;
+}
 .lkj-form-title { margin: 0; font-size: 16px; line-height: 1.4; }
 .lkj-section { margin: 8px 0 0; font-size: 13px; line-height: 1.4; opacity: 0.7; }
 .lkj-summary, .lkj-note { margin: 0; opacity: 0.75; font-size: 13px; line-height: 1.6; }
@@ -594,24 +682,35 @@ const CSS = `
 .lkj-field-inline { flex-direction: row; align-items: flex-start; gap: 8px; }
 .lkj-field input[type="text"], .lkj-field input[type="password"], .lkj-field input[type="number"], .lkj-field select {
   padding: 6px 10px; font-size: 13px; line-height: 1.5;
-  color: var(--dsw-alias-text-primary, inherit);
-  background: var(--dsw-alias-bg-primary, transparent);
-  border: 0.5px solid var(--dsw-alias-border-primary, currentColor);
+  color: var(--lkj-text);
+  background: var(--lkj-bg);
+  border: 0.5px solid var(--lkj-border);
   border-radius: var(--dsw-radius-md, 6px);
 }
 .lkj-field input:disabled, .lkj-field select:disabled { opacity: 0.45; }
 .lkj-badge { font-size: 12px; font-style: normal; opacity: 0.65; }
-.lkj-invalid { color: var(--dsw-alias-text-danger, #d64545); font-size: 12px; line-height: 1.5; }
+.lkj-invalid { color: var(--lkj-danger); font-size: 12px; line-height: 1.5; }
 .lkj-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 .lkj-form-actions button {
   padding: 6px 16px; font-size: 13px; line-height: 1.5; cursor: pointer;
-  color: var(--dsw-alias-text-primary, inherit);
-  background: var(--dsw-alias-interactive-bg, transparent);
-  border: 0.5px solid var(--dsw-alias-border-primary, currentColor);
+  color: var(--lkj-text);
+  background: var(--lkj-hover);
+  border: 0.5px solid var(--lkj-border);
   border-radius: var(--dsw-radius-md, 6px);
 }
-.lkj-form-actions button:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, transparent); }
+.lkj-form-actions button:hover:not(:disabled) { background: var(--lkj-bg); }
 .lkj-form-actions button:disabled { opacity: 0.4; cursor: default; }
+.lkj-prov-list { display: flex; flex-direction: column; gap: 8px; }
+.lkj-prov-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 0.5px solid var(--lkj-border); border-radius: var(--dsw-radius-md, 6px); }
+.lkj-prov-head { display: flex; align-items: center; gap: 6px; }
+.lkj-prov-name { flex: 1; padding: 4px 8px; font-size: 13px; color: var(--lkj-text); background: var(--lkj-bg); border: 0.5px solid var(--lkj-border); border-radius: var(--dsw-radius-md, 6px); }
+.lkj-prov-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; }
+.lkj-prov-grid label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; opacity: 0.85; }
+.lkj-prov-grid input, .lkj-prov-grid select { padding: 4px 8px; font-size: 12px; color: var(--lkj-text); background: var(--lkj-bg); border: 0.5px solid var(--lkj-border); border-radius: var(--dsw-radius-md, 6px); }
+.lkj-prov-use, .lkj-prov-del, .lkj-prov-add { padding: 4px 10px; font-size: 12px; cursor: pointer; border-radius: var(--dsw-radius-md, 6px); border: 0.5px solid var(--lkj-border); background: var(--lkj-hover); color: var(--lkj-text); }
+.lkj-prov-use.on { background: var(--lkj-bg); font-weight: 600; outline: 1px solid var(--lkj-border); }
+.lkj-prov-add { align-self: flex-start; }
+.lkj-prov button:disabled { opacity: 0.4; cursor: default; }
 `
 
 function injectStyles() {

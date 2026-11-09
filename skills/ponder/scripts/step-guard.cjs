@@ -69,6 +69,13 @@ const MIN_AGENTS = {
   synthesis: 0,
 };
 
+// SOLO 模式（PONDER_SOLO=1 / init 时 state.solo=true）：
+// 成员会话是 depth-1 子agent，起不了孙agent（subagent depth 2 exceeds maxDepth 1），
+// bagua≥8/plans≥5/score≥3/simulate≥3/debate≥3 的下限在成员环境恒不可达 → ponder 半途 BLOCKED。
+// SOLO 下由主线程按 stages/<阶段>.json 自模拟、每维度独立成文落盘，agent 数闸放宽为
+// 「十阶段顺序 + 阶段证据文件（stage-*.json/end-state.md）」核验，agent 计数如实记 0、不虚记。
+var SOLO = process.env.PONDER_SOLO === '1' || process.env.PONDER_SOLO === 'true';
+
 // ── 工具函数 ──
 
 function ensureDir() {
@@ -153,6 +160,7 @@ function init(question) {
     agents: {},
     certainties: {},
     sequence: [], // 顺序记录：每次 after 追加 {step, at} —— 顺序可事后核验（completed 只是集合）
+    solo: SOLO, // 成员/受限环境自模拟模式（PONDER_SOLO=1）：agent 数闸放宽，按顺序+证据文件核验
     superseded_run: superseded || null, // 非空=本轮 init 覆盖了上一轮未完成的 run（状态可信度受损信号）
     started_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -271,13 +279,17 @@ function after(step, agentCount, certainty) {
     ? 0
     : parseInt(agentCount, 10) || 0;
   var minimumAgents = MIN_AGENTS[stdStep] || 0;
+  var stNow = loadState();
+  var soloNow = SOLO || !!(stNow && stNow.solo);
+  if (soloNow) minimumAgents = 0; // SOLO：无子agent环境，按维度自模拟核验
   if (parsedAgentCount < minimumAgents) {
     return {
       verdict: 'BLOCKED',
       step: stdStep,
       required_agents: minimumAgents,
       received_agents: parsedAgentCount,
-      message: '⛔ ' + LABELS[stdStep] + ' 至少需要 ' + minimumAgents + ' 个完整 Subagent 结果，当前仅有 ' + parsedAgentCount + ' 个',
+      message: '⛔ ' + LABELS[stdStep] + ' 至少需要 ' + minimumAgents + ' 个完整 Subagent 结果，当前仅有 ' + parsedAgentCount + ' 个'
+        + '（成员/受限环境起不了子agent时：export PONDER_SOLO=1 后重跑本阶段 after，走 SOLO 自模拟模式）',
     };
   }
 
@@ -421,7 +433,10 @@ function verify(opts) {
     var got = (state.agents && state.agents[s]) || 0;
     if (got < need) agentShortfalls.push(LABELS[s] + '(' + s + ') 需 ' + need + ' 个，实际 ' + got + ' 个');
   });
-  if (agentShortfalls.length > 0) issues.push('子 agent 数不足：' + agentShortfalls.join('；'));
+  var soloMode = SOLO || !!(state && state.solo);
+  var soloNotes = [];
+  if (agentShortfalls.length > 0 && !soloMode) issues.push('子 agent 数不足：' + agentShortfalls.join('；'));
+  else if (agentShortfalls.length > 0 && soloMode) soloNotes.push('SOLO 自模拟（state.solo=true，成员环境无子agent）：' + agentShortfalls.join('；') + ' —— 按十阶段顺序+阶段证据文件核验，agent 数不足不视为缺陷');
 
   // ④ 证据文件（可选）
   var evidence = null;
@@ -453,7 +468,7 @@ function verify(opts) {
     issues.push('未提供 evidenceDir——只核验了 step-guard 记录，**未核验阶段产出是否真实落盘**（建议传项目 .jarvis/ponder-runs/<run_id>/）');
   }
 
-  var ok = missing.length === 0 && orderViolations.length === 0 && agentShortfalls.length === 0
+  var ok = missing.length === 0 && orderViolations.length === 0 && (agentShortfalls.length === 0 || soloMode)
     && (!claimed || runIdMatch) && (evidence ? evidence.missing.length === 0 : true);
 
   return {
@@ -469,6 +484,8 @@ function verify(opts) {
     order_verifiable: orderVerifiable,
     order_violations: orderViolations,
     sequence: seq,
+    solo: !!soloMode,
+    solo_notes: soloNotes,
     agent_shortfalls: agentShortfalls,
     agents: state.agents,
     certainties: state.certainties,
@@ -476,7 +493,7 @@ function verify(opts) {
     superseded_run: state.superseded_run || null,
     issues: issues,
     message: ok
-      ? '✅ 核验通过：十阶段按序完整执行、子 agent 数达标' + (evidence ? '、阶段产出齐全' : '（未核验产出文件）')
+      ? '✅ 核验通过：十阶段按序完整执行' + (soloMode ? '（SOLO 自模拟模式：agent 数按 0 核验）' : '、子 agent 数达标') + (evidence ? '、阶段产出齐全' : '（未核验产出文件）')
       : '⛔ 核验不通过：' + issues.join(' | '),
   };
 }
