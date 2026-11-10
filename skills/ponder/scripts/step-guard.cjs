@@ -78,6 +78,34 @@ var SOLO = process.env.PONDER_SOLO === '1' || process.env.PONDER_SOLO === 'true'
 
 // ── 工具函数 ──
 
+// 搜索能力自举（用户定调 2026-11-10：ponder 大量查资料，走 dsh-free-search 免费多引擎；
+// 没装这个插件时自动依赖安装）——只在 init 时跑一次：
+//   已装 → 返回 null，零开销；
+//   未装 → `dsh plugin add dsh-free-search`（DSH 官方插件安装通道，pnpm 转发到 profile），
+//          装完需会话重载/重启 DSH 后 web_search 才走免费引擎，期间 WebFetch 兜底；
+//   任何失败都不阻塞 ponder（查资料还有 WebFetch 直抓兜底）。
+function ensureFreeSearch() {
+  try {
+    const os = require('os');
+    const profilesDir = require('path').join(os.homedir(), '.dsh', 'profiles');
+    let entries = [];
+    try { entries = fs.readdirSync(profilesDir); } catch (e) { return null; } // 非 DSH 环境（如 Claude Code）：跳过
+    const liveProfiles = entries.filter((n) => !/\.bak|\.rollback|\.old/.test(n));
+    if (liveProfiles.length === 0) return null;
+    const installed = liveProfiles.some((prof) => {
+      try { return fs.existsSync(require('path').join(profilesDir, prof, 'node_modules', 'dsh-free-search')); } catch (e) { return false; }
+    });
+    if (installed) return null;
+    const r = require('child_process').spawnSync('dsh', ['plugin', 'add', 'dsh-free-search'], { timeout: 180000, encoding: 'utf8' });
+    if (r.status === 0) {
+      return { plugin: 'dsh-free-search', installed: true, note: '本环境缺免费搜索插件，已自动安装 dsh-free-search（web_search 将走免费多引擎）。当前会话可能尚未加载——若 web_search 不可用，提示用户重启 DSH 生效，期间用 web_fetch 直抓权威来源兜底。' };
+    }
+    return { plugin: 'dsh-free-search', installed: false, note: 'dsh-free-search 未安装且自动安装未成功——查资料改用 web_fetch 直抓权威来源，禁止因此编造资料。' };
+  } catch (e) {
+    return { plugin: 'dsh-free-search', installed: false, note: '搜索能力检查跳过（' + ((e && e.message) || e) + '）——查资料用 web_fetch 兜底。' };
+  }
+}
+
 function ensureDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
@@ -153,6 +181,7 @@ function archivePreviousRun(prev) {
 function init(question) {
   var prev = loadState();
   var superseded = archivePreviousRun(prev);
+  var searchBoot = ensureFreeSearch();
   var state = {
     run_id: generateRunId(),
     question: question || '',
@@ -162,6 +191,7 @@ function init(question) {
     sequence: [], // 顺序记录：每次 after 追加 {step, at} —— 顺序可事后核验（completed 只是集合）
     solo: SOLO, // 成员/受限环境自模拟模式（PONDER_SOLO=1）：agent 数闸放宽，按顺序+证据文件核验
     superseded_run: superseded || null, // 非空=本轮 init 覆盖了上一轮未完成的 run（状态可信度受损信号）
+    search_boot: searchBoot || { plugin: 'dsh-free-search', installed: true, note: '' }, // 搜索能力自举结果（null=已装正常）
     started_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -171,8 +201,10 @@ function init(question) {
     run_id: state.run_id,
     total_steps: STEPS.length,
     superseded_run: superseded || null,
+    search_boot: searchBoot || undefined,
     message: '运行已初始化，从 ' + LABELS[STEPS[0]] + '(' + STEPS[0] + ') 开始'
-      + (superseded ? '（⚠️ 已覆盖上一轮未完成的 ' + superseded + '，已归档）' : ''),
+      + (superseded ? '（⚠️ 已覆盖上一轮未完成的 ' + superseded + '，已归档）' : '')
+      + (searchBoot && searchBoot.note ? '\n🔎 ' + searchBoot.note : ''),
   };
 }
 

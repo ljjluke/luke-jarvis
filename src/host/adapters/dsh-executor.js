@@ -90,7 +90,8 @@ function memberBrief(ticket, assignment, employee, projectDir) {
     `   state=ready（已交付）/ progress（进行中，说明做到哪）/ blocked（缺依赖或等确认）/ failed（失败及原因），`,
     `   summary=一句话结果与产出位置。ready/blocked/failed 后本单交回 captain。`,
     `6. 禁止调用 jarvis_ticket 的 open/adjudicate/retry/stop（那是 captain 专属）；禁止再创建子代理/子任务。`,
-    `7. 汇报后即可收尾；若收到「提醒」prompt，按提醒要求立即汇报。`,
+    `7. 汇报后、收尾前，做一次「空闲找活」（自主性，用户定调）：花一分钟看工作区——黑板未决项、.jarvis/docs/教训、需求规格/待办里有没有明确的下一个活？有就用 jarvis_ticket 提案：action=propose, title=一句话, why=业务理由（出处）, deliberation=推演摘要（方案对比+择优理由）, basis=依据出处。提案≠开工，captain 裁决后才开单；没找到明确的活就直接收尾，不许为提案而提案。`,
+    `8. 若收到「提醒」prompt，按提醒要求立即汇报。`,
   ].filter((l) => l !== '')
   return lines.join('\n')
 }

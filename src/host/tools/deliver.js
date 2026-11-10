@@ -34,6 +34,25 @@ function _ticketEngine(projectDir, repo, executor) {
   return engine || null
 }
 
+// ── 成员自主找活：提案存储（.jarvis/tickets/proposals.jsonl，append-only + 状态字段）──
+// 用户定调（2026-11-10）：superagent-prototype 的「自己找活干」要体现出来——成员空闲时
+// 主动从黑板/教训/待办找活，起草提案交 captain 裁决；通过→open 开单（引用提案），
+// 驳回→dismiss。成员永远不直接 open（防递归），提案是成员唯一的发起通道。
+const _proposalsFile = (projectDir) => path.join(projectDir, '.jarvis', 'tickets', 'proposals.jsonl')
+const _readProposals = (projectDir) => {
+  try {
+    const fsp = _require('node:fs')
+    const raw = fsp.readFileSync(_proposalsFile(projectDir), 'utf8')
+    return raw.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  } catch { return [] }
+}
+const _writeProposals = (projectDir, list) => {
+  try {
+    const fsp = _require('node:fs')
+    fsp.mkdirSync(path.join(projectDir, '.jarvis', 'tickets'), { recursive: true })
+    fsp.writeFileSync(_proposalsFile(projectDir), list.map((p) => JSON.stringify(p)).join('\n') + (list.length ? '\n' : ''))
+  } catch {}
+}
 
 /** 本组工具（按原始顺序）；由 tools/index.js 汇总成 TOOLS。 */
 export const DELIVER_TOOLS = [
@@ -896,11 +915,16 @@ export const DELIVER_TOOLS = [
   {
     name: 'jarvis_ticket',
     description:
-      '任务单内核（移植 dsh-superagent-prototype 的 Ticket/Assignment 领域模型）：把「需求裁决→开单→派单→汇报→重试/停止→阶段判定」变成可持久化状态机，落在 <项目>/.jarvis/tickets + decisions；开单即由自建执行器派成员子会话真执行（成员用 report 回报推进状态机）。动作：adjudicate=过闸裁决并开单（闸不过则只记 decision）；open=直接开单并派单；list=列任务单；get=看单（阶段/是否可重试/派单）；report=成员汇报（progress/waiting/ready/blocked/failed/dropped，ready/dropped 结束任务单）；retry=卡住重试（仅 blocked/failed，重新派单）；stop=人工停止。汇报语义对齐 prototype（ready→completed、dropped→dropped、blocked/failed→等人工且可重试），领域是数字公司；插件仓库拒写（STATE_ROOT_CONFLICT），普通项目正常落盘。',
+      '任务单内核（移植 dsh-superagent-prototype 的 Ticket/Assignment 领域模型）：把「需求裁决→开单→派单→汇报→重试/停止→阶段判定」变成可持久化状态机，落在 <项目>/.jarvis/tickets + decisions；开单即由自建执行器派成员子会话真执行（成员用 report 回报推进状态机）。动作：adjudicate=过闸裁决并开单（闸不过则只记 decision）；open=直接开单并派单（可带 proposalId 消化成员提案）；list=列任务单（含待裁决提案）；get=看单（阶段/是否可重试/派单）；report=成员汇报（progress/waiting/ready/blocked/failed/dropped，ready/dropped 结束任务单）；propose=成员自主找活提案（空闲时从黑板/教训/待办发现新活，带推演摘要提案交 captain 裁决——成员唯一的发起通道，提案≠开工）；dismiss=captain 驳回提案；retry=卡住重试（仅 blocked/failed，重新派单）；stop=人工停止。汇报语义对齐 prototype（ready→completed、dropped→dropped、blocked/failed→等人工且可重试），领域是数字公司；插件仓库拒写（STATE_ROOT_CONFLICT），普通项目正常落盘。',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'adjudicate / open / list / get / report / retry / stop（默认 list）' },
+        action: { type: 'string', description: 'adjudicate / open / list / get / report / retry / stop / propose（成员自主找活提案）/ dismiss（驳回提案）（默认 list）' },
+        proposalId: { type: 'string', description: '提案 id（open 引用提案开单；dismiss 驳回指定提案；propose 不用）' },
+        why: { type: 'string', description: '提案的业务理由：从哪发现的活（黑板未决项 id/教训 id/待办路径）、解决了什么业务问题（propose 用）' },
+        deliberation: { type: 'string', description: '提案的推演摘要：方案对比+择优理由（为什么值得干、为什么这么干最好）——没推演的提案不收（propose 用）' },
+        basis: { type: 'string', description: '提案的授权依据：引用黑板项/教训/待办的具体出处（propose 用）' },
+        reason: { type: 'string', description: '驳回提案的理由（dismiss 用）' },
         projectDir: { type: 'string', description: '项目工作区（默认当前会话 cwd）' },
         title: { type: 'string', description: '任务单标题（open/adjudicate）' },
         stage: { type: 'string', description: '所属阶段 clarify/decompose/design/build/verify/close（默认 build）' },
@@ -939,10 +963,10 @@ export const DELIVER_TOOLS = [
       if (conflict) return { ok: false, action, verdict: `⛔ ${conflict.message}` }
       // 执行器（每工作区单例）：开单即派成员子会话；getEngine 惰性解引用当前引擎
       const executor = dshExecutorFor(projectDir, () => _ticketEngines.get(projectDir) || null)
-      // 成员越权守卫：本执行器派出的成员禁止 open/adjudicate/retry/stop（captain 专属，防递归开单）
+      // 成员越权守卫：本执行器派出的成员禁止 open/adjudicate/retry/stop/dismiss（captain 专属，防递归开单）
       const callerId = exec && exec.agent && exec.agent.id
-      if (callerId && executor.isChild(callerId) && ['open', 'adjudicate', 'retry', 'stop'].includes(action)) {
-        return { ok: false, action, verdict: `⛔ 成员只可汇报（jarvis_ticket action=report, ticketId=..., assignmentId=..., state=...）；open/adjudicate/retry/stop 是 captain 专属` }
+      if (callerId && executor.isChild(callerId) && ['open', 'adjudicate', 'retry', 'stop', 'dismiss'].includes(action)) {
+        return { ok: false, action, verdict: `⛔ 成员只可汇报（jarvis_ticket action=report, ticketId=..., assignmentId=..., state=...）与提案找活（action=propose）；open/adjudicate/retry/stop/dismiss 是 captain 专属` }
       }
       // 流程闸（与 agent-teams 派活闸同款，软启用：仅 jarvis 模式工作区生效）：开单即派单，跳步=缺陷
       if (['open', 'adjudicate'].includes(action)) {
@@ -966,12 +990,15 @@ export const DELIVER_TOOLS = [
         if (action === 'list') {
           const rows = engine.list()
           const open = engine.open()
+          const pendingP = _readProposals(projectDir).filter((p) => p.status === 'pending')
           return {
             ok: true,
             action,
             tickets: rows,
-            text: rows.slice(0, 50).map((t) => `${t.id} [${t.stage}] ${t.title} —— ${engine.view(t.id)?.text || ''}`).join('\n'),
-            verdict: `共 ${rows.length} 张任务单（未结束 ${open.length}）`,
+            proposals: pendingP,
+            text: rows.slice(0, 50).map((t) => `${t.id} [${t.stage}] ${t.title} —— ${engine.view(t.id)?.text || ''}`).join('\n')
+              + (pendingP.length ? '\n\n📋 待裁决提案（成员自主找活，captain 必须逐条消化——通过：action=open 带 proposalId 开单；驳回：action=dismiss）：\n' + pendingP.map((p) => `${p.id}〔${p.proposer}〕${p.title} — 依据:${p.basis}；推演:${(p.deliberation || '').slice(0, 80)}…`).join('\n') : ''),
+            verdict: `共 ${rows.length} 张任务单（未结束 ${open.length}）${pendingP.length ? `；⚠️ 待裁决提案 ${pendingP.length} 条，不许堆积无响应` : ''}`,
           }
         }
         if (action === 'get') {
@@ -996,9 +1023,25 @@ export const DELIVER_TOOLS = [
             mandate,
             origin: { triggerId: String(args?.triggerId ?? 'manual') },
           }
+          // 成员提案消化：open 带 proposalId 时把提案内容作为兜底（title/mandate），开单成功后标记 consumed
+          const proposalId = String(args?.proposalId ?? '').trim()
+          const proposals = _readProposals(projectDir)
+          const proposal = proposalId ? proposals.find((p) => p.id === proposalId) : null
+          if (proposalId && !proposal) return { ok: false, action, verdict: `⛔ 提案不存在：${proposalId}（action=list 可见全部待裁决提案）` }
+          if (proposal) {
+            input.origin.triggerId = 'propose:' + proposal.id
+            if (!args?.title) input.title = proposal.title || input.title
+            if (!mandate) input.mandate = { strength: 'derived', basis: `成员提案 ${proposal.id}（${proposal.proposer}）：${proposal.basis || proposal.why || '自主找活'}` }
+          }
           const out = action === 'adjudicate' ? engine.adjudicate(input) : { ticket: engine.tickets.open(input) }
           if (!out.ticket) {
             return { ok: false, action, decision: out.decision, verdict: `⛔ 闸未通过：${reasonText(out.decision && out.decision.reason)}` }
+          }
+          if (proposal) {
+            proposal.status = 'consumed'
+            proposal.ticketId = out.ticket.id
+            proposal.decidedAt = new Date().toISOString()
+            _writeProposals(projectDir, proposals)
           }
           const first = (out.ticket.assignments || [])[0] || {}
           return {
@@ -1006,8 +1049,50 @@ export const DELIVER_TOOLS = [
             action,
             ticket: out.ticket,
             text: `${out.ticket.id} [${out.ticket.stage}] ${out.ticket.title}\n派单：${first.id}→${first.role}（${first.state}）`,
-            verdict: `已开单 ${out.ticket.id}（${out.ticket.mandate.strength}：${out.ticket.mandate.basis}）`,
+            verdict: `已开单 ${out.ticket.id}（${out.ticket.mandate.strength}：${out.ticket.mandate.basis}）${proposal ? `；提案 ${proposal.id} 已消化 → ${out.ticket.id}` : ''}`,
           }
+        }
+        if (action === 'propose') {
+          // 成员自主找活通道（用户定调 2026-11-10）：空闲时从黑板/教训/待办找活，提案交 captain 裁决
+          const title = String(args?.title ?? '').trim()
+          if (!title) return { ok: false, action, verdict: '⛔ 提案必须带 title（想干什么，一句话说清）' }
+          const deliberation = String(args?.deliberation ?? '').trim()
+          if (deliberation.length < 20) return { ok: false, action, verdict: '⛔ 提案必须带推演摘要 deliberation（方案对比+择优理由，为什么值得干）——没推演的提案不收' }
+          const rec = {
+            id: 'p' + Date.now().toString(36),
+            at: new Date().toISOString(),
+            proposer: String(args?.proposer ?? '').trim() || (exec && exec.agent && (exec.agent.name || exec.agent.id)) || 'member',
+            title,
+            why: String(args?.why ?? '').trim(),
+            deliberation,
+            basis: String(args?.basis ?? '').trim() || '自主找活（黑板/教训/待办）',
+            status: 'pending',
+          }
+          try {
+            const fsp = _require('node:fs')
+            fsp.mkdirSync(path.join(projectDir, '.jarvis', 'tickets'), { recursive: true })
+            fsp.appendFileSync(_proposalsFile(projectDir), JSON.stringify(rec) + '\n')
+          } catch (e) {
+            return { ok: false, action, verdict: `⛔ 提案落盘失败：${(e && e.message) || e}` }
+          }
+          return {
+            ok: true,
+            action,
+            proposal: rec,
+            verdict: `✅ 提案已登记 ${rec.id}（${title}）——captain 用 jarvis_ticket action=list 查看待裁决提案；通过后 action=open（带 proposalId=${rec.id}）开单。提案不等于开工，等 captain 裁决。`,
+          }
+        }
+        if (action === 'dismiss') {
+          const pid = String(args?.proposalId ?? '').trim()
+          const reason = String(args?.reason ?? '').trim() || '暂不采纳'
+          const proposals = _readProposals(projectDir)
+          const rec = proposals.find((p) => p.id === pid && p.status === 'pending')
+          if (!rec) return { ok: false, action, verdict: `⛔ 找不到待裁决提案：${pid || '(空)'}（action=list 可见全部提案）` }
+          rec.status = 'rejected'
+          rec.decidedAt = new Date().toISOString()
+          rec.decisionReason = reason
+          _writeProposals(projectDir, proposals)
+          return { ok: true, action, proposal: rec, verdict: `已驳回提案 ${pid}（${reason}）——提案人可看 board/纪要了解驳回原因` }
         }
         if (action === 'report') {
           const ticket = engine.report(String(args?.ticketId ?? ''), {
@@ -1027,7 +1112,7 @@ export const DELIVER_TOOLS = [
           const ticket = engine.stop(String(args?.ticketId ?? ''), String(args?.reason ?? ''))
           return { ok: true, action, ticket, text: `已结束（${ticket.ended?.outcome}）`, verdict: `已停止 ${ticket.id}` }
         }
-        return { ok: false, action, verdict: `⛔ 未知 action：${action}（adjudicate/open/list/get/report/retry/stop）` }
+        return { ok: false, action, verdict: `⛔ 未知 action：${action}（adjudicate/open/list/get/report/retry/stop/propose/dismiss）` }
       } catch (error) {
         const code = error && error.code ? String(error.code) : ''
         return { ok: false, action, verdict: `⛔ ${String((error && error.message) || error)}${code ? `（${code}）` : ''}` }

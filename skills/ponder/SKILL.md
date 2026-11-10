@@ -13,6 +13,7 @@ argument-hint: "<question or decision>"
 - **平台无关的路径规则（两种环境通用）**：本文内所有引用均为**技能内相对路径**——`scripts/step-guard.cjs`、`stages/<阶段>.json`、`engine/<方法>.md`、`resources/<资源>.json` 都相对本技能目录。执行脚本用 `node <本技能目录>/scripts/<脚本>.cjs ...`（或先 `cd` 进本技能目录再按相对路径执行）；读文件用 Read 工具读 `<本技能目录>/<相对路径>`。**禁止把任何生成文件写入插件/技能/仓库目录**——持久数据一律写 PONDER_DATA_DIR 或项目 `.jarvis/`。
 - **交互**：DSH 下用 `ask_user_question` 工具（对应 Claude Code 的 `AskUserQuestion`，一次一问、带选项）。
 - **Agent-Reach**：可选外部能力。Claude Code 的 Setup/SessionStart hooks 会自动安装检查；DSH 下不自动安装，可用 `agent-reach doctor --json` 探活，不可用时走 WebSearch/WebFetch 兜底。
+- **查资料（查证引擎，用户定调 2026-11-10：ponder 大量查资料走免费搜索）**：DSH 下查外部资料必须用 `web_search` / `web_fetch` 工具——它们由 **dsh-free-search 插件**驱动（36 个免费引擎自动回退：DuckDuckGo/Bing/SearXNG/知乎/微信公众号文章等，零 key 零成本），`step-guard.cjs init` 会自动检测并在缺失时执行 `dsh plugin add dsh-free-search` 安装。铁律：① 结论必须带来源 URL，查不到就明说"未查到公开资料"，**禁止编造来源与数据**；② 同一问题最多换 3 种关键词重查，仍查不到就降级为"基于推理并标注不确定性"；③ 插件刚自动装完但当前会话还搜不到时，提示用户重启 DSH 生效，期间用 `web_fetch` 直抓权威来源兜底。
 
 ## 流程
 
