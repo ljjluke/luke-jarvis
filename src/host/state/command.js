@@ -1,4 +1,4 @@
-/** 能力台（UI → 34 个 jarvis 工具的真实执行通道）。
+/** 能力台（UI → 35 个 jarvis 工具的真实执行通道）。
 
  *  为什么需要它：UI 之前只有只读快照，用户要求"能力全部接入"。
  *  设计原则（不绕过插件的硬闸）：
@@ -114,7 +114,7 @@ export async function runCommand({ ctx, projectDir, tool, args, agent, signal })
   const name = String(tool)
   if (!INVOKABLE.test(name)) return { ok: false, tool: name, error: `只允许调用 jarvis_* 工具（收到：${name}）` }
   const spec = TOOLS.find((t) => t.name === name)
-  if (!spec) return { ok: false, tool: name, error: `未知工具：${name}（能力台只暴露 34 个 jarvis 工具）` }
+  if (!spec) return { ok: false, tool: name, error: `未知工具：${name}（能力台只暴露 35 个 jarvis 工具）` }
   const specMeta = toolSpecs().find((t) => t.name === spec.name)
   const { args: norm, errors } = normalizeArgs(specMeta, args)
   if (errors.length) return { ok: false, tool: spec.name, error: errors.join('；') }

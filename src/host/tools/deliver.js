@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
+import { dshExecutorFor } from '../adapters/dsh-executor.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from '../distill/index.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from '../protocol/index.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams, looksLikePluginRepo, stateRootConflict, writeActiveTeamMarker } from '../gates/ownership.js'
@@ -20,6 +21,18 @@ import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
 const _require = createRequire(import.meta.url)
+
+// 任务单引擎缓存（每工作区一个）：executor 的 children 集合与提醒循环跨工具调用保持。
+// Engine/repo 均无内存态（repo 每操作读盘），缓存只为 executor 生命周期。
+const _ticketEngines = new Map()
+function _ticketEngine(projectDir, repo, executor) {
+  let engine = _ticketEngines.get(projectDir)
+  if (!engine && repo) {
+    engine = new Engine({ repo, executor })
+    _ticketEngines.set(projectDir, engine)
+  }
+  return engine || null
+}
 
 
 /** 本组工具（按原始顺序）；由 tools/index.js 汇总成 TOOLS。 */
@@ -883,7 +896,7 @@ export const DELIVER_TOOLS = [
   {
     name: 'jarvis_ticket',
     description:
-      '任务单内核（移植 dsh-superagent-prototype 的 Ticket/Assignment 领域模型）：把「需求裁决→开单→派单→汇报→重试/停止→阶段判定」变成可持久化状态机，落在 <项目>/.jarvis/tickets + decisions。动作：adjudicate=过闸裁决并开单（闸不过则只记 decision）；open=直接开单；list=列任务单；get=看单（阶段/是否可重试/派单）；report=成员汇报（progress/waiting/ready/blocked/failed/dropped，ready/dropped 结束任务单）；retry=卡住重试（仅 blocked/failed）；stop=人工停止。汇报语义对齐 prototype（ready→completed、dropped→dropped、blocked/failed→等人工且可重试），领域是数字公司；插件仓库拒写（STATE_ROOT_CONFLICT），普通项目正常落盘。',
+      '任务单内核（移植 dsh-superagent-prototype 的 Ticket/Assignment 领域模型）：把「需求裁决→开单→派单→汇报→重试/停止→阶段判定」变成可持久化状态机，落在 <项目>/.jarvis/tickets + decisions；开单即由自建执行器派成员子会话真执行（成员用 report 回报推进状态机）。动作：adjudicate=过闸裁决并开单（闸不过则只记 decision）；open=直接开单并派单；list=列任务单；get=看单（阶段/是否可重试/派单）；report=成员汇报（progress/waiting/ready/blocked/failed/dropped，ready/dropped 结束任务单）；retry=卡住重试（仅 blocked/failed，重新派单）；stop=人工停止。汇报语义对齐 prototype（ready→completed、dropped→dropped、blocked/failed→等人工且可重试），领域是数字公司；插件仓库拒写（STATE_ROOT_CONFLICT），普通项目正常落盘。',
     parameters: {
       type: 'object',
       properties: {
@@ -917,15 +930,38 @@ export const DELIVER_TOOLS = [
       },
       render: (r) => `${r.ok ? '✅' : '⛔'} ${r.verdict}${r.text ? `\n${r.text}` : ''}${r.tickets && r.tickets.length ? `\n${r.tickets.map((t) => `${t.id} [${t.stage}] ${t.title}${t.ended ? '（已结束:' + t.ended.outcome + '）' : ''}`).join('\n')}` : ''}`,
     },
-    execute: async (args) => {
+    execute: async (args, exec) => {
       const path = _require('node:path')
-      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || '.'
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
       // 状态根守卫：插件仓库不是 jarvis 状态根，不写任务单（防记忆文件污染插件项目）
       const conflict = stateRootConflict(projectDir)
       const action = String(args?.action ?? 'list').trim()
       if (conflict) return { ok: false, action, verdict: `⛔ ${conflict.message}` }
+      // 执行器（每工作区单例）：开单即派成员子会话；getEngine 惰性解引用当前引擎
+      const executor = dshExecutorFor(projectDir, () => _ticketEngines.get(projectDir) || null)
+      // 成员越权守卫：本执行器派出的成员禁止 open/adjudicate/retry/stop（captain 专属，防递归开单）
+      const callerId = exec && exec.agent && exec.agent.id
+      if (callerId && executor.isChild(callerId) && ['open', 'adjudicate', 'retry', 'stop'].includes(action)) {
+        return { ok: false, action, verdict: `⛔ 成员只可汇报（jarvis_ticket action=report, ticketId=..., assignmentId=..., state=...）；open/adjudicate/retry/stop 是 captain 专属` }
+      }
+      // 流程闸（与 agent-teams 派活闸同款，软启用：仅 jarvis 模式工作区生效）：开单即派单，跳步=缺陷
+      if (['open', 'adjudicate'].includes(action)) {
+        const cwd = (exec && exec.agent && exec.agent.session && exec.agent.session.header && exec.agent.session.header.cwd) || projectDir
+        const st = _flowState(String(cwd))
+        if (st.jarvis) {
+          const memIssue = checkMemoryFresh(String(cwd), {})
+          if (memIssue) return { ok: false, action, verdict: `⛔ ${memIssue}` }
+          if (!st.hasReq && st.baseline === 0) {
+            return { ok: false, action, verdict: `⛔ 开单派活前必须先过需求闸：当前工作区没有「需求规格」也没有「基线清单」。先用 jarvis_clarify 打磨需求并产出 .jarvis/docs/需求规格-*.md（改造类还要 jarvis_baseline 建基线），再开单。跳步=缺陷。` }
+          }
+          const gates = _readGates(String(cwd))
+          if (!(gates.build && gates.build.ok)) {
+            return { ok: false, action, verdict: `⛔ 开单派活前必须先跑 jarvis_flowguard(step="build") 通过（需要方案设计 + 人才层齐备）。开单即派真成员执行，硬流程不可跳过。` }
+          }
+        }
+      }
       const repo = new JsonTicketRepositories(path.join(projectDir, '.jarvis'))
-      const engine = new Engine({ repo })
+      const engine = _ticketEngine(projectDir, repo, executor)
       try {
         if (action === 'list') {
           const rows = engine.list()

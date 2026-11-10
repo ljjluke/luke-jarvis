@@ -99,7 +99,12 @@ export function createEngine(ports) {
         return out
       } catch (e) {
         const elapsedMs = Date.now() - startedAt
-        const out = { ok: false, tool: cmd.tool, elapsedMs, error: String((e && e.message) || e) }
+        // cause 链全展开（平台批量执行器把真实原因包在 ToolBatchError.cause 里，只看顶层 message 会误诊）
+        const causes = []
+        let c = e && e.cause
+        for (let i = 0; c && i < 4; i++) { causes.push(String(c.message || c)); c = c.cause }
+        const errText = String((e && e.message) || e) + (causes.length ? ' ← ' + causes.join(' ← ') : '')
+        const out = { ok: false, tool: cmd.tool, elapsedMs, error: errText }
         enqueueEvent(projectDir, { type: 'command', at: now(), data: { tool: cmd.tool, ok: false, ms: elapsedMs } })
         if (effects) { try { await effects.tick() } catch { /* 非致命 */ } }
         else if (ports.events) { try { ports.events.append(projectDir, 'command', { tool: cmd.tool, ok: false, ms: elapsedMs }) } catch { /* 非致命 */ } }

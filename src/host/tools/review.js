@@ -9,6 +9,7 @@ import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from '../distill/index.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from '../protocol/index.js'
+import { MEMBER_DELIBERATION, DELIBERATION_MARK } from '../protocol/deliberation.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams, looksLikePluginRepo, stateRootConflict, writeActiveTeamMarker } from '../gates/ownership.js'
 import { findRoleCard, cardStructureOk, CARD_SECTION_MARK } from '../state/cards.js'
 import { listNames, readTextSafe, hasTeamJson, resolveWorkspace, ponderVerifyProjectDir, getFsService, getRuntimeContext, getLatestExec, getResolvedWorkspace, markJarvisSession, isJarvisSession } from '../runtime.js'
@@ -192,7 +193,7 @@ export const REVIEW_TOOLS = [
       if (mode === 'broadcast') {
         const protocolRefresh = [
           '【协议刷新 · 贾维斯】你所在工作区已升级到新版 jarvis——以下是升级后的成员协议（与你的角色卡不冲突，是新增的团队级约束），请立即纳入你的工作方式：',
-          '① **深度思考（ponder 十阶段，可用资源不是闸）**：要做判断时（分析需求/方案决策/难点定位/返工根因/分歧/变更影响/收口判定/回应质疑）值得用它跑一轮（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis）；执行已定方案/汇报/查资料不必跑。插件不校验、不记录——交付里体现得出思考（反方攻击/失效边界/置信度）就行。',
+          '① **深度思考（ponder 十阶段，可用资源不是闸）**：要做判断时（分析需求/方案决策/难点定位/返工根因/分歧/变更影响/收口判定/回应质疑）值得用它跑一轮（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis）；**开工推演人人必做**（审题→≥3 方案→择优→复盘，结果进第一份回报，不分赌注档）。插件不校验、不记录——交付里体现得出思考（反方攻击/失效边界/置信度）就行。',
           '② ponder 执行：export PONDER_DATA_DIR=<项目>/.jarvis/ponder-runs/<run_id>/ → 成员会话再加 export PONDER_SOLO=1（成员是 depth-1 子agent 起不了孙agent，SOLO=主线程按 stages/<阶段>.json 逐维度自模拟独立成文）→ node <ponder技能>/scripts/step-guard.cjs init "<问题>" → 逐阶段 before/after → verify 自检 → 回报 run_id+dataDir+evidenceDir（派活方用 jarvis_ponder_check 核验：顺序/完整性/产出文件；SOLO run 的 agent 数按 0 核验不算缺陷）。',
           '③ 黑板即真相：问题/发现/决策/风险/阻塞/接口变更/资源需求 → jarvis_board 写公屏；资源需求（尤其只有客户能给的）必须上公屏闭环。',
           '④ 问题上行三件套：绕不开/无法抉择 → jarvis_escalate（问题+已尝试+风险细节+需决策什么），缺项打回。',
@@ -231,7 +232,7 @@ export const REVIEW_TOOLS = [
           return { verdict: '⚠️ audit 需要 teamDir（团队目录，自动读 team.json）或 tasksJson', ok: false }
         }
         // 任务描述/标题里是否含 ponder 须知特征（有 = 成员会知道先跑 ponder；无 = 成员只当执行手）
-        const PONDER_MARK = /ponder|开工须知|step-guard|十阶段|run_id|PONDER_DATA_DIR|先跑 ponder/
+        const PONDER_MARK = /ponder|开工须知|step-guard|十阶段|run_id|PONDER_DATA_DIR|先跑 ponder|开工推演|方案对比|deliberation|阶段思考|过闸|卡点开会|jarvis_meeting/
         const missing = []
         for (const t of tasks || []) {
           const id = t?.id ?? '?'
@@ -289,7 +290,10 @@ export const REVIEW_TOOLS = [
         '',
         '## 二、深度思考（可用资源：ponder 十阶段——不是流程闸，插件不校验）',
         '- **硬要求只有一条，且是可验证的**：交付里要有 4 反方攻击 / 5 失效边界 / 6 置信度（见第四节）——用产物证明思考发生过。跑不跑某个工具，插件不查、也不记录。',
-        '- **ponder 是本机现成的深度思考技能**（十阶段 interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis）：要做判断时（需求分析/方案选择/难点定位/分歧/变更影响）值得用它，尤其赌注高的；执行已定方案/汇报/查资料不需要。',
+        '- **⚡ 开工推演（人人必做，不分赌注档——像人脑：先想后做）**：动手前先在脑内走四步——①审题（这件事真正要什么/验收怎么判"做对了"）②列 ≥3 个可行做法（含一个最省事的、一个最稳的，各写关键取舍）③逐案推演后果择优（对验收/下游依赖/现有基线的影响；写清为什么选它+落选各一句话死因）④按选定方案干，干完对照"当初推演的预期"复盘一句（预期 vs 实际+偏差原因）。推演结果写进第一份回报（或 ' + dataDirHint + 'deliberation.md）；回报里看不到「方案对比+择优理由」= 没推演 = 打回重想。',
+        '- **ponder 是本机现成的深度思考技能**（十阶段 interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis）：complex/高赌注值得跑满血；**开工推演（上一条）不可省**——执行类小活走推演即可，不用硬跑十阶段。',
+        '- **🧭 阶段思考闸（每个阶段开始前必过，不是只开工想一次）**：任务分阶段推进（理解需求→方案设计→搭建骨架→具体实现→自查交付…），每进入一个新阶段，动手前先过三问——①本阶段业务目标（上游给我什么/我给下游什么，结合业务场景不孤立看）②本阶段选型（有哪些可选做法，像开发选架构/设计模式/数据结构一样先想"用什么"再想"怎么用"）③过闸标准（做到什么样算过关，过关才进下一阶段）。每个阶段的回报里要能看到「选型+理由」；跳阶段直接干 = 打回。',
+        '- **🤝 卡点开会（疑问自决不了时必须做，不许硬猜）**：同一卡点两种办法都走不通 / 需要别人产出或确认 / 你的改动影响别人接口或上游需求 / 同一问题试两次仍失败 / 发现需求矛盾——出现任一条，禁止硬猜继续、无脑重试、闷头造结论；必须用 jarvis_meeting（meetingType=cycle，groupchat=true）拉涉及成员和 captain 开会（逐人给观点、互相评价），散会必出纪要（落盘 .jarvis/meetings/，含结论+会后行动项：谁负责什么），会议结论和行动项写进下一份回报。开会是谨慎不是失败——硬猜出活才算失败。',
         `- 本单赌注=${stakes}：low 可精简各阶段子 agent 规模，阶段骨架照旧；想跳过某阶段请自己判断并说明理由。`,
         '- **把本角色卡六段式作为"人物视角"注入画像**（思维模型/方法论/红线），让十阶段按这个人的方法论跑，而不是通用分析师套路。',
         '- **没有 skill 工具也能跑**（成员环境常缺 skill 工具——直接用 bash，效果相同）：',
@@ -354,7 +358,7 @@ export const REVIEW_TOOLS = [
       // executionPrompt 版：注入 add_member 的 executionPrompt（成员系统 prompt 自带协议——根治"子代理只有角色卡不跑ponder"）
       const executionPrompt = [
         `你是「${role}」，本项目团队正式成员（不是执行手）。以下是你作为成员必须遵守的协议（写入你的系统 prompt，不是可选项）：`,
-        '① **深度思考（ponder 十阶段，可用资源不是闸）**：要做判断时（分析需求/方案决策/难点定位/返工根因/分歧/变更影响/收口判定/回应质疑）值得用它跑一轮（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis）；执行已定方案/汇报/查资料不必跑。插件不校验、不记录——交付里体现得出思考（反方攻击/失效边界/置信度）就行。',
+        '① **深度思考（ponder 十阶段，可用资源不是闸）**：要做判断时（分析需求/方案决策/难点定位/返工根因/分歧/变更影响/收口判定/回应质疑）值得用它跑一轮（interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→synthesis）；**开工推演人人必做**（审题→≥3 方案→择优→复盘，结果进第一份回报，不分赌注档）。插件不校验、不记录——交付里体现得出思考（反方攻击/失效边界/置信度）就行。',
         `② ponder 执行（无 skill 工具用 bash 等价）：export PONDER_DATA_DIR="${dataDirHint}" → node ${sg} init "<问题>" → 逐阶段 before/after → verify 自检 → 回报 run_id+dataDir+evidenceDir（派活方用 jarvis_ponder_check 核验：顺序/完整性/子agent数/产出文件）。`,
         '③ 黑板即真相：问题/发现/决策/风险/阻塞/接口变更/资源需求 → jarvis_board 写公屏；资源需求（尤其只有客户能给的）必须上公屏闭环，不许假装有。',
         '④ 问题上行三件套：绕不开/无法抉择 → jarvis_escalate（问题+已尝试+风险细节+需决策什么），缺项打回；不许沉默/假装解决。',

@@ -14,6 +14,18 @@ export function eventsFile(projectDir, path = _require('node:path')) {
   return path.join(String(projectDir || ''), '.jarvis/events.jsonl')
 }
 
+/** GC：事件日志轮转阈值。超过即把 events.jsonl 整体让位为 events.jsonl.old（覆盖上一代），
+ *  当前文件重开、seq 重新从 1 计——防止长期运行 append-only 无限膨胀。 */
+const EVENTS_ROTATE_BYTES = 2 * 1024 * 1024
+
+function rotateIfNeeded(file, fs) {
+  try {
+    const st = fs.statSync(file)
+    if (st.size <= EVENTS_ROTATE_BYTES) return
+    fs.renameSync(file, file + '.old') // rename 覆盖同名 .old
+  } catch { /* 文件不存在/被并发轮转：不处理 */ }
+}
+
 /** 追加一条事件；返回 { seq, at, type }，失败返回 null（不抛，事件不该阻断主流程）。 */
 export function appendEvent(projectDir, type, data = {}, path = _require('node:path')) {
   if (!projectDir) return null
@@ -22,6 +34,7 @@ export function appendEvent(projectDir, type, data = {}, path = _require('node:p
   try {
     let seq = 0
     try {
+      rotateIfNeeded(file, fs) // GC：超限先轮转再写
       const text = fs.readFileSync(file, 'utf8')
       seq = text.split('\n').filter(Boolean).length
     } catch {
