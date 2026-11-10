@@ -33,6 +33,12 @@
 .detail-row{padding:13px 16px;background:linear-gradient(115deg,rgba(7,28,43,.5),rgba(3,13,21,.24));border:1px solid rgba(112,234,255,.12);clip-path:polygon(0 0,96% 0,100% 10%,100% 100%,4% 100%,0 92%)}
 .detail-row-main{font-size:13px;line-height:1.6}
 .detail-row-sub{margin-top:5px;font-size:10px;color:#6f92a4}
+.detail-row-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.chip{font-size:9px;line-height:1.7;padding:1px 8px;border-radius:9px;border:1px solid rgba(112,234,255,.3);color:#7fd4ea;white-space:nowrap}
+.chip.ok{color:var(--green);border-color:rgba(61,220,151,.4)}
+.chip.bad{color:var(--red);border-color:rgba(255,99,99,.4)}
+.chip.mut{color:#6f92a4;border-color:rgba(111,146,164,.35)}
+.detail-mandate{margin:10px 0 2px;padding:9px 12px;border-left:2px solid rgba(112,234,255,.4);background:rgba(112,234,255,.05);font-size:11px;color:#9fc3d2;line-height:1.7;border-radius:0 6px 6px 0}
 /* 3D 陀螺仪全息层：倾斜轨道面 + 核心经线环 + 深度遮挡 */
 .orbital-system{transition:transform .25s ease-out}
 .jarvis-visual{transform:translateZ(0)}
@@ -57,6 +63,24 @@ body.jarvis-speaking .gyro.g2{animation-duration:5.5s}
 body.jarvis-speaking .gyro.g3{animation-duration:2.8s}
 body.jarvis-speaking .plasma-layer{animation-duration:2.4s}
 @keyframes heartbeat{0%,100%{transform:scale(1);filter:drop-shadow(0 0 20px rgba(0,174,239,.5)) brightness(1)}12%{transform:scale(1.07);filter:drop-shadow(0 0 28px rgba(0,200,255,.7)) brightness(1.14)}24%{transform:scale(1.015);filter:drop-shadow(0 0 22px rgba(0,174,239,.55)) brightness(1.04)}38%{transform:scale(1.13);filter:drop-shadow(0 0 36px rgba(0,210,255,.85)) brightness(1.22)}60%{transform:scale(1);filter:drop-shadow(0 0 20px rgba(0,174,239,.5)) brightness(1)}}
+/* 动态卡片：自由定位+拖拽+连线跟随+防重叠（用户定调 2026-11-10：卡片按会话数据动态生成，假卡全删） */
+.hud-node{user-select:none;touch-action:none;cursor:grab;transition:left .25s ease,top .25s ease,background .22s ease;transform:none!important}
+.hud-node.dragging{cursor:grabbing;transition:none;z-index:20;box-shadow:0 20px 60px rgba(0,0,0,.45),0 0 30px rgba(112,234,255,.14)}
+#cardLayer{position:absolute;inset:0;pointer-events:none}#cardLayer .hud-node{pointer-events:auto;max-height:270px;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(112,234,255,.2) transparent}
+.hud-node[data-kind=decision]{border-top-color:rgba(255,189,104,.65);background:linear-gradient(115deg,rgba(55,36,16,.7),rgba(8,17,24,.4))}.hud-node[data-kind=blocked]{border-top-color:rgba(255,113,137,.55)}.hud-node[data-kind=done]{border-top-color:rgba(60,242,165,.45)}
+.card-empty{position:absolute;left:50%;top:76%;transform:translateX(-50%);width:min(520px,80vw);text-align:center;color:#6f92a4;font-size:12px;line-height:1.8;pointer-events:none}
+.decision-form{display:flex;gap:7px;margin-top:10px;pointer-events:auto}.decision-form input{min-width:0;flex:1;height:29px;padding:0 9px;border:1px solid rgba(112,234,255,.18);border-radius:3px;background:rgba(2,10,16,.75);color:var(--text);font:inherit;font-size:10px;outline:none}.decision-form input:focus{border-color:rgba(112,234,255,.5)}.decision-form button{height:29px;padding:0 10px;border:1px solid rgba(112,234,255,.28);border-radius:3px;color:var(--cyan);font-size:9px;cursor:pointer}.decision-form button:hover{background:rgba(112,234,255,.1)}.card-feedback{min-height:13px;margin-top:6px;font-size:9px;color:var(--amber)}
+@media(max-width:900px){#cardLayer{position:relative;inset:auto;pointer-events:auto}#cardLayer .hud-node{max-height:none;overflow:visible}.card-empty{position:relative;left:auto;top:auto;transform:none;margin:24px auto}.voice-strip{max-width:100%;flex-wrap:wrap}.voice-strip .voice-privacy{display:none}}
+.hud-node .card-act{display:inline-block;margin-top:9px;margin-right:8px;padding:4px 10px;border:1px solid rgba(255,189,104,.3);border-radius:3px;font-size:9px;color:var(--amber);cursor:pointer}
+.hud-node .card-act:hover{background:rgba(255,189,104,.14)}
+.hud-node .card-act.ok{border-color:rgba(60,242,165,.35);color:var(--green)}
+.hud-node .card-act.ok:hover{background:rgba(60,242,165,.12)}
+/* 语音胶囊（字幕下方）：原语音卡元素整体挪入，id 保留 JS 零改 */
+.voice-strip{display:flex;align-items:center;gap:10px;margin:9px auto 0;padding:6px 14px;width:fit-content;max-width:min(680px,58vw);border:1px solid rgba(112,234,255,.14);background:rgba(3,14,22,.5);border-radius:20px;font-size:9px;color:#6d8ea0;pointer-events:auto}
+.voice-strip .vs-state{font:600 8px Consolas,monospace;letter-spacing:1px;white-space:nowrap}
+.voice-strip #micWaveform{width:110px;height:18px;margin:0;flex:none}
+.voice-strip .voice-transcript{flex:1;min-width:0;min-height:14px;margin:0;font-size:9px}
+.voice-strip .voice-privacy{margin:0;font-size:8px;white-space:nowrap}
 @keyframes heartbeatGlow{0%,100%{box-shadow:0 0 26px rgba(0,174,239,.35),inset 0 0 18px rgba(0,140,220,.25)}38%{box-shadow:0 0 72px rgba(0,200,255,.75),inset 0 0 34px rgba(0,180,255,.5)}}
 @keyframes heartbeatCore{0%,100%{transform:translate(-50%,-50%) translateZ(30px) scale(1)}12%{transform:translate(-50%,-50%) translateZ(30px) scale(1.025)}24%{transform:translate(-50%,-50%) translateZ(30px) scale(1.005)}38%{transform:translate(-50%,-50%) translateZ(30px) scale(1.045)}60%{transform:translate(-50%,-50%) translateZ(30px) scale(1)}}
 @media(max-width:1180px){.hud-node{width:250px}.node-left-1{left:22px}.node-right-1{right:22px}.node-left-2{left:35px}.node-right-2{right:35px}.node-left-3{left:70px}.node-right-3{right:70px}.orbital-system{transform:translate(-50%,-50%) scale(.82) rotateX(var(--rx)) rotateY(var(--ry))}.jarvis-dialogue{bottom:48px}.mission-layout{grid-template-columns:330px 1fr}.mission-core-copy{padding:0 20px}.execution-zone{grid-template-columns:1fr}}
@@ -75,28 +99,19 @@ body.jarvis-speaking .plasma-layer{animation-duration:2.4s}
 </header>
 <main id="mainView" class="view active">
   <div class="holo-stage">
-    <svg class="link-lines" viewBox="0 0 1600 928" preserveAspectRatio="none">
-      <path d="M355 172 C470 172 520 265 620 315"/><circle cx="355" cy="172" r="3"/><circle cx="620" cy="315" r="2"/>
-      <path d="M352 412 C470 412 510 440 618 448"/><circle cx="352" cy="412" r="3"/>
-      <path d="M400 754 C505 670 545 610 628 530"/><circle cx="400" cy="754" r="3"/>
-      <path d="M1245 172 C1130 172 1080 265 980 315"/><circle cx="1245" cy="172" r="3"/><circle cx="980" cy="315" r="2"/>
-      <path d="M1236 412 C1120 412 1080 440 982 448"/><circle cx="1236" cy="412" r="3"/>
-      <path d="M1200 754 C1095 670 1055 610 972 530"/><circle cx="1200" cy="754" r="3"/>
-    </svg>
+    <svg class="link-lines" id="linkLines" preserveAspectRatio="none"></svg>
     <div class="orbital-system">
       <div class="ticks"></div><div class="orbit o1"><i class="satellite-dot sd3"></i><i class="satellite-dot sd4"></i></div><div class="orbit o2"><i class="satellite-dot sd1"></i><i class="satellite-dot sd2"></i></div><div class="orbit o3"></div><div class="orbit o4"></div><div class="beam b1"></div><div class="beam b2"></div><div class="beam b3"></div><div class="beam b4"></div>
       <div class="progress-orbit"><svg viewBox="0 0 660 660"><circle class="base" cx="330" cy="330" r="318"/><circle class="active" cx="330" cy="330" r="318"/></svg></div>
       <div class="jarvis-core"><div class="gyro g1"></div><div class="gyro g2"></div><div class="gyro g3"></div><div class="core-halo"></div><div class="core-halo h2"></div><div class="core-halo h3"></div><div class="jarvis-visual" aria-hidden="true"><img class="jarvis-orb" src="/jarvis-wings-assets/generated-images/JARVIS_AI_assistant_glowing_or_2026-11-05T01-56-27.png" alt=""><div class="plasma-layer pa"></div><div class="plasma-layer pb"></div><div class="plasma-layer pc"></div><div class="arc-field"><i></i><i></i><i></i><i></i></div><div class="core-depth"></div><canvas id="coreWave" width="320" height="320"></canvas></div></div>
     </div>
-    <section class="hud-node mission-node node-left-1" role="button" tabindex="0" data-open-progress aria-label="查看任务完整进度">
-      <div class="node-kicker"><span>ACTIVE MISSION · 当前任务</span><span>RUNNING</span></div><div class="node-title">全局服务巡检与优化</div><div class="node-copy">第 3 / 5 阶段 · 延迟分析与路由优化</div><div class="node-data"><b>72%</b><span>已完成 12 / 16 项</span></div><div class="thin-progress"><i style="width:72%"></i></div>
-    </section>
-    <section class="hud-node voice-node node-left-2" id="voiceNode" role="button" tabindex="0" aria-label="连接麦克风并启用中文语音交互"><div class="node-kicker"><span>VOICE LINK · 语音链路</span><span id="micState">OFFLINE</span></div><div class="node-title" id="voiceNodeTitle">点击连接麦克风</div><div class="node-copy" id="voiceStatus">授权后可使用中文语音指令，Jarvis 将以成熟女声回应。</div><canvas id="micWaveform" width="240" height="38"></canvas><div class="voice-transcript" id="voiceTranscript">试试说：“查看任务进度”</div><div class="voice-privacy" id="voiceEngineLabel">音频仅在当前浏览器处理，不会自动上传</div></section>
-    <section class="hud-node node-left-3"><div class="node-kicker"><span>SECURITY FIELD · 安全场</span><span>ACTIVE</span></div><div class="node-title">环境安全，无需介入</div><div class="node-copy">端到端加密正常，权限边界未发现异常。</div></section>
-    <section class="hud-node report-node node-right-1" role="button" tabindex="0" data-open-report aria-label="查看完成报告"><div class="node-kicker"><span>LATEST REPORT · 完成汇报</span><span>DONE</span></div><div class="node-title">模型密钥轮换已完成</div><div class="node-copy">先生，8 个通道全部验证通过，旧密钥已经安全销毁。</div><div class="report-stats"><div><b>8/8</b><span>通道验证</span></div><div><b>0</b><span>异常</span></div><div><b>1m42s</b><span>耗时</span></div></div></section>
-    <section class="hud-node node-right-2"><div class="node-kicker"><span>CHANNEL FIELD · 通道场</span><span>4/5 LIVE</span></div><div class="node-title">主干链路稳定</div><div class="node-copy">DeepSeek / OpenAI / Anthropic / SiliconFlow 在线</div><div class="channel-dots"><span><i></i>DeepSeek</span><span><i></i>OpenAI</span><span><i></i>Anthropic</span><span class="warn"><i></i>Ollama</span></div></section>
-    <section class="hud-node node-right-3"><div class="node-kicker"><span>NEXT EVENT · 下一事件</span><span>23:30</span></div><div class="node-title">加密数据备份</div><div class="node-copy">到时间我会自动执行，并在完成后向你汇报。</div></section>
-    <div class="jarvis-dialogue"><div class="dialogue-line"><p class="dialogue-main"><span id="captionText">正在接入当前工作区…</span><em></em></p></div></div>
+    <div id="cardLayer" aria-live="polite"></div>
+    <div class="jarvis-dialogue"><div class="dialogue-line"><p class="dialogue-main"><span id="captionText">正在接入当前工作区…</span><em></em></p></div>
+      <div class="voice-strip" id="voiceNode" role="button" tabindex="0" aria-label="连接或断开麦克风">
+        <span class="vs-state" id="micState">OFFLINE</span><span id="voiceNodeTitle">点击连接麦克风</span><canvas id="micWaveform" width="110" height="18"></canvas>
+        <span class="voice-transcript" id="voiceTranscript">可语音查看进度或答复待决定事项</span><span class="voice-privacy" id="voiceEngineLabel">音频仅在当前浏览器处理</span><span id="voiceStatus" hidden></span>
+      </div>
+    </div>
   </div>
   <details class="jarvis-menu"><summary aria-label="打开 Jarvis 快捷指令"><div class="orb3d" aria-hidden="true"></div></summary><div class="menu-pop"><div class="menu-title">JARVIS 快捷指令</div><button class="menu-item" data-open-team><svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor"/><circle cx="17" cy="9" r="2" stroke="currentColor"/><path d="M3 20c.8-4 3-6 6-6s5.2 2 6 6M15 14c3 0 5 2 6 5" stroke="currentColor"/></svg>员工协作空间</button><button class="menu-item" data-open-progress><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor"/><path d="M12 7v5l3 2" stroke="currentColor"/></svg>任务执行进度</button></div></details>
 </main>
@@ -172,7 +187,6 @@ const I18N={
 '第 3 / 5 阶段 · 延迟分析与路由优化':['第 3 / 5 阶段 · 延迟分析与路由优化','Phase 3 / 5 · Latency analysis & route optimization'],
 '已完成 12 / 16 项':['已完成 12 / 16 项','12 / 16 tasks done'],
 'VOICE LINK · 语音链路':['语音链路','VOICE LINK'],'点击连接麦克风':['点击连接麦克风','Click to connect mic'],
-'授权后可使用中文语音指令，Jarvis 将以成熟女声回应。':['授权后可使用语音指令，{n} 将以语音回应。','After authorization you can use voice commands; {n} will respond by voice.'],
 '试试说：“查看任务进度”':['试试说：“{n}，查看任务进度”','Try saying: "{n}, show task progress"'],
 '音频仅在当前浏览器处理，不会自动上传':['音频仅在当前浏览器处理，不会自动上传','Audio stays in your browser, never uploaded'],
 'SECURITY FIELD · 安全场':['安全场','SECURITY FIELD'],'ACTIVE':['生效中','ACTIVE'],'环境安全，无需介入':['环境安全，无需介入','Environment secure, no action needed'],
@@ -186,7 +200,6 @@ const I18N={
 'NEXT EVENT · 下一事件':['下一事件','NEXT EVENT'],'加密数据备份':['加密数据备份','Encrypted data backup'],
 '到时间我会自动执行，并在完成后向你汇报。':['到时间我会自动执行，并在完成后向你汇报。',"I'll run it on schedule and report when done."],
 '正在接入当前工作区…':['正在接入当前工作区…','Connecting to current workspace…'],
-'启用女声':['启用女声','Enable voice'],'启用或关闭 Jarvis 女声':['启用或关闭语音播报','Toggle voice announcements'],
 '连接麦克风':['连接麦克风','Connect mic'],'连接或断开麦克风':['连接或断开麦克风','Connect or disconnect microphone'],
 '员工协作空间':['员工协作空间','Team workspace'],'任务执行进度':['任务执行进度','Task progress'],
 '专家模式 · 原生 WebUI':['专家模式 · 原生 WebUI','Expert mode · Native WebUI'],'查看运行日志':['查看运行日志','View run logs'],
@@ -242,8 +255,8 @@ const I18N={
 '向团队发送一条消息…':['向团队发送一条消息…','Send a message to the team…'],'团队消息':['团队消息','Team message'],'发送':['发送','Send'],
 'JARVIS · 详情':['{n} · 详情','{n} · DETAILS'],'详情':['详情','Details'],
 // ── JS 动态文案 ──
-'voice.on':['女声已开启','Voice on'],'voice.off':['启用女声','Enable voice'],'voice.muted':['语音播报已静音','Voice announcements muted'],'voice.muted.cmd':['已通过语音指令静音','Muted by voice command'],
-'voice.using':['播报声音：{v}','Voice: {v}'],'voice.fallback':['将使用系统默认语音','Will use system default voice'],'voice.status':['授权后可使用语音指令，{n} 将以语音回应。','After authorization, {n} will respond by voice.'],
+'voice.on':['语音播报已开启','Voice on'],'voice.off':['语音播报已关闭','Voice off'],'voice.muted':['语音播报已静音','Voice announcements muted'],'voice.muted.cmd':['已通过语音指令静音','Muted by voice command'],
+'voice.status':['授权后可使用语音指令，{n} 将以语音回应。','After authorization, {n} will respond by voice.'],
 'voice.hint':['已收到语音。可尝试“查看进度”“打开员工空间”或“返回总览”。','Heard. Try "show progress", "open team space" or "back to overview".'],
 'mic.st.offline':['离线','OFFLINE'],'mic.st.waiting':['授权中','AUTH'],'mic.st.live':['聆听中','LISTENING'],'mic.st.wake':['待命','STANDBY'],'mic.st.error':['异常','ERROR'],
 'mic.connect':['连接麦克风','Connect mic'],'mic.disconnect':['断开麦克风','Disconnect mic'],'mic.waiting':['等待授权…','Waiting for permission…'],
@@ -254,7 +267,7 @@ const I18N={
 'mic.err.nodev':['未检测到可用麦克风，请检查设备连接。','No microphone found. Check the device connection.'],
 'mic.err.textonly':['你可以继续使用文字点击操作','You can continue with text and clicks'],'mic.err.nosr':['麦克风已连接，但当前浏览器不支持语音识别','Mic connected, but this browser does not support speech recognition'],
 'mic.off':['麦克风已断开。','Microphone disconnected.'],'mic.off.detail':['麦克风已断开，音频不会继续采集。','Microphone disconnected; audio capture stopped.'],'mic.reconnect':['点击可重新连接麦克风','Click to reconnect the microphone'],
-'voice.off.hint':['语音功能未开启：请在 DSH 设置中打开「语音功能」后使用','Voice is disabled: turn on "Voice" in DSH settings to use mic and speech'],
+'voice.off.hint':['语音沟通模式未开启：可在 DSH 设置面板打开「语音沟通模式」','Voice mode is off: enable "Voice mode" in DSH settings'],
 'listen':['正在聆听：','Listening: '],'chat.you':['你：','You: '],
 'wake.here':['在，我在听。',"Yes, I'm listening."],'wake.wait':['等待唤醒：说“{n}”','Waiting for wake word: say "{n}"'],'wake.miss':['（待命中，说“{n}”唤醒）你：{t}','(standby, say "{n}" to wake) You: {t}'],'wake.announce':['语音待命已开启，叫我{n}就能唤醒。','Voice standby is on. Just call my name, {n}, to wake me.'],
 'decision.approved':['已批准将新路由策略应用到全部通道。我会继续观察回归结果。','Approved: apply the new routing policy to all channels. I will keep watching the regression.'],
@@ -301,6 +314,7 @@ const I18N={
 'EVENTS · 事件流':['事件流','EVENTS'],'最近事件':['最近事件','Recent events'],
 'card.pages':['动态页面','DYNAMIC PAGES'],'card.pages.n':[' PAGES',' PAGES'],
 'card.pages.copy':['{n} 刚生成的可视化页面（{m} 分钟前）· 点击即看 · 用完自动回收','A page {n} just generated ({m} min ago) · click to view · auto-recycled'],
+'card.recent':['最近汇报','RECENT REPORTS'],'ev.taskDone':['已完成','done'],'ev.taskStart':['进行中','in progress'],'ev.taskAssign':['已派给','assigned to'],
 'pages.title':['{n} 生成的页面（闲置 24 小时自动回收）','Pages by {n} (auto-recycled after 24h idle)'],
 'pages.row':['{m} 分钟前生成 · 点击打开','generated {m} min ago · click to open'],
 'pages.empty':['{n} 还没有生成过页面。对它说「给我一个 XX 看板/报告页」，它会把页面写到动态页面里，用完自动回收。','{n} has not generated pages yet. Ask for a dashboard/report page and it will be written here, auto-recycled after use.'],
@@ -345,6 +359,12 @@ const TOOL_HUMAN={
   'agent_teams_create':{zh:'创建团队',en:'team creation'},'agent_teams_create_task':{zh:'创建任务',en:'task creation'},'agent_teams_status':{zh:'盯控进度',en:'progress watch'},
   'agent_teams_send_message':{zh:'给成员发消息',en:'messaging member'},'agent_teams_reassign_task':{zh:'改派任务',en:'task reassign'},add_member:{zh:'招募成员',en:'member recruiting'},
   ask_user_question:{zh:'向你提问',en:'asking you'},
+  ticket:{zh:'任务票据',en:'task ticket'},meeting:{zh:'组织会议',en:'meeting'},gc:{zh:'会话整理',en:'session cleanup'},
+  clarify:{zh:'需求澄清',en:'clarification'},collab:{zh:'协同通道',en:'collaboration'},company:{zh:'公司台账',en:'company ledger'},
+  lesson:{zh:'经验教训沉淀',en:'lessons capture'},process:{zh:'流程定制',en:'process setup'},release:{zh:'版本发布',en:'release'},
+  release_check:{zh:'发布校验',en:'release check'},report_issue:{zh:'问题上报',en:'issue reporting'},issue_sync:{zh:'问题同步',en:'issue sync'},
+  store:{zh:'知识存档',en:'knowledge store'},think:{zh:'思考',en:'thinking'},think_deep:{zh:'深度思考',en:'deep thinking'},
+  update:{zh:'版本更新',en:'update'},baseline:{zh:'基线评估',en:'baseline'},fingerprint:{zh:'环境指纹',en:'environment fingerprint'},
 };
 const TOOL_PATH_HUMAN=[
   [/\.jarvis\/docs\/需求规格[^，。；)\]（]*/g,{zh:'需求规格文档',en:'the requirement spec'}],
@@ -390,12 +410,12 @@ function showTeam(announce=true){currentView='team';activateView(teamView,'#team
 document.querySelectorAll('[data-open-progress]').forEach(el=>{el.addEventListener('click',e=>{e.stopPropagation();showProgress(false)});el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();showProgress(false)}})});
 document.querySelectorAll('[data-open-report]').forEach(el=>{el.addEventListener('click',e=>{e.stopPropagation();showProgress(true)});el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();showProgress(true)}})});
 document.querySelectorAll('[data-open-team]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();showTeam()}));document.querySelectorAll('[data-back]').forEach(el=>el.addEventListener('click',()=>showMain()));
-// Jarvis 中文成熟女声：优先选择本机自然女声，浏览器无对应声音时使用系统中文语音。
+// Jarvis 中文播报：优先选择本机自然语音，浏览器无对应声音时使用系统中文语音。
 let voiceEnabled=false,preferredVoice=null;
-const speakerToggle=document.getElementById('speakerToggle'),voiceEngineLabel=document.getElementById('voiceEngineLabel');
+const voiceEngineLabel=document.getElementById('voiceEngineLabel');
 const preferredNames=['Microsoft Xiaoxiao Online (Natural)','Microsoft Xiaoyi Online (Natural)','Microsoft Xiaohan Online (Natural)','Microsoft Xiaomeng Online (Natural)','Microsoft Huihui','Microsoft Yaoyao'];
-function selectJarvisVoice(){if(!('speechSynthesis'in window))return null;const isEn=window.JARVIS_LANG==='en';const voices=speechSynthesis.getVoices();let match=null;if(isEn){match=voices.find(v=>/^en(-|_|$)/i.test(v.lang)&&/natural|aria|zira|samantha|google uk english female|google us english/i.test(v.name))||voices.find(v=>/^en/i.test(v.lang))||null}else{for(const name of preferredNames){const m=voices.find(v=>v.name.includes(name)&&/zh|Chinese|中文/i.test(`${v.lang} ${v.name}`));if(m){match=m;break}}if(!match)match=voices.find(v=>/zh-CN/i.test(v.lang)&&/xiaoxiao|xiaoyi|xiaohan|xiaomeng|huihui|yaoyao|female|女/i.test(v.name))||voices.find(v=>/zh-CN/i.test(v.lang))||null}preferredVoice=match;voiceEngineLabel.textContent=match?t('voice.using').replace('{v}',match.name):t('voice.fallback');return match}
-function updateSpeakerUI(){if(!speakerToggle)return}
+function selectJarvisVoice(){if(!('speechSynthesis'in window))return null;const isEn=window.JARVIS_LANG==='en';const voices=speechSynthesis.getVoices();let match=null;if(isEn){match=voices.find(v=>/^en(-|_|$)/i.test(v.lang)&&/natural|aria|zira|samantha|google uk english female|google us english/i.test(v.name))||voices.find(v=>/^en/i.test(v.lang))||null}else{for(const name of preferredNames){const m=voices.find(v=>v.name.includes(name)&&/zh|Chinese|中文/i.test(`${v.lang} ${v.name}`));if(m){match=m;break}}if(!match)match=voices.find(v=>/zh-CN/i.test(v.lang)&&/xiaoxiao|xiaoyi|xiaohan|xiaomeng|huihui|yaoyao|female|女/i.test(v.name))||voices.find(v=>/zh-CN/i.test(v.lang))||null}preferredVoice=match;return match}
+function updateSpeakerUI(){}
 let speakQueue=[],speakingNow=false,lastSpokenText='',capGreeted=false;
 function splitSentences(t){return String(t||'').replace(/\s+/g,' ').split(/(?<=[。！？!?；;])/).map(s=>s.trim()).filter(Boolean)}
 function speakServer(s){return fetch('/api/jarvis/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:s})}).then(async r=>{if(!r.ok)return false;const blob=await r.blob();const url=URL.createObjectURL(blob);const audio=new Audio(url);await new Promise(res=>{audio.onended=res;audio.onerror=res;audio.play().catch(res)});URL.revokeObjectURL(url);return true}).catch(()=>false)}
@@ -410,11 +430,11 @@ window.JARVIS_VOICE_ON=true;window.personaReady=(async function loadPersona(){tr
 if(b&&b.ok){applyStaticI18n();refreshJSTexts();applyPersonaName();try{dispatchEvent(new CustomEvent('jarvis:lang'))}catch(e){}}}catch(e){}})();
 // 麦克风、实时声纹与中文语音指令（待命唤醒模式：叫名字才进入对话，18 秒无语音自动回到待命）。
 let micStream=null,audioContext=null,analyser=null,micData=null,micRaf=0,recognition=null,micActive=false,micMode='off',wakeTimer=0;
-const micToggle=document.getElementById('micToggle'),voiceNode=document.getElementById('voiceNode'),micState=document.getElementById('micState'),voiceNodeTitle=document.getElementById('voiceNodeTitle'),voiceStatus=document.getElementById('voiceStatus'),voiceTranscript=document.getElementById('voiceTranscript'),micCanvas=document.getElementById('micWaveform'),micCtx=micCanvas.getContext('2d');
-function setMicUI(state,detail){const labels={offline:t('mic.st.offline'),waiting:t('mic.st.waiting'),live:t('mic.st.live'),wake:t('mic.st.wake'),error:t('mic.st.error')};micState.textContent=labels[state]||state.toUpperCase();micState.style.color=state==='live'?'var(--green)':state==='wake'?'var(--cyan)':state==='error'?'var(--red)':'';if(micToggle){micToggle.classList.toggle('mic-live',state==='live');micToggle.querySelector('span').textContent=state==='live'?t('mic.disconnect'):state==='waiting'?t('mic.waiting'):t('mic.connect')}voiceNodeTitle.textContent=state==='live'?t('mic.title.live'):state==='wake'?t('mic.title.wake'):state==='waiting'?t('mic.title.waiting'):state==='error'?t('mic.title.error'):t('mic.title.off');if(detail)voiceStatus.textContent=detail}
+const voiceNode=document.getElementById('voiceNode'),micState=document.getElementById('micState'),voiceNodeTitle=document.getElementById('voiceNodeTitle'),voiceStatus=document.getElementById('voiceStatus'),voiceTranscript=document.getElementById('voiceTranscript'),micCanvas=document.getElementById('micWaveform'),micCtx=micCanvas.getContext('2d');
+function setMicUI(state,detail){const labels={offline:t('mic.st.offline'),waiting:t('mic.st.waiting'),live:t('mic.st.live'),wake:t('mic.st.wake'),error:t('mic.st.error')};micState.textContent=labels[state]||state.toUpperCase();micState.style.color=state==='live'?'var(--green)':state==='wake'?'var(--cyan)':state==='error'?'var(--red)':'';voiceNodeTitle.textContent=state==='live'?t('mic.title.live'):state==='wake'?t('mic.title.wake'):state==='waiting'?t('mic.title.waiting'):state==='error'?t('mic.title.error'):t('mic.title.off');if(detail)voiceStatus.textContent=detail}
 function drawMicWave(){if(!analyser)return;analyser.getByteTimeDomainData(micData);const w=micCanvas.width,h=micCanvas.height;micCtx.clearRect(0,0,w,h);micCtx.strokeStyle='rgba(112,234,255,.09)';micCtx.beginPath();micCtx.moveTo(0,h/2);micCtx.lineTo(w,h/2);micCtx.stroke();micCtx.beginPath();for(let i=0;i<micData.length;i++){const x=i/(micData.length-1)*w,y=(micData[i]/255)*h;if(i===0)micCtx.moveTo(x,y);else micCtx.lineTo(x,y)}micCtx.strokeStyle='#70eaff';micCtx.lineWidth=1.5;micCtx.shadowColor='#70eaff';micCtx.shadowBlur=7;micCtx.stroke();micCtx.shadowBlur=0;micRaf=requestAnimationFrame(drawMicWave)}
 function clearMicWave(){cancelAnimationFrame(micRaf);micCtx.clearRect(0,0,micCanvas.width,micCanvas.height);micCtx.strokeStyle='rgba(112,234,255,.18)';micCtx.beginPath();micCtx.moveTo(0,19);micCtx.lineTo(micCanvas.width,19);micCtx.stroke()}
-function handleVoiceCommand(text){const command=text.replace(/[，。！？\s]/g,'');voiceTranscript.textContent=t('chat.you')+text;armSleep();if(/查看进度|任务进度|执行进度|progress/i.test(command)){showProgress();return}if(/完成汇报|汇报结果|查看报告|report/i.test(command)){showProgress(true);return}if(/员工|协作空间|团队空间|team/i.test(command)){showTeam();return}if(/返回总览|回到主屏|返回主页面|overview|back/i.test(command)){showMain();return}if(/停止播报|静音|关闭声音|mute|stop talking/i.test(command)){voiceEnabled=false;updateSpeakerUI();speechSynthesis.cancel();voiceEngineLabel.textContent=t('voice.muted.cmd');return}if(/开启声音|开始播报|恢复播报|unmute|speak up/i.test(command)){voiceEnabled=true;updateSpeakerUI();speak(mainSpeech,true);return}voiceStatus.textContent=t('voice.hint')}
+function handleVoiceCommand(text){const command=text.replace(/[，。！？\s]/g,'');voiceTranscript.textContent=t('chat.you')+text;armSleep();if(/查看进度|任务进度|执行进度|progress/i.test(command)){showProgress();return}if(/完成汇报|汇报结果|查看报告|report/i.test(command)){showProgress(true);return}if(/员工|协作空间|团队空间|team/i.test(command)){showTeam();return}if(/返回总览|回到主屏|返回主页面|overview|back/i.test(command)){showMain();return}if(/停止播报|静音|关闭声音|mute|stop talking/i.test(command)){voiceEnabled=false;updateSpeakerUI();speechSynthesis.cancel();voiceEngineLabel.textContent=t('voice.muted.cmd');return}if(/开启声音|开始播报|恢复播报|unmute|speak up/i.test(command)){voiceEnabled=true;updateSpeakerUI();speak(mainSpeech,true);return}if(window.__jarvisDecisionReply&&window.__jarvisDecisionReply(text)){voiceTranscript.textContent='正在提交你的决定：'+text;return}voiceStatus.textContent=t('voice.hint')}
 // ── 待命/唤醒状态机：wake = 只听唤醒词；live = 正常对话；18 秒无语音回 wake ──
 function wakeAliases(){const n=String(window.JARVIS_NAME||'Jarvis');const list=[n,n.replace(/[^0-9A-Za-z\u4e00-\u9fa5]/g,'')];const key=n.toLowerCase().replace(/[^a-z]/g,'');const TRANS={jarvis:['jarvis','javis','贾维斯','加维斯'],stark:['斯塔克']};if(TRANS[key])list.push(...TRANS[key]);return [...new Set(list.map(x=>String(x).toLowerCase().replace(/[\s，。！？,.!?]/g,'')).filter(Boolean))]}
 function heardWake(text){const s=String(text).toLowerCase().replace(/[\s，。！？,.!?]/g,'');return wakeAliases().some(a=>a&&s.includes(a))}
@@ -451,64 +471,111 @@ const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelecto
 const esc=s=>String(s??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const clip=(s,n)=>{const t=String(s??'').trim();return t.length>n?t.slice(0,n)+'…':t};
 const setText=(sel,text,root=document)=>{const el=$(sel,root);if(el)el.textContent=text};
-const STATUS_LABEL=k=>({in_progress:t('st.in_progress'),claimed:t('st.claimed'),pending:t('st.pending'),completed:t('st.completed'),failed:t('st.failed'),cancelled:t('st.cancelled'),dropped:t('st.dropped')})[k]||k;
+const STATUS_LABEL=k=>({in_progress:t('st.in_progress'),claimed:t('st.claimed'),pending:t('st.pending'),completed:t('st.completed'),failed:t('st.failed'),cancelled:t('st.cancelled'),dropped:t('st.dropped'),ready:'已完成',done:'已完成',working:'进行中',reviewing:'评审中',assigned:'已派工'})[k]||k;
 const LIVE={snap:null,events:[],lastSeq:0,connected:false,demo:true};
 
+const STEP_HUMAN={clarify:'需求确认',decompose:'任务拆解',design:'方案设计',build:'团队组建',execute:'执行盯控',close:'收口'};
+const MEET_TYPE_HUMAN={kickoff:'开工会',cycle:'阶段会',close:'收口会'};
 function eventLine(e){
   const d=e.data||{};
-  if(e.type==='gate')return t('ev.gate').replace('{s}',d.step||'');
-  if(e.type==='board')return t('ev.board').replace('{k}',String(d.open??'?'));
-  if(e.type==='meeting')return t('ev.meeting').replace('{ty}',d.type||'').replace('{tp}',clip(d.topic||'',30));
+  if(e.type==='gate')return t('ev.gate').replace('{s}',STEP_HUMAN[d.step]||d.step||'');
+  if(e.type==='board')return t('ev.board').replace('{k}',String(d.open??d.count??'?'));
+  if(e.type==='meeting')return t('ev.meeting').replace('{ty}',MEET_TYPE_HUMAN[d.type]||'').replace('{tp}',clip(d.topic||d.path||'',30));
   if(e.type==='dispatch')return t('ev.dispatch').replace('{a}',d.assignee||t('st.member')).replace('{s}',clip(d.subject,26));
-  if(e.type==='command')return t('ev.command').replace('{tool}',humanize(d.tool||'')).replace('{r}',d.ok?t('ev.ok'):t('ev.fail'));
-  return e.type||t('ev.fallback');
+  if(String(e.type).startsWith('task.')){
+    const act=e.type==='task.completed'?t('ev.taskDone'):e.type==='task.started'?t('ev.taskStart'):t('ev.taskAssign');
+    return `${act} ${d.assignee||t('st.member')}：${clip(String(d.subject||''),30)}`;
+  }
+  if(e.type==='command'){
+    let tool=humanize(d.tool||'');
+    if(tool===String(d.tool||'')&&/\b[a-z][a-z_]{3,}\b/.test(tool))tool=tool.replace(/^[\w.-]*[_:]/,'').replace(/_/g,' ');
+    return t('ev.command').replace('{tool}',tool||t('ev.fallback')).replace('{r}',d.ok?t('ev.ok'):t('ev.fail'));
+  }
+  return t('ev.fallback');
 }
 function eventTime(e){try{return new Date(e.at).toLocaleTimeString(window.JARVIS_LANG==='en'?'en-US':'zh-CN',{hour12:false})}catch{return ''}}
 
-/* 主界面：动态卡片系统 —— 卡片由会话快照按价值优先级派生，点击进入动态详情子页 */
-const CARD_SLOTS=['.node-left-1','.node-left-3','.report-node','.node-right-2','.node-right-3'];
+/* 主界面：卡片只从当前会话真实快照派生；票据优先，旧团队任务仅作兼容回退。 */
+function taskText(value,limit=90){
+  let x=humanize(String(value??'')).replace(/[`*_>#]/g,' ');
+  x=x.replace(/https?:\/\/[^\s，。；）)]+/g,'链接')
+    .replace(/\.jarvis\/[^\s，。；）)]*/g,'')
+    .replace(/(?:[A-Za-z]:[\\/]|\/(?:opt|root|home|tmp|var|usr)\/)[^\s，。；）)]*/g,'')
+    .replace(/\b(?:attempt|run|session|trigger)\s+[0-9a-f]{8}-[0-9a-f-]{20,}/gi,'')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,'')
+    .replace(/\bcaptain\b/gi,'队长')
+    .replace(/\.jarvis(?![\w\/])/g,'')
+    .replace(/\b(?:R|CF|RF|H)-?\d+(?:\.\.[A-Z]?\d+)?(?:\s*[-–]\s*[A-Z]?-?\d+)*\b/g,'')
+    .replace(/\b(?:run_id|dataDir|agentCount|MANIFEST|PONDER_DATA_DIR)\b\s*[=:]?\s*[^\s，。；]*/gi,'')
+    .replace(/\b(?:ticket|asg|run|session|attempt|trigger)[-_][A-Za-z0-9_-]+\b/gi,'')
+    .replace(/\bT\d+(?:\s*\/\s*F\d+)?\b[：:、-]?\s*/gi,'')
+    .replace(/\b(?:jarvis|agent_teams)_[A-Za-z0-9_]+\b/g,'')
+    .replace(/（\s*）/g,'')
+    .replace(/\s+（/g,'（')
+    .replace(/\s+([、，。；）])/g,'$1')
+    .replace(/\s{2,}/g,' ').trim();
+  return clip(x.replace(/^[：:，,；;。\s]+/,''),limit);
+}
+function reportText(value,limit=110){
+  const clean=taskText(value,240);
+  if(!clean)return '';
+  const parts=clean.split(/(?<=[。！？；])/).map(s=>s.trim()).filter(s=>s&&!/工具|参数|路径|run|json|schema/i.test(s));
+  return clip((parts.length?parts:[clean]).slice(0,2).join(''),limit);
+}
+function unifiedTasks(snap){
+  const tk=snap.tickets||{};
+  if((tk.open&&tk.open.length)||(tk.done&&tk.done.length)){
+    const convert=x=>({id:x.id,title:taskText(x.title,160),role:x.role||t('st.member'),state:x.reportState||x.state||(x.ended?'completed':'in_progress'),summary:reportText(x.summary,300),ended:!!x.ended,at:x.updatedAt||x.createdAt||'',stage:x.stage||'',attempts:x.attempts||0,mandate:reportText(x.mandate,300),endedReason:x.endedReason||'',raw:x});
+    return {open:(tk.open||[]).map(convert),done:(tk.done||[]).map(convert),proposals:tk.proposals||[],source:'tickets'};
+  }
+  const legacy=(snap.tasks&&snap.tasks.byAssignee)||[];
+  const convert=x=>({id:x.id,title:taskText(x.subject,160),role:x.assignee||t('st.member'),state:x.status||'pending',summary:'',ended:['completed','cancelled','failed','dropped'].includes(x.status),at:'',stage:'',attempts:x.attempt||0,mandate:'',endedReason:'',raw:x});
+  const all=legacy.map(convert);
+  return {open:all.filter(x=>!x.ended),done:all.filter(x=>x.state==='completed'),proposals:(snap.tickets&&snap.tickets.proposals)||[],source:'legacy'};
+}
+function reportTime(ms){if(!ms)return '';const d=Date.now()-Number(ms);if(!(d>=0))return '';const m=Math.round(d/60000);if(m<1)return '刚刚';if(m<60)return m+' 分钟前';const h=Math.round(m/60);if(h<24)return h+' 小时前';return Math.round(h/24)+' 天前'}
+function ago(iso){if(!iso)return '';const ms=Date.now()-new Date(iso).getTime();if(!(ms>=0))return '';const m=Math.round(ms/60000);if(m<1)return '刚刚';if(m<60)return m+' 分钟前';const h=Math.round(m/60);if(h<24)return h+' 小时前';return Math.round(h/24)+' 天前'}
+function taskChips(x,extra=[]){const chips=[];const st=STATUS_LABEL(x.state)||'';if(st)chips.push({t:st,c:x.state==='completed'?'ok':['failed','blocked','cancelled','dropped'].includes(x.state)?'bad':''});if(x.stage)chips.push({t:'阶段 '+x.stage,c:'mut'});if(x.attempts>1)chips.push({t:'第 '+x.attempts+' 次推进',c:'mut'});const when=ago(x.at);if(when)chips.push({t:when,c:'mut'});return chips.concat(extra)}
 function cardDecision(snap){
   const need=(snap.board&&snap.board.needsUser)||[];
-  const meeting=((snap.meetings&&sneak_meetings(snap))||[])[0];
-  if(!need.length&&!meeting)return null;
-  const tasksAll=(snap.tasks&&snap.tasks.byAssignee)||[];
-  const cnt=st=>tasksAll.filter(x=>x.status===st).length;
-  const blockers=(snap.board&&snap.board.blockers)||[];
-  const employees=(snap.company&&snap.company.employees)||[];
-  const rows=need.slice(0,12).map(n=>({main:clip(humanize(n.content),64),sub:n.from?(t('card.from')+(n.from||'')):''}));
-  if(meeting){
-    rows.push({main:t('card.meeting.dot')+humanize(meeting.type||''),sub:(t('meet.attendees'))+((meeting.attendees||[]).join('、')||t('empty.team'))});
-    (meeting.agenda||[]).slice(0,8).forEach((a,i)=>rows.push({main:t('meet.agenda.item').replace('{i}',i+1)+humanize(a)}));
-  }
-  blockers.slice(0,6).forEach(b=>rows.push({main:'⛔ '+clip(humanize(b.content||''),60),sub:(b.type||'')+(b.id?' · '+b.id:'')}));
-  // 各成员任务概览（谁在干什么）
-  const byPerson={};
-  tasksAll.forEach(x=>{if(['completed','cancelled','dropped'].includes(x.status))return;(byPerson[x.assignee||t('st.unassigned')]=byPerson[x.assignee||t('st.unassigned')]||[]).push(x)});
-  Object.entries(byPerson).slice(0,6).forEach(([p,arr])=>rows.push({main:t('meet.person').replace('{p}',p).replace('{k}',arr.length),sub:clip(humanize(arr[0]?arr[0].subject||'':''),52)}));
-  const copy=meeting?humanize(meeting.why||meeting.topic||''):(need.length?t('card.waiting.copy'):'');
-  return {k:t('card.waiting'),st:t('card.reply'),title:need.length?clip(need[0].content,22):t('card.meeting.req')+(meeting?humanize(meeting.type||''):''),
-    copy:clip(copy,200),
-    detail:{kicker:t('BOARD · 黑板与会议'),title:meeting?(t('card.meeting.dot')+humanize(meeting.type||'')):t('需要你决定的事项'),
-      copy:copy,
-      meta:[[t('meet.m.doing'),String(cnt('in_progress'))],[t('meet.m.queued'),String(cnt('pending')+cnt('claimed'))],[t('meet.m.done'),String(cnt('completed'))],[t('meet.m.members'),String(employees.length)]],
-      rows:rows,empty:t('empty.decision')}}
+  if(!need.length)return null;
+  const first=need[0];
+  return {id:'decision-'+(first.id||'0'),kind:'decision',k:'待你决定',st:need.length>1?`共 ${need.length} 项`:'需要答复',title:taskText(first.content,54),
+    copy:'可以选择下面的建议，也可以输入或直接说出你的想法。',
+    action:{type:'board',id:first.id,content:first.content},options:[['同意，按这个方向继续推进。','同意推进'],['暂不同意，请维持现状并补充风险与备选方案。','暂不，补充方案']],
+    detail:{kicker:'BOARD · 待你决定',title:taskText(first.content,100),copy:'你的答复会写回当前工作区黑板，团队据此继续推进。',
+      rows:need.slice(0,12).map(n=>({main:taskText(n.content,160),chips:n.from?[{t:'来自 '+n.from,c:'mut'}]:[{t:'等待你的答复',c:''}],sub:taskText(n.detail||n.context||'',160)}))}};
+}
+function cardProposal(snap){
+  const list=(snap.tickets&&snap.tickets.proposals)||[];
+  if(!list.length)return null;
+  const p=list[0];
+  return {id:'proposal-'+p.id,kind:'decision',k:'成员找来新任务',st:'等你裁决',title:taskText(p.title,54),copy:reportText(p.why||p.basis,120)||'成员在空闲时发现了值得推进的工作。',
+    action:{type:'proposal',id:p.id,title:p.title},options:[['approve','采纳并开单'],['reject','暂不采纳']],
+    detail:{kicker:'PROPOSAL · 自主找活提案',title:taskText(p.title,100),copy:reportText(p.why||p.basis,300)||'成员在空闲时发现了值得推进的工作。',brief:reportText(p.basis,300)!==reportText(p.why,300)?reportText(p.basis,300):'',
+      rows:list.slice(0,10).map(x=>({main:taskText(x.title,160),chips:[{t:x.proposer||'成员',c:'mut'},...((x.at&&[ago(x.at)])||[]).map(t2=>({t:t2,c:'mut'}))],sub:reportText(x.why||x.basis,220)}))}};
+}
+function cardBlocked(snap){
+  const u=unifiedTasks(snap);const hit=u.open.find(x=>['blocked','failed'].includes(x.state));
+  const board=(snap.board&&snap.board.blockers)||[];
+  if(!hit&&!board.length)return null;
+  const title=hit?hit.title:taskText(board[0].content,60);
+  const copy=hit?(hit.summary||'这项任务遇到阻塞，需要协调后才能继续。'):'当前有阻塞事项，正在等待协调。';
+  return {id:'blocked-'+(hit?hit.id:board[0].id||'board'),kind:'blocked',k:'需要协调',st:'阻塞',title,copy,
+    detail:{kicker:'BLOCKED · 阻塞与协调',title,copy,
+      rows:[...u.open.filter(x=>['blocked','failed'].includes(x.state)).map(x=>({main:x.title,chips:taskChips(x,[{t:x.role,c:'mut'}]),sub:x.summary||'等待协调'})),...board.map(b=>({main:taskText(b.content,120),chips:[{t:'黑板阻塞项',c:'bad'}],sub:b.from?`来自 ${b.from}`:''}))]}};
 }
 function sneak_meetings(snap){return (snap.meetings&&snap.meetings.required)||[]}
 function cardMission(snap){
-  const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
-  const stage=snap.stage||{index:0,total:6,label:'未开始'};
-  const doing=tasks.filter(t=>!['completed','cancelled','dropped'].includes(t.status));
-  const done=tasks.filter(t=>t.status==='completed');
-  const cur=doing.find(t=>t.status==='in_progress')||doing[0];
-  if(!cur)return null;
-  const pct=tasks.length?Math.round(done.length/tasks.length*100):0;
-  return {k:t('card.mission'),st:t('card.running'),title:cur.subject,
-    copy:t('card.mission.copy').replace('{a}',cur.assignee||t('st.unassigned')).replace('{s}',STATUS_LABEL(cur.status)).replace('{i}',stage.index).replace('{t2}',stage.total).replace('{l}',stage.label),
-    data:pct+'%',dataLabel:t('card.mission.data').replace('{d}',done.length).replace('{n2}',tasks.length),pct,
-    detail:{kicker:t('MISSION · 当前任务'),title:cur.subject,
-      copy:t('card.mission.detail').replace('{a}',cur.assignee||t('st.unassigned')).replace('{s}',STATUS_LABEL(cur.status)).replace('{att}',cur.attempt>1?t('att.try').replace('{i}',cur.attempt):'').replace('{dep}',cur.dependencies&&cur.dependencies.length?t('att.dep').replace('{d}',cur.dependencies.join('/')):''),
-      meta:[[t('m.overall'),pct+'%'],[t('m.doing'),String(doing.length)],[t('m.done'),String(done.length)],[t('m.stage'),`${stage.index}/${stage.total} ${stage.label}`]],
-      rows:doing.slice(0,15).map(t=>({main:clip(t.subject,48),sub:`${t.assignee||t('st.unassigned')} · ${STATUS_LABEL(t.status)}`}))}}
+  const u=unifiedTasks(snap);const doing=u.open.filter(x=>!['blocked','failed'].includes(x.state));
+  if(!doing.length)return null;
+  const cur=doing.find(x=>['in_progress','working','claimed','progress'].includes(x.state))||doing[0];
+  const total=u.open.length+u.done.length,pct=total?Math.round(u.done.length/total*100):0;
+  return {id:'mission-'+cur.id,kind:'doing',k:'正在推进',st:cur.role,title:cur.title,copy:cur.summary||`${cur.role}正在推进这项任务，完成后会汇报结果。`,data:pct+'%',dataLabel:`已交付 ${u.done.length} 项`,pct,
+    detail:{kicker:'MISSION · 当前任务',title:cur.title,copy:cur.summary||'任务正在推进。',brief:cur.mandate||'',
+      meta:[['整体完成',pct+'%'],['进行中',String(doing.length)],['已交付',String(u.done.length)],...((snap.stage&&snap.stage.label)?[['当前阶段',snap.stage.label]]:[])],
+      rows:doing.slice(0,15).map(x=>({main:x.title,chips:taskChips(x,[{t:x.role,c:'mut'}]),sub:x.summary||STATUS_LABEL(x.state)})),
+      extra:u.open.filter(x=>['blocked','failed'].includes(x.state)).slice(0,5).map(x=>({main:x.title,chips:[{t:'阻塞',c:'bad'}],sub:x.summary||'等待协调'}))}};
 }
 function cardGap(snap){
   const stage=snap.stage||{};
@@ -520,63 +587,86 @@ function cardGap(snap){
       rows:stage.missing.map(m=>({main:clip(humanize(m),60)})),empty:t('empty.gap')}}
 }
 function cardQueue(snap){
-  const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
-  const doing=tasks.filter(t=>!['completed','cancelled','dropped'].includes(t.status));
-  const queued=doing.filter(t=>t.status!=='in_progress');
+  const u=unifiedTasks(snap);const candidates=u.open.filter(x=>!['blocked','failed'].includes(x.state));const queued=candidates.slice(1);
   if(!queued.length)return null;
-  return {k:t('card.queue'),st:queued.length+t('card.pending'),title:queued[0].subject,
-    copy:t('card.queue.copy').replace('{a}',queued[0].assignee||t('st.unassigned')).replace('{s}',STATUS_LABEL(queued[0].status)).replace('{more}',queued.length>1?t('card.queue.more').replace('{q}',queued.length):''),
-    detail:{kicker:t('QUEUE · 任务队列'),title:t('card.queue.title').replace('{q}',queued.length),
-      copy:t('card.queue.desc'),
-      rows:queued.slice(0,15).map(t=>({main:clip(t.subject,48),sub:`${t.assignee||t('st.unassigned')} · ${STATUS_LABEL(t.status)}${t.dependencies&&t.dependencies.length?t('att.dep').replace('{d}',t.dependencies.join('/')):''}`}))}}
+  return {id:'queue-'+queued[0].id,kind:'queue',k:'接下来要做',st:`${queued.length} 项`,title:queued[0].title,copy:`${queued[0].role}已收到任务，将按顺序继续推进。`,
+    detail:{kicker:'QUEUE · 后续任务',title:`后续任务（${queued.length}）`,copy:'这些任务已登记，会在当前工作之后继续推进。',
+      rows:queued.slice(0,15).map(x=>({main:x.title,chips:taskChips(x,[{t:x.role,c:'mut'}]),sub:x.summary||STATUS_LABEL(x.state)}))}};
 }
 function cardReport(snap){
-  const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
-  const done=tasks.filter(t=>t.status==='completed');
-  const last=done[done.length-1];
-  if(!last)return null;
-  return {k:t('card.report'),st:t('card.done'),title:last.subject,
-    copy:t('card.report.copy').replace('{a}',last.assignee||t('st.member')).replace('{att}',last.attempt>1?t('card.report.att').replace('{i}',last.attempt):''),
-    detail:{kicker:t('REPORT · 完成汇报'),title:t('已完成任务'),
-      copy:t('以下任务点已交付，等待验收或已通过。'),
-      rows:done.slice(-15).reverse().map(t=>({main:clip(t.subject,48),sub:`${t.assignee||t('st.member')} · ${t('st.completed')}${t.attempt>1?t('st.attN').replace('{n}',t.attempt):''}`}))}}
+  const u=unifiedTasks(snap);if(!u.done.length)return null;const last=u.source==='tickets'?u.done[0]:u.done[u.done.length-1];
+  return {id:'done-'+last.id,kind:'done',k:'刚完成',st:last.role,title:last.title,copy:last.summary||'这项任务已经交付，可以点击查看结果。',
+    detail:{kicker:'REPORT · 完成汇报',title:last.title,copy:last.summary||'任务已交付。',brief:last.mandate||'',
+      meta:[['已交付',String(u.done.length)+' 项'],['最近完成',ago(last.at)||'—']],
+      rows:u.done.slice(0,15).map(x=>({main:x.title,chips:taskChips(x),sub:x.summary||(x.endedReason?('结束原因：'+x.endedReason):'已完成')}))}};
 }
 function cardTeam(snap){
   const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
   const byPerson={};
-  for(const t of tasks)(byPerson[t.assignee||t('st.unassigned')]=byPerson[t.assignee||t('st.unassigned')]||[]).push(t);
+  for(const tk of tasks){const key=tk.assignee||t('st.unassigned');(byPerson[key]=byPerson[key]||[]).push(tk)}
   const names=Object.keys(byPerson);
   if(names.length<2)return null;
   const busy=names.filter(n=>byPerson[n].some(t=>t.status==='in_progress')).length;
-  return {k:t('card.team'),st:names.length+t('card.members'),title:t('团队任务分布'),
+  return {id:'team-dist',k:t('card.team'),st:names.length+t('card.members'),title:t('团队任务分布'),
     copy:t('card.team.copy').replace('{t}',tasks.length).replace('{b}',busy),
     detail:{kicker:t('TEAM · 团队通道'),title:t('按负责人的任务分布'),
-      rows:names.map(n=>{const arr=byPerson[n];const d=arr.filter(t=>t.status==='completed').length;const run=arr.some(t=>t.status==='in_progress');const bad=arr.some(t=>t.status==='failed');
-        return {main:t('row.person').replace('{n2}',n).replace('{c}',arr.length).replace('{d}',d),sub:bad?t('row.bad'):run?t('row.run'):t('row.wait')}}) ,empty:t('empty.team')}}
+      meta:[['成员',String(names.length)],['任务总数',String(tasks.length)],['在办',String(busy)]],
+      rows:names.map(n=>{const arr=byPerson[n];const d=arr.filter(x=>x.status==='completed').length;const run=arr.find(x=>x.status==='in_progress');const bad=arr.some(x=>x.status==='failed');
+        return {main:t('row.person').replace('{n2}',n).replace('{c}',arr.length).replace('{d}',d),
+          chips:[{t:d+' 项已完成',c:'ok'},{t:(arr.length-d)+' 项未完',c:'mut'}],
+          sub:bad?t('row.bad'):run?('正在做：'+taskText(run.subject,60)):t('row.wait')}}),empty:t('empty.team')}}
 }
 function cardEvents(){
   if(!LIVE.events.length)return null;
-  return {k:t('card.events'),st:t('card.live'),title:eventLine(LIVE.events[LIVE.events.length-1]),
+  return {id:'live-events',k:t('card.events'),st:t('card.live'),title:eventLine(LIVE.events[LIVE.events.length-1]),
     copy:t('card.events.copy'),
     detail:{kicker:t('EVENTS · 事件流'),title:t('最近事件'),
-      rows:LIVE.events.slice(-15).reverse().map(e=>({main:eventLine(e),sub:eventTime(e)}))}}
+      rows:(()=>{const seen=new Set();const out=[];for(const e of LIVE.events.slice().reverse()){const key=String((e.data&&(e.data.taskId||e.data.subject))||'')+'|'+String(e.type);if(seen.has(key))continue;seen.add(key);out.push({main:eventLine(e),sub:eventTime(e)});if(out.length>=8)break}return out})()}}
 }
 /* 动态页面：Jarvis 把 HTML 写到 <工作区>/.jarvis/pages/<id>.html，服务端闲置 24h 回收，GC 48h 兜底 */
+LIVE.recent=[];
+async function loadRecent(){
+  try{
+    const r=await fetch(apiUrl('/api/jarvis/session-recent')+(apiUrl('/api/jarvis/session-recent').includes('?')?'&':'?')+'session='+encodeURIComponent(qsSession||window.__activeSessionId||''),{cache:'no-store'});
+    const b=await r.json();
+    LIVE.recent=(b&&b.reports)||[];
+    if(LIVE.snap)renderCards(LIVE.snap);
+  }catch{/* 汇报读取失败不影响主状态 */}
+}
+function cardRecent(){
+  if(!LIVE.recent.length)return null;
+  const r=LIVE.recent[0];
+  return {id:'recent-report',kind:'report',k:t('card.recent'),st:reportTime(r.time),title:reportText(String(r.text),60),
+    copy:reportText(String(r.text),120),
+    detail:{kicker:'REPORTS · 最近汇报',title:'最近汇报',
+      rows:LIVE.recent.slice(0,5).map(x=>({main:reportText(String(x.text),160),sub:reportTime(x.time)}))}}
+}
 LIVE.pages=[];
 async function loadPages(){
   try{
-    const r=await fetch(apiUrl('/api/luke-jarvis/pages'),{cache:'no-store'});
+    const r=await fetch(apiUrl('/api/jarvis/pages'),{cache:'no-store'});
     const b=await r.json();
     const changed=JSON.stringify((b&&b.pages)||[])!==JSON.stringify(LIVE.pages);
     LIVE.pages=(b&&b.pages)||[];
     if(changed&&LIVE.snap)renderMain(LIVE.snap);
   }catch{/* 动态页面失败不影响主状态 */}
 }
+function cardGC(snap){
+  const g=snap.gc;if(!g)return null;if(!g.inTrash&&!g.lastSweep)return null;
+  const ls=g.lastSweep;
+  return {id:'gc-status',kind:'task',k:'工作区整洁',st:g.inTrash?`${g.inTrash} 件在回收站`:'已清干净',title:g.inTrash?'回收站有件待观察':'自动保洁已开启',
+    copy:g.inTrash?`回收站 ${g.inTrash} 件，保留 ${g.retentionDays} 天后自动彻底删除；期内可恢复。`:'垃圾会定期自动收进回收站，保留期内可恢复。',
+    data:g.inTrash?String(g.inTrash):'✓',dataLabel:g.inTrash?'件在回收站':'无积压',
+    detail:{kicker:'GC · 工作区垃圾回收',title:'垃圾回收状态',
+      meta:[['回收站',g.inTrash+' 件'],['保留期',g.retentionDays+' 天'],...(ls?[['上次清理',ago(ls.at)||'—'],['上次收纳',String(ls.collected)+' 件'],['到期已删',String(ls.purged||0)+' 件']]:[])],
+      rows:(g.recent||[]).map(x=>({main:taskText(x,120),chips:[{t:'保留期内可恢复',c:'mut'}]})),
+      empty:'回收站是空的，工作区很干净。'}}
+}
 function cardPages(){
   if(!LIVE.pages.length)return null;
   const latest=LIVE.pages[0];
   const ago=Math.max(1,Math.round((Date.now()-(latest.created||Date.now()))/60000));
-  return {k:t('card.pages'),st:LIVE.pages.length+t('card.pages.n'),title:latest.title,
+  return {id:'page-'+latest.id,kind:'page',k:t('card.pages'),st:LIVE.pages.length+t('card.pages.n'),title:latest.title,
     copy:t('card.pages.copy').replace('{m}',ago),
     detail:{pagesList:true}}
 }
@@ -594,50 +684,137 @@ function showPageIframe(id,title){
   const body=document.getElementById('detailBody');
   setText('#detailKicker',t('card.pages'));
   setText('#detailTitle',title||id);
-  body.innerHTML=`<div class="board-meta" style="padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>${esc(t('pages.banner'))}</span><a href="#" id="backToPages" style="color:var(--cyan)">${esc(t('pages.back'))}</a></div><iframe src="/jarvis-wings/dyn/${encodeURIComponent(id)}.html" style="width:100%;height:70vh;border:1px solid rgba(112,234,255,.25);border-radius:8px;background:#020b11"></iframe>`;
+  body.innerHTML=`<div class="board-meta" style="padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>${esc(t('pages.banner'))}</span><a href="#" id="backToPages" style="color:var(--cyan)">${esc(t('pages.back'))}</a></div><iframe src="/jarvis-pages/${encodeURIComponent(id)}.html" style="width:100%;height:70vh;border:1px solid rgba(112,234,255,.25);border-radius:8px;background:#020b11"></iframe>`;
   document.getElementById('backToPages').addEventListener('click',e=>{e.preventDefault();showPageDetail()});
   activateView(detailView,'#detail');
 }
-function renderCards(snap){
-  const cards=[cardDecision,cardPages,cardMission,cardGap,cardQueue,cardReport,cardTeam,cardEvents]
-    .map(f=>{try{return f(snap)}catch(e){return null}}).filter(Boolean).slice(0,5);
-  CARD_SLOTS.forEach((sel,i)=>{
-    let el=$(sel);
-    if(!el)return;
-    // 克隆替换以清除旧演示卡上的点击监听
-    const fresh=el.cloneNode(false);
-    el.replaceWith(fresh);el=fresh;
-    const c=cards[i];
-    if(!c){el.style.display='none';return}
-    el.style.display='';
-    el.dataset.card=String(i);
-    el.setAttribute('role','button');el.setAttribute('tabindex','0');
-    el.innerHTML=`<div class="node-kicker"><span>${esc(c.k)}</span><span>${esc(c.st||'')}</span></div><div class="node-title">${esc(c.title)}</div><div class="node-copy">${esc(c.copy)}</div>`
-      +(c.data?`<div class="node-data"><b>${esc(c.data)}</b><span>${esc(c.dataLabel||'')}</span></div>`:'')
-      +(c.pct!=null?`<div class="thin-progress"><i style="width:${c.pct}%"></i></div>`:'');
-  });
-  LIVE.cards=cards;
+const CARD_POS=new Map();
+function actionMarkup(c,i){
+  if(!c.action)return '';
+  const buttons=(c.options||[]).map((o,j)=>`<button type="button" class="card-act ${j===0?'ok':''}" data-card-option="${i}:${j}">${esc(o[1])}</button>`).join('');
+  return `<div>${buttons}</div><form class="decision-form" data-card-custom="${i}"><input maxlength="240" placeholder="也可以输入你的决定…" aria-label="输入你的决定"><button type="submit">发送</button></form><div class="card-feedback" aria-live="polite"></div>`;
 }
+function renderCards(snap){
+  if(LIVE.dragging){LIVE.pendingSnap=snap;return}
+  // 只展示「有价值」的卡片，按优先级取前 4 张；空工作区一张都不显示（不摆空壳/提示）
+  const order=[cardDecision,cardProposal,cardBlocked,cardPages,cardRecent,cardMission,cardReport,cardQueue,cardTeam,cardGC];
+  const cards=order.map(f=>{try{return f(snap)}catch(e){console.warn('card',e);return null}}).filter(Boolean);
+  const picked=cards.filter(c=>c&&c.title).slice(0,4);
+  const layer=$('#cardLayer'),svg=$('#linkLines');if(!layer)return;
+  const signature=JSON.stringify(picked);
+  if(signature===LIVE.cardSignature){LIVE.cards=cards;requestAnimationFrame(drawLinks);return}
+  LIVE.cardSignature=signature;LIVE.cards=picked;
+  if(LIVE.positionWorkspace!==((snap.workspace&&snap.workspace.cwd)||'')){
+    CARD_POS.clear();LIVE.positionWorkspace=(snap.workspace&&snap.workspace.cwd)||'';
+    try{const saved=JSON.parse(localStorage.getItem('jarvis.cardPos.v3.'+LIVE.positionWorkspace)||'{}');Object.entries(saved).forEach(([k,v])=>CARD_POS.set(k,v))}catch(e){}
+  }
+  if(!picked.length){layer.innerHTML='';if(svg)svg.replaceChildren();return}
+  layer.innerHTML=picked.map((c,i)=>`<section class="hud-node" data-card="${i}" data-card-id="${esc(c.id||String(i))}" data-kind="${esc(c.kind||'task')}" role="button" tabindex="0" aria-label="${esc(c.title)}，点击查看详情">
+    <div class="node-kicker"><span>${esc(c.k)}</span><span>${esc(c.st||'')}</span></div><div class="node-title">${esc(taskText(c.title,70))}</div><div class="node-copy">${esc(reportText(c.copy,120))}</div>
+    ${c.data?`<div class="node-data"><b>${esc(c.data)}</b><span>${esc(c.dataLabel||'')}</span></div>`:''}${c.pct!=null?`<div class="thin-progress"><i style="width:${Math.max(0,Math.min(100,c.pct))}%"></i></div>`:''}${actionMarkup(c,i)}</section>`).join('');
+  $$('[data-card-option]',layer).forEach(btn=>btn.addEventListener('click',e=>{e.stopPropagation();const [i,j]=btn.dataset.cardOption.split(':').map(Number);const c=LIVE.cards[i],opt=c&&c.options[j];if(opt)submitCardOption(i,opt[0],btn)}));
+  $$('[data-card-custom]',layer).forEach(form=>form.addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();const i=Number(form.dataset.cardCustom),input=$('input',form),value=input.value.trim();if(value)submitCardOption(i,value,form)}));
+  window.__jarvisDecisionReply=text=>{
+    const i=LIVE.cards.findIndex(c=>c.action);if(i<0)return false;const c=LIVE.cards[i],raw=String(text||'').trim();if(!raw)return false;
+    let answer=raw;if(c.action.type==='proposal'){if(/采纳|同意|开单|批准/.test(raw))answer='approve';else if(/不采纳|拒绝|暂缓/.test(raw))answer='reject'}
+    submitCardOption(i,answer,null);return true;
+  };
+  bindCardDrag(layer);requestAnimationFrame(()=>{layoutCards();drawLinks()});
+}
+async function submitCardOption(i,value,source){
+  const c=LIVE.cards[i];if(!c||!c.action)return;const node=$(`.hud-node[data-card="${i}"]`),feedback=node&&$('.card-feedback',node);
+  if(node&&node.dataset.busy==='1')return;if(node)node.dataset.busy='1';if(feedback)feedback.textContent='正在提交你的决定…';
+  let tool='jarvis_board',args={};
+  if(c.action.type==='board')args={userAnswer:JSON.stringify({[c.action.id||c.action.content]:String(value)}),role:'用户（主屏）'};
+  else if(value==='approve'){tool='jarvis_ticket';args={action:'open',proposalId:c.action.id,title:c.action.title}}
+  else if(value==='reject'){tool='jarvis_ticket';args={action:'dismiss',proposalId:c.action.id,reason:'用户在主屏决定暂不采纳'}}
+  else{tool='jarvis_ticket';args={action:'dismiss',proposalId:c.action.id,reason:String(value)}}
+  try{
+    const r=await fetch(apiUrl('/api/jarvis/command'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tool,args,agent:window.__activeSessionId||''})});
+    const out=await r.json();if(!r.ok||out.ok===false||/^⛔/.test(out.verdict||''))throw new Error(out.error||out.verdict||'提交未成功');
+    if(feedback)feedback.textContent='已收到，团队会按你的决定继续。';const cap=$('#captionText');if(cap)cap.textContent='决定已记录，我会按你的选择继续推进。';
+    const input=node&&$('.decision-form input',node);if(input)input.value='';setTimeout(loadState,500);setTimeout(loadState,2200);
+  }catch(e){if(feedback)feedback.textContent='提交失败：'+clip(e.message||e,70)+'，可进入任务详情处理。'}
+  finally{if(node)delete node.dataset.busy}
+}
+function saveCardPositions(){
+  const stage=$('.holo-stage');if(!stage||!LIVE.positionWorkspace)return;const w=stage.clientWidth,h=stage.clientHeight,obj={};
+  CARD_POS.forEach((v,k)=>{if(v.user)obj[k]={x:v.x/w,y:v.y/h}});try{localStorage.setItem('jarvis.cardPos.v3.'+LIVE.positionWorkspace,JSON.stringify(obj))}catch(e){}
+}
+function overlaps(a,b,pad=14){return a.x<b.x+b.w+pad&&a.x+a.w+pad>b.x&&a.y<b.y+b.h+pad&&a.y+a.h+pad>b.y}
+function cardReserved(w,h){return [{x:w/2-188,y:h*.43-178,w:376,h:356},{x:w/2-Math.min(400,w*.32),y:h-190,w:Math.min(800,w*.64),h:170}]}
+function findCardSpot(node,x,y,nodes){
+  const stage=$('.holo-stage'),w=stage.clientWidth,h=stage.clientHeight,nw=node.offsetWidth||300,nh=node.offsetHeight||170;
+  const maxX=Math.max(12,w-nw-12),maxY=Math.max(80,h-nh-115);const occupied=nodes.filter(n=>n!==node).map(n=>({x:n.offsetLeft,y:n.offsetTop,w:n.offsetWidth,h:n.offsetHeight})).concat(cardReserved(w,h));
+  const valid=(px,py)=>{const r={x:px,y:py,w:nw,h:nh};return !occupied.some(o=>overlaps(r,o))};
+  const cx=Math.max(12,Math.min(maxX,x)),cy=Math.max(70,Math.min(maxY,y));if(valid(cx,cy))return {x:cx,y:cy};
+  for(let radius=28;radius<=Math.max(w,h);radius+=28){for(let k=0;k<24;k++){const a=k*Math.PI/12,px=Math.max(12,Math.min(maxX,cx+Math.cos(a)*radius)),py=Math.max(70,Math.min(maxY,cy+Math.sin(a)*radius));if(valid(px,py))return {x:px,y:py}}}
+  return null;
+}
+function layoutCards(){
+  const layer=$('#cardLayer'),stage=$('.holo-stage');if(!layer||!stage)return;const nodes=$$('.hud-node',layer),svg=$('#linkLines');
+  if(innerWidth<=900){nodes.forEach(n=>{n.style.left='';n.style.top=''});if(svg)svg.replaceChildren();return}
+  const w=stage.clientWidth,h=stage.clientHeight,marginX=Math.max(20,Math.round(w*.05)),yTop=84,yBot=Math.max(yTop+160,h-132);
+  // 先为"没被用户拖过"的卡片按左右两侧预排：列内垂直聚簇、整体居中、间距收敛
+  const defaults=new Map();
+  [true,false].forEach(sideL=>{
+    const arr=nodes.map((n,i)=>({n,i})).filter(o=>o.i%2===(sideL?0:1)&&!CARD_POS.get(o.n.dataset.cardId));
+    if(!arr.length)return;
+    const hs=arr.map(o=>o.n.offsetHeight||170),total=hs.reduce((a,b)=>a+b,0),avail=yBot-yTop;
+    let gap=arr.length>1?(avail-total)/(arr.length-1):0;gap=Math.max(18,Math.min(72,gap));
+    let y=Math.round(yTop+Math.max(0,(avail-total-gap*(arr.length-1))/2));
+    const x=sideL?marginX:w-(arr[0].n.offsetWidth||300)-marginX;
+    arr.forEach((o,k)=>{defaults.set(o.n.dataset.cardId,{x,y});y+=hs[k]+gap});
+  });
+  nodes.forEach((node,i)=>{
+    const id=node.dataset.cardId;let desired=CARD_POS.get(id);
+    if(desired){desired={x:desired.x*(desired.normalized===false?1:w),y:desired.y*(desired.normalized===false?1:h)}}
+    else desired=defaults.get(id)||{x:marginX,y:yTop+i*200};
+    let spot=findCardSpot(node,desired.x,desired.y,nodes.filter(n=>n.style.left));
+    if(!spot){node.style.maxHeight='190px';spot=findCardSpot(node,desired.x,desired.y,nodes.filter(n=>n.style.left))||{x:desired.x,y:desired.y}}
+    node.style.left=Math.round(spot.x)+'px';node.style.top=Math.round(spot.y)+'px';node.style.right='auto';node.style.bottom='auto';CARD_POS.set(id,{x:spot.x,y:spot.y,normalized:false});
+  });drawLinks();
+}
+function drawLinks(){
+  const svg=$('#linkLines'),layer=$('#cardLayer'),stage=$('.holo-stage');if(!svg||!layer||!stage)return;const nodes=$$('.hud-node',layer);
+  if(!nodes.length||innerWidth<=900){svg.replaceChildren();return}const w=stage.clientWidth,h=stage.clientHeight,cx=w/2,cy=h*.43;
+  svg.setAttribute('viewBox',`0 0 ${w} ${h}`);svg.innerHTML=nodes.map(n=>{
+    const x=n.offsetLeft,y=n.offsetTop,nw=n.offsetWidth,nh=n.offsetHeight,px=x+nw/2,py=y+nh/2;
+    const sx=px<cx?x+nw:x,sy=Math.max(y+20,Math.min(y+nh-20,cy));const dx=cx-sx,dy=cy-sy,len=Math.max(1,Math.hypot(dx,dy)),ex=cx-dx/len*155,ey=cy-dy/len*155;
+    return `<path d="M${sx} ${sy} C${sx+dx*.38} ${sy},${ex-dx*.25} ${ey},${ex} ${ey}"/><circle cx="${sx}" cy="${sy}" r="3"/><circle cx="${ex}" cy="${ey}" r="2"/>`;
+  }).join('');
+}
+function bindCardDrag(layer){
+  if(LIVE.dragBound)return;LIVE.dragBound=true;let drag=null;
+  layer.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('button,input,form')||innerWidth<=900)return;const node=e.target.closest('.hud-node');if(!node)return;e.preventDefault();LIVE.dragging=true;drag={node,sx:e.clientX,sy:e.clientY,ox:node.offsetLeft,oy:node.offsetTop,moved:false};node.setPointerCapture(e.pointerId)});
+  layer.addEventListener('pointermove',e=>{if(!drag)return;const dx=e.clientX-drag.sx,dy=e.clientY-drag.sy;if(!drag.moved&&Math.hypot(dx,dy)<5)return;drag.moved=true;LIVE.suppressClick=true;drag.node.classList.add('dragging');const st=$('.holo-stage');const fallback=()=>{const nw=drag.node.offsetWidth||300,nh=drag.node.offsetHeight||170;return {x:Math.max(12,Math.min(st.clientWidth-nw-12,drag.ox+dx)),y:Math.max(70,Math.min(st.clientHeight-nh-115,drag.oy+dy))}};const spot=findCardSpot(drag.node,drag.ox+dx,drag.oy+dy,$$('.hud-node',layer))||fallback();drag.node.style.left=spot.x+'px';drag.node.style.top=spot.y+'px';CARD_POS.set(drag.node.dataset.cardId,{x:spot.x,y:spot.y,normalized:false,user:true});drawLinks();e.preventDefault()});
+  const end=()=>{if(!drag)return;drag.node.classList.remove('dragging');if(drag.moved){saveCardPositions();setTimeout(()=>{LIVE.suppressClick=false},180)}drag=null;LIVE.dragging=false;if(LIVE.pendingSnap){const s=LIVE.pendingSnap;LIVE.pendingSnap=null;renderCards(s)}};
+  layer.addEventListener('pointerup',end);layer.addEventListener('pointercancel',end);
+}
+addEventListener('resize',()=>{if(LIVE.snap)layoutCards()});
 function showDetail(c){
   if(!c)return;
   if(c.detail&&c.detail.pagesList){showPageDetail();return}
-  const body=document.getElementById('detailBody');
-  setText('#detailKicker',c.kicker||t('detail.kicker'));
-  setText('#detailTitle',c.title||t('detail.title'));
+  const d=c.detail||c,body=document.getElementById('detailBody');
+  setText('#detailKicker',d.kicker||c.k||t('detail.kicker'));
+  setText('#detailTitle',d.title||c.title||t('detail.title'));
   let html='';
-  if(c.copy)html+=`<p class="detail-copy">${esc(c.copy)}</p>`;
-  if(c.meta&&c.meta.length)html+=`<div class="report-metrics" style="margin-top:0;margin-bottom:18px">${c.meta.map(([k,v])=>`<div class="report-metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
-  if(c.rows)html+=c.rows.length?`<div class="detail-rows">${c.rows.slice(0,20).map(r=>`<div class="detail-row"><div class="detail-row-main">${esc(r.main)}</div>${r.sub?`<div class="detail-row-sub">${esc(r.sub)}</div>`:''}</div>`).join('')}</div>`:`<div class="detail-rows"><div class="board-meta" style="padding:12px">${esc(c.empty||t('empty.generic'))}</div></div>`;
+  if(d.copy)html+=`<p class="detail-copy">${esc(d.copy)}</p>`;
+  if(d.brief)html+=`<div class="detail-mandate"><b style="color:#7fd4ea">任务要求 · </b>${esc(d.brief)}</div>`;
+  if(d.meta&&d.meta.length)html+=`<div class="report-metrics" style="margin-top:0;margin-bottom:18px">${d.meta.map(([k,v])=>`<div class="report-metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
+  const rows=[...(d.rows||[]),...(d.extra||[])];
+  if(rows.length)html+=`<div class="detail-rows">${rows.slice(0,20).map(r=>`<div class="detail-row"><div class="detail-row-main">${esc(r.main)}</div>${r.chips&&r.chips.length?`<div class="detail-row-chips">${r.chips.map(ch=>`<span class="chip ${ch.c||''}">${esc(ch.t)}</span>`).join('')}</div>`:''}${r.sub?`<div class="detail-row-sub">${esc(r.sub)}</div>`:''}</div>`).join('')}</div>`;
+  else html+=`<div class="detail-rows"><div class="board-meta" style="padding:12px">${esc(d.empty||t('empty.generic'))}</div></div>`;
   body.innerHTML=html||`<p class="detail-copy">${esc(t('empty.more'))}</p>`;
   activateView(detailView,'#detail');
 }
 mainView.addEventListener('click',e=>{
+  if(LIVE.suppressClick||e.target.closest('button,input,form'))return;
   const node=e.target.closest('.hud-node');
   if(!node||node.id==='voiceNode')return;
   const idx=node.dataset.card;
   const c=(idx!=null&&LIVE.cards)?LIVE.cards[Number(idx)]:null;
-  showDetail(c||{kicker:t('detail.demo'),title:($('.node-title',node)||node).textContent?.slice(0,30)||t('detail.title'),
-    copy:t('detail.democopy')});
+  if(c)showDetail(c);
 });
 mainView.addEventListener('keydown',e=>{
   if(e.key!=='Enter'&&e.key!==' ')return;
@@ -648,45 +825,20 @@ mainView.addEventListener('keydown',e=>{
   if(c)showDetail(c);
 });
 function renderMain(snap){
-  const tasks=(snap.tasks&&snap.tasks.byAssignee)||[];
-  const stage=snap.stage||{index:0,total:6,label:t('stage.none'),done:[],missing:[],next:''};
-  const board=snap.board||{open:[],blockers:[],needsUser:[]};
-  const doing=tasks.filter(t=>!['completed','cancelled','dropped'].includes(t.status));
-  const done=tasks.filter(t=>t.status==='completed');
   renderCards(snap);
-  // 唯一字幕：只报有用信息（待你决定 > 正在做 > 刚完成 > 空闲），不做任务计数/缺口清单；
-  // 内容与当前一致就不重写 DOM，杜绝轮询反复触发导致的"来回变"
-  const cap=document.getElementById('captionText');
-  if(cap&&!speakingNow){
-    const need=(board.needsUser&&board.needsUser[0])||null;
-    const busy=doing.find(x=>x.status==='in_progress')||doing.find(x=>x.status==='claimed')||null;
-    const lastDone=done.length?done[done.length-1]:null;
-    let capText='';
-    if(need&&need.content)capText=t('cap.need').replace('{s}',clip(humanize(String(need.content)),42))+(board.needsUser.length>1?t('cap.need.more').replace('{q}',board.needsUser.length-1):'');
-    else if(busy&&busy.subject)capText=t('cap.doing').replace('{a}',busy.assignee||t('st.member')).replace('{s}',clip(humanize(String(busy.subject)),42));
-    else if(lastDone&&lastDone.subject)capText=t('cap.done').replace('{s}',clip(humanize(String(lastDone.subject)),42));
-    else capText=t('cap.idle');
-    if(cap.textContent!==capText)cap.textContent=capText;
-  }
-  // 顶栏连接状态（诚实标注 demo / 真实工作区）
-  const ok=$('.clockbox .ok');
-  const bind=document.getElementById('bindInfo');
-  if(bind){
-    const sid=(window.__activeSessionId||'').replace('session-','').slice(0,8);
-    bind.textContent=t('bind.info').replace('{s}',sid||'?').replace('{w}',(snap.workspace&&snap.workspace.cwd)||'?').replace('{t2}',(window.__teamSel||((snap.tasks&&snap.tasks.teams||[]).find(t=>t.active)||{}).name||((snap.tasks&&snap.tasks.teams||[])[0]||{}).name||'?'));
-  }
-  if(ok)ok.innerHTML=`<i class="pulse-dot"></i>${LIVE.demo?esc(t('bind.demo')):esc(t('bind.live'))+esc(clip((snap.workspace&&snap.workspace.name)||t('bind.ws'),16))+(snap.workspace&&snap.workspace.cwd?' · '+esc(clip(snap.workspace.cwd,28)):'')}`;
-  try{
-    const ws=(snap.workspace&&(snap.workspace.name||snap.workspace.cwd))||t('bind.ws');
-    const lines=[];
-    lines.push(t('sp.ws').replace('{w}',ws));
-    if(board.needsUser&&board.needsUser.length&&board.needsUser[0]&&board.needsUser[0].content){lines.push(t('sp.need').replace('{s}',clip(humanize(String(board.needsUser[0].content)),40)).replace('{k}',board.needsUser.length))}
-    else{const busy2=doing.find(x=>x.status==='in_progress')||doing.find(x=>x.status==='claimed')||null;
-      if(busy2&&busy2.subject)lines.push(t('sp.doing').replace('{a}',busy2.assignee||t('st.member')).replace('{s}',clip(humanize(String(busy2.subject)),48)));
-      else if(stage.next)lines.push(t('sp.next').replace('{s}',clip(humanize(String(stage.next)),40)))}
-    if(done.length&&done[done.length-1]&&done[done.length-1].subject)lines.push(t('sp.done').replace('{s}',clip(humanize(String(done[done.length-1].subject)),40)));
-    mainSpeech=sanitizeSpeech(lines.join(''));
-  }catch(e){}
+  const cap=$('#captionText');
+  let capText='当前没有待办。你可以直接告诉我下一个目标。';
+  const cards=LIVE.cards||[],decision=cards.find(c=>c.kind==='decision'),blocked=cards.find(c=>c.kind==='blocked'),doing=cards.find(c=>c.kind==='doing'),done=cards.find(c=>c.kind==='done');
+  if(decision)capText=`需要你决定：${taskText(decision.title,58)}。可以点卡片选择，也可以直接告诉我。`;
+  else if(blocked)capText=`有一项工作需要协调：${taskText(blocked.title,58)}。${reportText(blocked.copy,55)}`;
+  else if(doing)capText=`正在做：${taskText(doing.title,58)}。${reportText(doing.copy,55)}`;
+  else if(done)capText=`刚完成：${taskText(done.title,58)}。${reportText(done.copy,55)}`;
+  capText=capText.replace(/。{2,}/g,'。').trim();
+  if(cap&&!speakingNow&&cap.textContent!==capText)cap.textContent=capText;
+  mainSpeech=sanitizeSpeech(capText);
+  const ok=$('.clockbox .ok'),bind=$('#bindInfo');
+  if(bind){const sid=(window.__activeSessionId||'').replace('session-','').slice(0,8);bind.textContent=`会话 ${sid||'?'} · 工作区 ${(snap.workspace&&snap.workspace.cwd)||'?'}`}
+  if(ok)ok.innerHTML=`<i class="pulse-dot"></i>${LIVE.demo?'已连接 · 演示工作区':'已连接 · '+esc(clip((snap.workspace&&snap.workspace.name)||'当前工作区',20))}`;
 }
 
 /* 进度页：六阶段能量链 + 真实事件控制台 + 任务完成率 */
@@ -757,18 +909,18 @@ function renderTeam(snap){
   }
   const board=$('.board-list');
   if(board){
-    board.innerHTML=tasks.length?tasks.slice(0,20).map(t=>{
-      const isDone=String(t.status)==='completed';
-      const failed=['failed','cancelled','dropped'].includes(String(t.status));
-      const p=isDone?100:failed?0:String(t.status)==='in_progress'?50:String(t.status)==='claimed'?20:0;
-      return `<div class="board-item ${isDone?'done':''}"><div class="board-top"><span>${esc(clip(t.subject,16))}</span><span>${p}%</span></div><div class="board-meta">${esc(t.assignee||t('st.unassigned'))} · ${esc(STATUS_LABEL(t.status))}${t.attempt?esc(t('st.attN').replace('{n}',t.attempt)):''}</div><div class="board-bar"><i style="width:${p}%"></i></div></div>`;
+    board.innerHTML=tasks.length?tasks.slice(0,20).map(x=>{
+      const isDone=String(x.status)==='completed';
+      const failed=['failed','cancelled','dropped'].includes(String(x.status));
+      const p=isDone?100:failed?0:String(x.status)==='in_progress'?50:String(x.status)==='claimed'?20:0;
+      return `<div class="board-item ${isDone?'done':''}"><div class="board-top"><span>${esc(clip(x.subject,16))}</span><span>${p}%</span></div><div class="board-meta">${esc(x.assignee||t('st.unassigned'))} · ${esc(STATUS_LABEL(x.status))}${x.attempt?esc(t('st.attN').replace('{n}',x.attempt)):''}</div><div class="board-bar"><i style="width:${p}%"></i></div></div>`;
     }).join(''):`<div class="board-meta" style="padding:12px">${esc(t('team.notasks'))}</div>`;
   }
   const head=$('.team-panel-head');
   if(head&&teams.length>1){
     let sel=document.getElementById('teamPicker');
     if(!sel){sel=document.createElement('select');sel.id='teamPicker';sel.style.cssText='height:24px;margin-left:8px;border:1px solid rgba(112,234,255,.25);background:rgba(5,20,31,.6);color:#9fd9ea;font-size:9px';head.appendChild(sel)}
-    sel.innerHTML=teams.map(t=>{const open=(t.tasks||[]).filter(x=>!['completed','cancelled','failed','dropped'].includes(String(x.status))).length;const curSess=sid&&String(t.captainSessionId)===sid;return `<option value="${esc(t.name)}">${esc(t.name)}${t('team.openN').replace('{o}',open)}${curSess?esc(t('team.cursess')):t.active?esc(t('team.cur')):''}</option>`}).join('');
+    sel.innerHTML=teams.map(g=>{const open=(g.tasks||[]).filter(x=>!['completed','cancelled','failed','dropped'].includes(String(x.status))).length;const curSess=sid&&String(g.captainSessionId)===sid;return `<option value="${esc(g.name)}">${esc(g.name)}${t('team.openN').replace('{o}',open)}${curSess?esc(t('team.cursess')):g.active?esc(t('team.cur')):''}</option>`}).join('');
     sel.value=picked?picked.name:'';
     sel.onchange=()=>{window.__teamSel=sel.value;renderTeam(LIVE.snap)};
   }
@@ -789,6 +941,7 @@ function renderAll(){
   try{renderMain(LIVE.snap)}catch(e){console.warn('renderMain',e)}
   try{renderProgress(LIVE.snap)}catch(e){console.warn('renderProgress',e)}
   try{renderTeam(LIVE.snap)}catch(e){console.warn('renderTeam',e)}
+  try{renderCards(LIVE.snap)}catch(e){console.warn('renderCards',e)}
 }
 function sanitizeSpeech(text){
   return String(text||'')
@@ -854,8 +1007,9 @@ async function loadGreeting(){
     const clean=sanitizeSpeech(b.text);
     const sentences=splitSentences(clean).slice(0,3);
     const shortText=sentences[0]?sentences[0].slice(0,64):'';
-    const cap=document.getElementById('captionText');if(cap&&!speakingNow&&!capGreeted&&shortText){cap.textContent=shortText;capGreeted=true}
-    if(sentences.length)mainSpeech=sentences.join('');
+    // 问候只用于语音稿，不覆盖主屏字幕；字幕始终由真实任务状态驱动。
+    capGreeted=true;
+    if(sentences.length&&!LIVE.cards?.length)mainSpeech=sentences.join('');
     // 播报稿仍以阶段摘要短句为准（loadGreeting 不覆盖 mainSpeech、不自动播报）
   
   }catch(e){/* 问候失败不影响状态 */}
@@ -867,6 +1021,7 @@ async function loadState(){
     if(!body.ok||!body.snapshot)return;
     LIVE.snap=body.snapshot;LIVE.connected=true;LIVE.demo=body.demo===true;
     renderAll();
+    if(location.hash==='#detail'&&LIVE.cards&&LIVE.cards.length&&!LIVE.detailAutoOpened){LIVE.detailAutoOpened=true;showDetail(LIVE.cards[0])}
     loadGreeting();
     loadPages();
   }catch{LIVE.connected=false}
@@ -894,10 +1049,13 @@ document.getElementById('detailBody').addEventListener('keydown',e=>{
   const row=e.target.closest&&e.target.closest('[data-page]');
   if(row)showPageIframe(row.dataset.page,row.dataset.ptitle);
 });
-loadState();loadEvents();
+loadState();loadEvents();loadPages();loadRecent();
 setInterval(loadState,5000);
 setInterval(loadEvents,3000);
+setInterval(loadPages,15000);setInterval(loadRecent,10000);
 })();
 </script>
+
+
 </body>
 </html>

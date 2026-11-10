@@ -15,7 +15,7 @@ const _require = createRequire(import.meta.url)
 // 此 guard 直接拦在工具执行前，**对已存在会话同样生效**：
 //   • 仅当调用会话 = 「jarvis 工作区（有 .jarvis/）+ 某团队 team.json 的 captainSessionId」时才拦；
 //   • 只拦执行类工具（bash/pwsh/edit/write/subagent/workflow/ralph）；
-//     read/glob/grep（只读查看）与 agent_teams_*/jarvis_*（派发与流程）不受影响；
+//     read/glob/grep（只读查看）与 jarvis_*（派发与流程）不受影响；
 //   • 成员会话（非 captain）完全不受影响。
 const CAPTAIN_DENY_TOOLS = new Set([
   'bash', 'pwsh', 'edit', 'write',
@@ -104,8 +104,8 @@ export function computeStage(cwd, opts = {}) {
     { id: 'clarify', ok: reqDoc && gateOk('clarify'), missing: [...(reqDoc ? [] : ['.jarvis/docs/需求规格-*.md（≥300字且含验收）']), ...(gateOk('clarify') ? [] : ['jarvis_flowguard(step="clarify")'])], next: '打磨需求 → 产出需求规格 → jarvis_flowguard(step="clarify")' },
     { id: 'decompose', ok: taskmap && gateOk('decompose'), missing: [...(taskmap ? [] : ['.jarvis/docs/任务编排-*.md（先跑 jarvis_taskgraph）']), ...(gateOk('decompose') ? [] : ['jarvis_flowguard(step="decompose")'])], next: 'jarvis_taskgraph 出任务编排 → jarvis_flowguard(step="decompose")' },
     { id: 'design', ok: designDoc && gateOk('design'), missing: [...(designDoc ? [] : ['.jarvis/docs/方案设计-*.md']), ...(gateOk('design') ? [] : ['jarvis_flowguard(step="design")'])], next: '产出方案设计（每条需求→实现落点）→ jarvis_flowguard(step="design")' },
-    { id: 'build', ok: cards >= 2 && teams > 0 && gateOk('build'), missing: [...(cards >= 2 ? [] : [`.jarvis/cards/ 角色卡（当前 ${cards} 张，需≥2：带队卡+岗位卡）`]), ...(teams > 0 ? [] : ['建队（agent_teams_create）']), ...(gateOk('build') ? [] : ['jarvis_flowguard(step="build")'])], next: 'jarvis_distill 蒸馏角色卡 → jarvis_flowguard(step="build") → agent_teams_create → add_member' },
-    { id: 'execute', ok: openTasks === 0 && teams > 0, missing: [...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个`])], next: 'jarvis_dispatch_task 派活（自动带卡+须知）→ 盯控(agent_teams_status) → 交付物/证据验收' },
+    { id: 'build', ok: cards >= 2 && teams > 0 && gateOk('build'), missing: [...(cards >= 2 ? [] : [`.jarvis/cards/ 角色卡（当前 ${cards} 张，需≥2：带队卡+岗位卡）`]), ...(teams > 0 ? [] : ['建队（jarvis_company 员工落盘）']), ...(gateOk('build') ? [] : ['jarvis_flowguard(step="build")'])], next: 'jarvis_distill 蒸馏角色卡 → jarvis_company 员工落盘 → jarvis_flowguard(step="build")' },
+    { id: 'execute', ok: openTasks === 0 && teams > 0, missing: [...(openTasks === 0 ? [] : [`未完成任务 ${openTasks} 个`])], next: 'jarvis_dispatch_task 派活（自动带卡+须知，开单即派原生 subagents 执行）→ 盯控(jarvis_ticket list/get) → 交付物/证据验收' },
     // R1/②：close.ok 不再恒 false——由「收口闸」真实判定（gateOk('close')），过了才算收口完成。
     // 否则过了 flowguard(step="close") 阶段也永远停在 6/6「收口未完成」，`done` 永不包含 close（T3 报告 §三 边界 5）。
     // 纵深防御：再加 openTasks===0（闸是「历史上跑过一次」，任务可能被重新打开；闸过期不能授予「完成」）。
@@ -144,7 +144,7 @@ export function renderStage(cwd, opts = {}) {
     r.done.length ? `已通过：${r.done.join(' → ')}` : '已通过：（无）',
     r.missing.length ? `当前缺口：${r.missing.join('；')}` : '当前缺口：无',
     `下一步：${r.next}`,
-    r.stage === 'build' ? '本阶段固化用法：jarvis_dispatch_task(assignee, subject, description, acceptance) 一步完成「角色卡+须知+建任务」，再用 agent_teams_reassign_task 唤醒成员。' : '',
+    r.stage === 'build' ? '本阶段固化用法：jarvis_dispatch_task(assignee, subject, description, acceptance) 一步完成「角色卡+须知+开单」，开单即由原生 subagents 派成员执行；卡住用 jarvis_ticket（action=retry）重派。' : '',
     (() => { try { return renderMeetingStatus(cwd, undefined, { teams: r.artifacts.activeTeams || [] }) } catch { return '' } })(),
     `事实快照：需求规格=${r.artifacts.reqDoc ? '有' : '无'} 任务编排=${r.artifacts.taskmap ? '有' : '无'} 方案设计=${r.artifacts.designDoc ? '有' : '无'} 角色卡=${r.artifacts.cards} 团队=${r.artifacts.teams} 未完成任务=${r.artifacts.openTasks} ponder记录（可选，不作闸）=${r.artifacts.verify}`,
     '规则：只做当前阶段允许的动作；下游动作（建队/派活）在阶段未过时会被机械闸拒绝。',
@@ -157,7 +157,7 @@ export function renderStage(cwd, opts = {}) {
 // 长会话/弱模型必然跳步。文字拦不住 → 必须在工具执行前让它**机械失败**（与 flowguard 同族思路）。
 // 设计（方案设计-luke-jarvis完全体.md §2）：
 //   • deny-list（不是 allowlist）：未知工具默认放行，避免误伤 read/glob/grep/bash 等只读/执行类工具；
-//   • 只对流程类工具生效（jarvis_* / agent_teams_*）；
+//   • 只对流程类工具生效（jarvis_*；agent_teams_* 已退役，命中即拒作防御）；
 //   • 先判「是否 jarvis 工作区」+「有没有 cwd」——判不出来就放行（与 captainExecutionGuard/jarvisFlowGuard 同款保护），
 //     否则全局 guard（dsh-tools：plain-context guard 全局生效）会把纯 agent-teams 用户全误伤；
 //   • 否定文案必含三要素：阶段 N/6+名称、当前缺口、下一步（R2 验收点，也是模型唯一的纠错输入）。
@@ -174,15 +174,15 @@ export function renderStage(cwd, opts = {}) {
 // D6b：delete（归档团队）与 resume（复活团队）都能零成本把 openTasks 归零 → 并入 clarify/decompose/design；
 //   execute 放行 resume/update/claim/amend（执行期需要复活/交活/返工）。
 export const STAGE_DENY = {
-  clarify: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
-  decompose: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_coverage', 'jarvis_release'],
-  design: ['agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
-  build: ['agent_teams_claim_task', 'agent_teams_amend_task', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'], // 建队期不许改验收契约/认领（换人 add/remove 仍允许）
+  clarify: ['jarvis_dispatch_task', 'agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  decompose: ['jarvis_dispatch_task', 'agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_coverage', 'jarvis_release'],
+  design: ['jarvis_dispatch_task', 'agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_claim_task', 'agent_teams_amend_task', 'agent_teams_update_task', 'agent_teams_delete', 'agent_teams_resume', 'agent_teams_approve', 'agent_teams_edit_plan', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'],
+  build: ['agent_teams_claim_task', 'agent_teams_amend_task', 'jarvis_taskgraph', 'jarvis_coverage', 'jarvis_release'], // 建队期不许改验收契约/认领（dispatch_task 派活、ticket open 仍允许——ticket 的 open/adjudicate 已在 deliver.js 内部按 action 过闸，成员 report/propose 不受影响）
   execute: ['jarvis_baseline', 'jarvis_taskgraph', 'jarvis_release'], // 执行期不回头改基线/重拆/改版本账本；claim/update/amend 放行（交活与返工需要）
-  close: ['agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_add_member'],
+  close: ['jarvis_dispatch_task', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_add_member'],
 }
 /** 派活类工具：除「本阶段允许」外，还必须持完整链（R3：build 必须建立在 clarify→decompose→design 之上） */
-export const PAID_WORK_TOOLS = new Set(['agent_teams_create_task', 'agent_teams_reassign_task'])
+export const PAID_WORK_TOOLS = new Set(['jarvis_dispatch_task', 'agent_teams_create_task', 'agent_teams_reassign_task'])
 /** 链式校验：复用 computeStage 返回的 gates（同一份读取结果，避免与 flowguard 两处口径漂移） */
 function _stageChainMissing(gates) {
   const g = gates || {}
@@ -249,7 +249,7 @@ export function captainExecutionGuard(exec) {
       )
     } catch {}
     if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
-    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① agent_teams_status 先看现有成员与任务；② 建人前查重——add_member 同名会报 "has already been used"，同名就复用或换名；③ 派活：agent_teams_create_task(assignee=成员) 建任务，**任务卡住(claimed 无产出)/成员休眠 → agent_teams_reassign_task 唤醒**，但**成员在忙(member X is busy with tN) → 不要 reassign（会被拒），等它跑完或先看 status**；④ 只读查看用 read/glob/grep；⑤ **不要重试本工具**——派活后成员会开始干活（页面可见子任务）；⑥ **保持本回合活跃**直至成员回报并验收完成（A2A 闭环），期间不做任何 dsh 重启；⑦ **成员数量没有上限**（插件无 8 人限制，别把当前人数当上限）：队伍大就加人，或走三层——让 CEO 成员自己用 agent_teams_create 建子队带人（v0.7.3 已放开成员建队权限）；**绝不要用 subagent 绕过**（那是顶层自己干，属于违规）。`
+    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① jarvis_ticket（action=list）先看现有任务单与成员在办情况；② 派活：jarvis_dispatch_task(assignee=成员, subject, description, acceptance) 一步开单（自动带角色卡+须知，开单即由原生 subagents 派成员子会话执行）；卡住的单 → jarvis_ticket（action=retry, ticketId=...）重派；③ 只读查看用 read/glob/grep；④ **不要重试本工具**——开单后成员子会话即开始干活（页面可见子任务）；⑤ **保持本回合活跃**直至成员经 jarvis_ticket report 回报并验收完成（A2A 闭环），期间不做任何 dsh 重启；⑥ **成员数量没有上限**：队伍大就让 CEO 成员用原生子代理辅助（深度限 1 层），正式扩编/加人提 jarvis_ticket（action=propose）由你裁决后开单；**绝不要用 subagent 绕过派活**（那是顶层自己干，属于违规）。`
   } catch {
     return undefined
   }

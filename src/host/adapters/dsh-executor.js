@@ -12,7 +12,7 @@
  *    · ctx.agents.get(sessionId)                       Agent（status/cancel/whenIdle）
  *  简化决策（第一版）：
  *    · persona/toolFilter 不走宿主注册（兼容分支多），角色宪法全部内联在任务简报文本里；
- *    · 成员防递归（不能再开单/再派成员）由本模块 guard：isChild() + 包装创建 API；
+ *    · 成员防越权（不能开单/裁决/换人）由本模块 guard：isChild() 拦 jarvis_ticket captain 专属动作；
  *    · childId 映射持久化 <project>/.jarvis/tickets/exec-map.json；派单审计走 events.jsonl；
  *    · 成员空闲未汇报 → followup 提醒（每单最多 3 次）。
  */
@@ -84,14 +84,17 @@ function memberBrief(ticket, assignment, employee, projectDir) {
     ...STAGE_DELIBERATION.split('\n').slice(1).map((l) => `   ${l}`),
     `3. ${STUCK_MEETING.split('\n')[0]}`,
     ...STUCK_MEETING.split('\n').slice(1).map((l) => `   ${l}`),
-    `4. 独立完成本任务单；产出文件写进工作区（建议 .jarvis/outputs/ 下按 ticketId 建目录），关键结论写清楚。`,
-    `5. 完成或阶段性进展必须汇报——调用工具 jarvis_ticket：`,
+    ...(ticket.meta && ticket.meta.brief
+      ? [`4. 角色卡与协同须知（蒸馏卡全文，必须遵守）：`, ...String(ticket.meta.brief).split('\n').map((l) => `   ${l}`)]
+      : []),
+    `5. 独立完成本任务单；产出文件写进工作区（建议 .jarvis/outputs/ 下按 ticketId 建目录），关键结论写清楚。`,
+    `6. 完成或阶段性进展必须汇报——调用工具 jarvis_ticket：`,
     `   action=report, ticketId=${ticket.id}, assignmentId=${assignment.id},`,
     `   state=ready（已交付）/ progress（进行中，说明做到哪）/ blocked（缺依赖或等确认）/ failed（失败及原因），`,
     `   summary=一句话结果与产出位置。ready/blocked/failed 后本单交回 captain。`,
-    `6. 禁止调用 jarvis_ticket 的 open/adjudicate/retry/stop（那是 captain 专属）；禁止再创建子代理/子任务。`,
-    `7. 汇报后、收尾前，做一次「空闲找活」（自主性，用户定调）：花一分钟看工作区——黑板未决项、.jarvis/docs/教训、需求规格/待办里有没有明确的下一个活？有就用 jarvis_ticket 提案：action=propose, title=一句话, why=业务理由（出处）, deliberation=推演摘要（方案对比+择优理由）, basis=依据出处。提案≠开工，captain 裁决后才开单；没找到明确的活就直接收尾，不许为提案而提案。`,
-    `8. 若收到「提醒」prompt，按提醒要求立即汇报。`,
+    `7. 禁止调用 jarvis_ticket 的 open/adjudicate/retry/stop/dismiss（那是 captain 专属）。可以用你环境里的原生子代理（subagent）自主开子任务干细分工作——Super-agent 式自主：深度最多 1 层（子任务的子任务不得再开）；子任务不另开任务单，产出与结论必须并进你对本单的汇报。`,
+    `8. 汇报后、收尾前，做一次「空闲找活」（自主性，用户定调）：花一分钟看工作区——黑板未决项、.jarvis/docs/教训、需求规格/待办里有没有明确的下一个活？有就用 jarvis_ticket 提案：action=propose, title=一句话, why=业务理由（出处）, deliberation=推演摘要（方案对比+择优理由）, basis=依据出处。提案≠开工，captain 裁决后才开单；没找到明确的活就直接收尾，不许为提案而提案。`,
+    `9. 若收到「提醒」prompt，按提醒要求立即汇报。`,
   ].filter((l) => l !== '')
   return lines.join('\n')
 }

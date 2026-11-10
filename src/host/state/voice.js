@@ -23,14 +23,14 @@ const _require = createRequire(import.meta.url)
 
 export const VOICE_PRESETS = {
   voices: [
-    { id: 'nova', label: 'nova · 成熟女声（通用）' },
-    { id: 'shimmer', label: 'shimmer · 温柔女声' },
+    { id: 'nova', label: 'nova · 沉稳（通用）' },
+    { id: 'shimmer', label: 'shimmer · 温和亲切' },
     { id: 'alloy', label: 'alloy · 中性' },
     { id: 'echo', label: 'echo · 偏低沉' },
     { id: 'fable', label: 'fable · 叙事感' },
-    { id: 'onyx', label: 'onyx · 低沉男声' },
-    { id: 'longxiaochun', label: 'longxiaochun · 龙小春（CosyVoice 女声）' },
-    { id: 'longwan', label: 'longwan · 龙婉（CosyVoice 女声）' },
+    { id: 'onyx', label: 'onyx · 低沉' },
+    { id: 'longxiaochun', label: 'longxiaochun · 龙小春（CosyVoice）' },
+    { id: 'longwan', label: 'longwan · 龙婉（CosyVoice）' },
   ],
   models: ['qwen-tts', 'cosyvoice-v2', 'gpt-4o-mini-tts', 'tts-1', 'tts-1-hd', 'index-tts', 'gpt-sovits'],
 }

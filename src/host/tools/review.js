@@ -206,11 +206,11 @@ export const REVIEW_TOOLS = [
         const members = String(args.members ?? '').trim()
         const target = members ? members.split(',').map((x) => x.trim()).filter(Boolean) : []
         return {
-          verdict: `协议刷新消息已生成（${target.length ? '成员：' + target.join('、') : '发给所有成员'}）——用 agent_teams_send_message 逐个发给每个已有成员（落 mailbox，成员下回合读到并遵守）；升级后不刷新 = 老成员继续用旧 persona = 约束不生效`,
+          verdict: `协议刷新消息已生成（${target.length ? '成员：' + target.join('、') : '发给所有成员'}）——①新开单自动生效（成员简报内联最新协议）；②在办成员用 jarvis_meeting（groupchat 群聊）宣贯并出纪要；升级后不刷新 = 老成员继续用旧 persona = 约束不生效`,
           protocolRefresh,
           members: target,
           broadcast: `【协议刷新 · 贾维斯】${protocolRefresh}`,
-          hint: teamDir ? `发送：对 ${teamDir} 团队每个成员 agent_teams_send_message(to=<成员>, content=本消息)` : '发送：agent_teams_send_message(to=<成员>, content=本消息)',
+          hint: teamDir ? `宣贯：jarvis_meeting（groupchat，members=${target.join(',') || '<成员名,逗号分隔>'}, content=protocolRefresh 原文）` : '宣贯：jarvis_meeting（groupchat，content=protocolRefresh 原文）',
         }
       }
       // ⚠️ audit 模式：机械校验"团队每个任务是否都附了开工须知（含 ponder 指引）"——ssa 教训：
@@ -322,7 +322,7 @@ export const REVIEW_TOOLS = [
         '- **问题上行三件套**：技术绕不开/自己无法抉择 → jarvis_escalate 上报，必须带 ①问题 ②已尝试的方案 ③风险细节（后果/影响范围/时限）④需要领导决策什么——**缺项会被打回**；不许沉默、降级、假装解决。',
         '- **资源需求**：缺数据/权限/凭据/环境/工具 → 写黑板登记（要什么+用于哪步+没有会怎样），不要幻觉跳过。',
         '- **查证通道矩阵**：查资料先真调默认搜索工具（web_search），不可用自动降级——①web_fetch 抓已知 URL ②公开检索端点（平台搜索 API 等）③直接网络抓取；**查到标来源、查不到如实标注"查证受限/基于既有知识推演"，绝不脑补补齐**（编造来源=一票否决）；按你职责查你该查的方向，带事实回会议。',
-        '- **需要时找专业同事直连**：跨角色的接口/口径问题直接 agent_teams_send_message 找当事人（不必事事经 captain/CEO 中转）；分歧各自跑 ponder 后交 jarvis_review 裁决。',
+        '- **需要时找专业同事直连**：跨角色的接口/口径问题用 jarvis_meeting（groupchat）或 jarvis_collab 找当事人直连（不必事事经 captain/CEO 中转）；分歧各自跑 ponder 后交 jarvis_review 裁决。',
         '- **我的模块质量深挖（质量自循环）**：你是自己负责模块的"质量第一责任人"——按本单质量维度清单（`.jarvis/docs/质量维度-<需求>.md`）对自己负责的模块自循环深挖（深挖→修→再深挖直到无问题），**不是等质量评审角色来挑**；连续一轮清单全部维度无毛病才算达标；会议归拢时把碰撞出的新细节方向回报 CEO（回流清单）。',
         '- **不要自己发挥**：成果要对照需求/参照基准做（功能对齐、不加基准里没有的东西）；拿不准先问，不凭感觉加。',
         '- **✍️ 改文件前必须先 Read（平台强制 read-before-edit）**：任何 `edit`/`write`（尤其改代码/插件源码）之前，**必须先用 `read` 读同一文件**——不读就改会被平台直接拒绝（报 `cannot modify "…": file has not been read`），白费一轮；改完再用 `read`/跑测试确认真改到了。',

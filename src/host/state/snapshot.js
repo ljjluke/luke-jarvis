@@ -12,6 +12,7 @@ import { createRequire } from 'node:module'
 import { computeStage, JARVIS_STAGES, STAGE_LABELS } from '../gates/stage.js'
 import { meetingPolicy } from './meetings.js'
 import { CARD_SECTIONS } from './cards.js'
+import { gcSummary } from '../tools/gc.js'
 
 const _require = createRequire(import.meta.url)
 
@@ -141,6 +142,61 @@ function memorySummary(projectDir, fs, path) {
   }
 }
 
+/** 票据体系摘要（wings 主屏数据源——待办#6：从 team.json 切 tickets）：.jarvis/tickets/ticket-*.json + proposals.jsonl（成员自主找活提案）。只读。 */
+function ticketsSummary(projectDir, fs, path) {
+  const dir = path.join(projectDir, '.jarvis', 'tickets')
+  const tickets = []
+  try {
+    for (const name of fs.readdirSync(dir)) {
+      if (!/^ticket-.*\.json$/.test(name)) continue
+      try {
+        const t = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'))
+        if (!t || !t.id) continue
+        const asg = (t.assignments || []).slice(-1)[0] || {}
+        const mandateText = (() => {
+          const m = t.mandate
+          if (!m) return ''
+          if (typeof m === 'string') return m.slice(0, 400)
+          return [m.by ? '来自 ' + m.by : '', m.basis || '', m.gate ? '依据 ' + m.gate : ''].filter(Boolean).join('；').slice(0, 400)
+        })()
+        tickets.push({
+          id: String(t.id),
+          title: String(t.title || ''),
+          stage: String(t.stage || 'build'),
+          createdAt: t.createdAt || '',
+          updatedAt: t.updatedAt || '',
+          ended: t.ended || null,
+          mandate: mandateText,
+          origin: t.origin ? (typeof t.origin === 'string' ? t.origin : String(t.origin.type || t.origin.source || t.origin.kind || '')).slice(0, 80) : '',
+          attempts: (t.assignments || []).length,
+          startedAt: asg.startedAt || '',
+          endedAt: asg.endedAt || '',
+          endedReason: asg.endedReason ? String(asg.endedReason).slice(0, 120) : '',
+          role: String(asg.role || ''),
+          state: String(asg.state || ''),
+          reportState: asg.report && asg.report.state ? String(asg.report.state) : '',
+          reportAt: asg.report && asg.report.at ? String(asg.report.at) : '',
+          summary: asg.report && asg.report.summary ? String(asg.report.summary).slice(0, 400) : '',
+        })
+      } catch {}
+    }
+  } catch {}
+  tickets.sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)))
+  const open = tickets.filter((t) => !t.ended)
+  const done = tickets.filter((t) => t.ended).slice(0, 20)
+  const proposals = []
+  try {
+    const raw = fs.readFileSync(path.join(dir, 'proposals.jsonl'), 'utf8')
+    for (const line of raw.split('\n').filter(Boolean)) {
+      try {
+        const p = JSON.parse(line)
+        if (p && p.status === 'pending') proposals.push({ id: String(p.id), title: String(p.title || ''), proposer: String(p.proposer || ''), why: String(p.why || '').slice(0, 300), basis: String(p.basis || '').slice(0, 300), at: p.at || '' })
+      } catch {}
+    }
+  } catch {}
+  return { open, done, proposals }
+}
+
 /**
  * 构建界面快照（只读；不存在的模块就是空，不编造）。
  * @param {string} projectDir
@@ -173,11 +229,14 @@ export function buildSnapshot(projectDir, meta = {}) {
   const board = boardSummary(dir, fs, path)
   const teams = listTeams(dir, fs, path)
   const cards = listCards(dir, fs, path)
+  const tickets = ticketsSummary(dir, fs, path)
   const memory = memorySummary(dir, fs, path)
+  let gc = null
+  try { gc = gcSummary(dir) } catch { gc = null }
   const gates = readJsonSafe(dir, '.jarvis/gates.json', fs, path) || {}
   const company = readJsonSafe(dir, '.jarvis/company-state.json', fs, path)
   const active = Boolean(
-    (stage && stage.index > 1) || teams.teams.length || board.total || cards.length || memory.exists || Object.keys(gates).length,
+    (stage && stage.index > 1) || teams.teams.length || board.total || cards.length || memory.exists || Object.keys(gates).length || tickets.open.length || tickets.done.length || tickets.proposals.length,
   )
   return {
     ...empty,
@@ -204,6 +263,8 @@ export function buildSnapshot(projectDir, meta = {}) {
       byAssignee: teams.teams.flatMap((t) => t.tasks.map((x) => ({ ...x, team: t.name }))),
     },
     board,
+    tickets,
+    gc,
     meetings: meetings
       ? {
           required: meetings.required,

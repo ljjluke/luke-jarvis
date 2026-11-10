@@ -57,6 +57,7 @@ const _require = createRequire(import.meta.url)
 import { TOOLS, ensureAgentStageSection } from './tools/index.js'
 import { bindJarvisPermission } from './adapters/permission.js'
 import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
+import { maybeAutoGc } from './tools/gc.js'
 import { readEvents } from './state/events.js'
 import { VOICE_PRESETS, normalizeVoiceState, publicVoiceState, publicVoiceConfig, readVoiceConfig, readVoiceConfigRaw, resolveActiveVoice, saveVoiceConfig, speechEndpoint } from './state/voice.js'
 import { pickAgent, runCommand, sessionFacts, toolSpecs } from './state/command.js'
@@ -143,7 +144,7 @@ export const Config = z.object({
   name: z.string().default('Jarvis').volatile(),
   /** 增强界面语言：zh=纯中文 / en=纯英文（Wings 页全量国际化）。 */
   lang: z.union([z.const('zh'), z.const('en')]).default('zh').volatile(),
-  /** 语音播报开关：关闭后 Wings 不做任何 TTS 播报（语音识别/唤醒不受影响）。 */
+  /** 语音沟通模式：开启后可与小云语音对话并接收语音汇报（关闭仅停播报，不影响其他功能）。 */
   voiceEnabled: z.boolean().default(true).volatile(),
   /** 语音（TTS）默认值：voice.json 已保存的值优先，缺省字段用这里兜底。apiKey 只写 voice.json，不进设置面板。 */
   voice: z.object({
@@ -542,6 +543,7 @@ export function apply(ctx, config) {
               try {
                 const cwd = requestWorkspace(ctx, req)
                 if (!cwd) return sendJson(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA, reason: 'no workspace' })
+                try { maybeAutoGc(cwd) } catch { /* 自动 GC 失败不影响快照 */ }
                 return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, demo: false, snapshot: buildSnapshot(cwd, pluginMeta) })
               } catch (e) {
                 return sendJson(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
@@ -557,6 +559,7 @@ export function apply(ctx, config) {
               try {
                 const cwd = requestWorkspace(ctx, req)
                 if (!cwd) return sendJson(res, 200, { ok: true, active: false, schema: SNAPSHOT_SCHEMA })
+                try { maybeAutoGc(cwd) } catch { /* 自动 GC 失败不影响摘要 */ }
                 return sendJson(res, 200, { ok: true, schema: SNAPSHOT_SCHEMA, summary: snapshotSummary(buildSnapshot(cwd, pluginMeta)) })
               } catch (e) {
                 return sendJson(res, 200, { ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) })
@@ -904,6 +907,110 @@ export function apply(ctx, config) {
                 res.writeHead(200, { 'content-type': types[ext] || 'application/octet-stream', 'cache-control': 'no-cache' })
                 return res.end(data)
               } catch {
+                try { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found') } catch {}
+              }
+            },
+          })
+        )
+        // 0.984) 当前会话近期汇报：读 DSH 会话转录（zstd 压缩 JSONL）最后若干条 assistant 文本
+        //   为什么：主页面卡片要跟得上「DSH 会话里已经汇报的进度」，而不是只看 team.json 任务
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/session-recent',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '')
+                const sid = (url.match(/[?&]session=([^&]+)/) || [])[1] || ''
+                const cwd = requestWorkspace(ctx, req)
+                if (!sid || !cwd) return sendJson(res, 200, { ok: true, reports: [] })
+                const os = _require('node:os')
+                const cp = _require('node:child_process')
+                const enc = '--' + String(cwd).replace(/^\//, '').replace(/\//g, '-') + '--'
+                const base = path.join(os.homedir(), '.dsh/sessions', enc, sid)
+                let file = path.join(base, 'session.v4.jsonl.zstd')
+                if (!fsm.existsSync(file)) file = ''
+                if (!file) return sendJson(res, 200, { ok: true, reports: [], reason: 'no transcript' })
+                const text = cp.execSync(`zstdcat "${file}" | tail -n 400`, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 20000 })
+                const reports = []
+                for (const line of text.split('\n')) {
+                  if (!line.trim()) continue
+                  try {
+                    const e = JSON.parse(line)
+                    if (e.type !== 'assistant/message') continue
+                    const msg = (e.data && e.data.message) || {}
+                    const parts = Array.isArray(msg.content) ? msg.content : []
+                    const body = parts.filter((x) => x && x.type === 'text').map((x) => String(x.text || '')).join(' ').trim()
+                    if (!body) continue
+                    if (/^<[^>]+>/.test(body) && body.length < 120) continue
+                    reports.push({ time: Number(e.time || 0), text: body.slice(0, 600) })
+                  } catch { /* 坏行跳过 */ }
+                }
+                const last = reports.slice(-6).reverse()
+                return sendJson(res, 200, { ok: true, reports: last })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, reports: [], error: String((e && e.message) || e).slice(0, 200) })
+              }
+            },
+          })
+        )
+        // 0.985) 动态结果页：<项目>/.jarvis/pages/*.html（Jarvis 按用户问题现写的展示页；GC 24h 回收）
+        //   GET /api/jarvis/pages → 卡片元数据（id/title/updatedAt/ageHours/url/summary）
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/pages',
+            handler: async (req, res) => {
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return sendJson(res, 200, { ok: true, pages: [] })
+                const dir = path.join(cwd, '.jarvis/pages')
+                let names = []
+                try { names = fsm.readdirSync(dir).filter((n) => n.endsWith('.html')) } catch { names = [] }
+                const pages = []
+                for (const n of names.slice(0, 200)) {
+                  const abs = path.join(dir, n)
+                  try {
+                    const st = fsm.statSync(abs)
+                    const html = fsm.readFileSync(abs, 'utf8')
+                    const title = (html.match(/<title[^>]*>([^<]{1,80})</i) || [])[1] || n.replace(/\.html$/i, '')
+                    const desc = (html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']{1,140})["']/i) || [])[1] || ''
+                    const id = n.replace(/\.html$/i, '')
+                    pages.push({ id, title: String(title).trim(), description: String(desc).trim(), bytes: st.size, created: st.mtimeMs, updatedAt: st.mtime.toISOString(), ageHours: Math.round((Date.now() - st.mtimeMs) / 3600000), url: '/jarvis-pages/' + encodeURIComponent(n) })
+                  } catch { /* 单个坏文件跳过 */ }
+                }
+                pages.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+                return sendJson(res, 200, { ok: true, pages })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, pages: [], error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        // 静态托管动态结果页（注入统一主题，保证「页面风格不会变化太大」）
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/jarvis-pages',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '/')
+                const rel = decodeURIComponent(url.split('?')[0].replace(/^\/jarvis-pages\/?/, ''))
+                if (!rel || rel.includes('..') || !rel.endsWith('.html')) { res.writeHead(404); return res.end('not found') }
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) { res.writeHead(404); return res.end('no workspace') }
+                const abs = path.join(cwd, '.jarvis/pages', rel)
+                const html = fsm.readFileSync(abs, 'utf8')
+                const THEME = `<style id="jarvis-page-theme">:root{color-scheme:dark}html,body{background:#02070d!important;color:#e8fbff!important;font-family:"Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;margin:0}body{padding:18px 22px;line-height:1.65}a{color:#70eaff}h1,h2,h3{color:#dffbff;margin:.6em 0 .4em}table{border-collapse:collapse;width:100%;margin:12px 0}th,td{border:1px solid rgba(112,234,255,.18);padding:8px 10px;text-align:left;font-size:13px}th{background:rgba(9,30,44,.7);color:#9fe8ff}tr:nth-child(even) td{background:rgba(6,22,33,.5)}.badge,.chip{display:inline-block;padding:2px 8px;border:1px solid rgba(112,234,255,.3);border-radius:999px;color:#9fe8ff;font-size:11px}button,input,select{background:rgba(5,20,31,.8);color:#dffbff;border:1px solid rgba(112,234,255,.3);border-radius:4px;padding:4px 8px;font:inherit}canvas,svg,img{max-width:100%}code,pre{background:rgba(4,16,25,.85);color:#bfeaf7;padding:6px;border-radius:4px;overflow:auto}#jarvis-page-bar{position:fixed;right:14px;bottom:12px;font:10px/1.6 Consolas,monospace;color:#5f96aa;background:rgba(2,10,16,.75);border:1px solid rgba(112,234,255,.22);padding:4px 8px;border-radius:4px;z-index:9}#jarvis-page-bar b{color:#70eaff;font-weight:500}</style>`
+                const banner = `<div id="jarvis-page-bar">JARVIS · 动态结果页 · <b>${rel.replace(/\.html$/i, '')}</b></div>`
+                let out = html
+                if (/<\/head>/i.test(out)) out = out.replace(/<\/head>/i, THEME + '</head>')
+                else out = THEME + out
+                if (/<body[^>]*>/i.test(out)) out = out.replace(/<body[^>]*>/i, (m) => m + banner)
+                res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+                res.end(out)
+                return undefined
+              } catch (e) {
                 try { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found') } catch {}
               }
             },

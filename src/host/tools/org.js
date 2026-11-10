@@ -240,7 +240,7 @@ export const ORG_TOOLS = [
         issues,
         ok,
         verdict: ok
-          ? `协同设计合格：${roles.length} 个角色，每角色已明确 位置/依赖/介入时机/协同方式，有升级路径且体现并行协作。建队时每个成员 role 必须携带各自的协同段（见 perRole）。可建队（agent_teams_create → add_member(role=蒸馏卡+该角色协同段) → create_task(带验收标准+dependencies)）。`
+          ? `协同设计合格：${roles.length} 个角色，每角色已明确 位置/依赖/介入时机/协同方式，有升级路径且体现并行协作。建队时每个成员 role 必须携带各自的协同段（见 perRole）。可派活（jarvis_ticket action=open，或 jarvis_dispatch_task 自动带卡派发——协同段经 meta.brief 直达成员简报）。`
           : `协同设计待修（${issues.length} 项）：补齐后重新调用。CEO 定子角色后必须先设计协同（含每角色自己的协同段），再建队——协同缺失 = 团队各干各的，不是真团队。`,
       }
     },
@@ -481,7 +481,7 @@ export const ORG_TOOLS = [
           protocol:
             '1) 逐任务对照验收标准与 jarvis_process 领域闸门检查产出；2) 复核黑板全部未决项：已解决/降级/遗留——遗留项必须写明影响与触发升级；3) 全部重要决策用 jarvis_essence 回归需求本质复查（迎合/幻觉/偏离 = 不许交付）；4) CEO 汇总交付报告（目标回顾/各岗位产出切片/风险未决/交付物在哪/怎么验收）',
           resolutions: 'R1 验收结论逐项（通过/未通过+原因）；R2 黑板遗留项分级；R3 jarvis_essence 审计结论汇总；R4 交付报告要点清单',
-          actions: 'CEO 产出交付报告给用户；必要时 agent_teams_delete 收队',
+          actions: 'CEO 产出交付报告给用户；必要时 jarvis_ticket（action=stop）收口清单',
         },
       }
       // ── 群聊会议协议（groupchat=true，用户定义的真实会议效果）：
@@ -815,25 +815,25 @@ export const ORG_TOOLS = [
  *
  * 旧做法：先用 jarvis_member_brief 生成须知 → 人工把须知抄进任务描述 → 再用闸检查「描述里有没有须知/角色卡标记」。
  * 那是「考核员工有没有按流程填表」。新做法：把流程做进工具——一次调用内部完成
- * ① jarvis_member_brief（含角色卡全文 + ponder 指引）② agent_teams_create_task（须知自动拼进描述）。
+ * ① jarvis_member_brief（含角色卡全文 + ponder 指引）② jarvis_ticket action=open（须知经 meta.brief 直达成员简报，开单即由原生 subagents 派会话执行）。
  * 正确的路 = 最省事的路，于是不需要再靠闸去验证某一步有没有做。
  */
 {
   name: 'jarvis_dispatch_task',
   description:
-    '派活一步到位（推荐用法）：内部先调 jarvis_member_brief 生成「角色卡全文 + ponder 指引 + 回报格式」的成员须知，再调 agent_teams_create_task 把须知自动拼进任务描述创建任务。把「正确流程」做成最省事的路：不用手工抄须知，不需要外部闸去检查你有没有抄。若任务已建好只想补须知，用 jarvis_member_brief + agent_teams_update_task。',
+    '派活一步到位（推荐用法）：内部先调 jarvis_member_brief 生成「角色卡全文 + ponder 指引 + 回报格式」的成员须知，再调 jarvis_ticket（action=open）开单——须知经 meta.brief 直达成员简报，开单即由原生 subagents 派成员子会话执行。把「正确流程」做成最省事的路：不用手工抄须知，不需要外部闸去检查你有没有抄。若只想补须知，重新调用本工具开新单；在办单卡住用 jarvis_ticket（action=retry）重派。',
   parameters: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      assignee: { type: 'string', description: '成员名（与 agent_teams_add_member 的 name 一致；也是找角色卡的键）' },
+      assignee: { type: 'string', description: '成员名（公司员工 role，与蒸馏角色卡同名；也是找角色卡的键）' },
       subject: { type: 'string', description: '任务标题（写清交付物与验收口径）' },
-      description: { type: 'string', description: '任务正文：要做什么、输入在哪、验收标准（成员须知会自动附在后面）' },
-      acceptance: { type: 'string', description: '验收标准（可判定；会一并进入须知与任务描述）' },
-      team: { type: 'string', description: '团队 id（agent_teams_create_task 的 team 参数；不传由 agent-teams 决定）' },
-      taskId: { type: 'string', description: '显式任务 id（可选）' },
+      description: { type: 'string', description: '任务正文：要做什么、输入在哪、验收标准（成员须知会经 meta.brief 直达成员简报）' },
+      acceptance: { type: 'string', description: '验收标准（可判定；会一并进入须知与授权依据）' },
+      team: { type: 'string', description: '归属标注（可选；仅写入授权依据，执行统一走工作区任务单内核）' },
+      taskId: { type: 'string', description: '沿用旧任务编号（可选，仅记录进授权依据）' },
       stakes: { type: 'string', description: '赌注 high/medium/low（默认 medium，影响 ponder 深度说明）' },
-      dependencies: { type: 'string', description: '依赖任务 id（JSON 数组字符串或逗号分隔，可选）' },
+      dependencies: { type: 'string', description: '依赖说明（可选；写入授权依据，由 captain 按依赖顺序派发）' },
       projectDir: { type: 'string', description: '项目目录（默认当前会话工作区）' },
     },
     required: ['assignee', 'subject'],
@@ -844,12 +844,12 @@ export const ORG_TOOLS = [
       additionalProperties: false,
       properties: {
         ok: { type: 'boolean', description: '整条链路是否成功' },
-        dispatched: { type: 'boolean', description: '任务是否真的建出来了（agent_teams_create_task 返回成功）' },
-        taskId: { type: 'string', description: '建出的任务 id（拿得到就填）' },
+        dispatched: { type: 'boolean', description: '是否已开单派单（jarvis_ticket open 成功）' },
+        taskId: { type: 'string', description: '开出的任务单 id（拿得到就填）' },
         cardPath: { type: 'string', description: '注入的角色卡文件；空=该角色还没卡' },
         cardMissing: { type: 'boolean', description: 'true=没有角色卡（流程建议先蒸馏，但不阻塞派活）' },
-        briefChars: { type: 'number', description: '写进任务描述的须知长度' },
-        inner: { type: 'array', items: { type: 'string' }, description: '内部调用轨迹（brief → create_task）' },
+        briefChars: { type: 'number', description: '直达成员简报的须知长度' },
+        inner: { type: 'array', items: { type: 'string' }, description: '内部调用轨迹（brief → ticket open）' },
         summary: { type: 'string', description: '结果摘要 + 失败时的补救办法' },
       },
       required: ['ok', 'summary'],
@@ -872,7 +872,7 @@ export const ORG_TOOLS = [
       return {
         ok: false,
         dispatched: false,
-        summary: '⚠️ 当前宿主没有 tools.execute（工具内派活不可用）。手工两步：① jarvis_member_brief(roleName=成员) ② 把 brief 原文附进 agent_teams_create_task 的 description。',
+        summary: '⚠️ 当前宿主没有 tools.execute（工具内派活不可用）。手工两步：① jarvis_member_brief(roleName=成员) ② jarvis_ticket action=open 开单（brief 参数直接带须知原文，role=成员名）。',
       }
     }
     const signal = (exec && exec.signal) || new AbortController().signal
@@ -915,24 +915,22 @@ export const ORG_TOOLS = [
       brief ? '\n---\n' : '',
       brief,
     ].filter(Boolean).join('\n')
-    const taskArgs = { subject, description, assignee }
-    if (args.team) taskArgs.team = String(args.team)
-    if (args.taskId) taskArgs.task_id = String(args.taskId)
-    if (args.dependencies) {
-      const raw = String(args.dependencies).trim()
-      let deps = raw
-      try {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) deps = parsed
-      } catch {}
-      taskArgs.dependencies = deps
+    const depNote = args.dependencies ? `依赖：${String(args.dependencies).trim()}` : ''
+    const teamNote = args.team ? `归属：${String(args.team).trim()}${args.taskId ? `（沿用编号 ${String(args.taskId).trim()}）` : ''}` : ''
+    const ticketArgs = {
+      action: 'open',
+      title: subject,
+      role: assignee,
+      stage: 'build',
+      brief,
+      mandate: JSON.stringify({ strength: 'explicit', basis: [body || subject, acceptance ? `验收标准：${acceptance}` : '', depNote, teamNote].filter(Boolean).join('；'), by: 'captain:dispatch_task' }),
     }
     try {
-      inner.push('agent_teams_create_task')
-      const created = await call('agent_teams_create_task', taskArgs)
+      inner.push('jarvis_ticket(open)')
+      const created = await call('jarvis_ticket', ticketArgs)
       const cv = created && !created.isError ? created.value : undefined
-      const taskId = String((cv && (cv.taskId || cv.id || (cv.task && cv.task.id))) || '')
-      if (created && created.isError) {
+      const taskId = String((cv && ((cv.ticket && cv.ticket.id) || cv.ticketId)) || '')
+      if (created && created.isError || (cv && cv.ok === false)) {
         return {
           ok: false,
           dispatched: false,
@@ -941,7 +939,7 @@ export const ORG_TOOLS = [
           cardMissing,
           briefChars: brief.length,
           inner,
-          summary: `⚠️ 任务创建失败：${String((created.error && (created.error.message || created.error.code)) || '未知错误')}——须知已生成（${brief.length} 字），可手工建任务并把须知附进描述。`,
+          summary: `⚠️ 开单失败：${String((created && created.error && (created.error.message || created.error.code)) || (cv && cv.verdict) || '未知错误')}——须知已生成（${brief.length} 字），可手工 jarvis_ticket action=open 开单（brief 参数直接带须知）。`,
         }
       }
       let meetingHint = ''
@@ -961,7 +959,7 @@ export const ORG_TOOLS = [
         cardMissing,
         briefChars: brief.length,
         inner,
-        summary: `任务「${subject}」已派给 ${assignee}；须知（含${cardPath ? '角色卡' : '角色卡缺失提示'} + ponder 指引）已自动写进描述。${cardMissing ? '⚠️ 该角色还没有卡：建议先蒸馏再让他开工。' : ''}${meetingHint}`,
+        summary: `任务「${subject}」已开单派给 ${assignee}（原生 subagents 执行，单号 ${taskId || '见 jarvis_ticket list'}）；须知（含${cardPath ? '角色卡' : '角色卡缺失提示'} + ponder 指引）已经 meta.brief 直达成员简报。${cardMissing ? '⚠️ 该角色还没有卡：建议先蒸馏再让他开工。' : ''}${meetingHint}`,
       }
     } catch (e) {
       return { ok: false, dispatched: false, cardPath, cardMissing, briefChars: brief.length, inner, summary: `⚠️ 建任务抛错：${String((e && e.message) || e)}` }

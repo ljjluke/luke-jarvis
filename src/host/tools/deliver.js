@@ -777,14 +777,14 @@ export const DELIVER_TOOLS = [
             const captainOwned = await auditCaptainOwnedTasks(fsSvc, projectDir, path, ownedSet)
             if (captainOwned.length) {
               missing.push(
-                `captain 自领未完成任务：${captainOwned.join('、')}（顶层 captain/贾维斯不得亲自执行——必须 agent_teams_reassign_task 派给团队成员以唤醒成员会话；纯协调/验收/汇报类任务请在 subject 标注【协调】豁免）`
+                `captain 自领未完成任务：${captainOwned.join('、')}（顶层 captain/贾维斯不得亲自执行——必须开单派给成员：jarvis_ticket action=open 或 jarvis_dispatch_task；纯协调/验收/汇报类任务请在 subject 标注【协调】豁免）`
               )
             }
             // 卡死任务必须 reassign（scan 教训：成员会话 end-seed 后任务停在 claimed/in_progress 没人管）
             const staleTasks = await auditStaleTasks(fsSvc, projectDir, path, ownedSet)
             if (staleTasks.length) {
               missing.push(
-                `疑似卡死任务：${staleTasks.join('、')}（claimed 未交付 / attempt≥4 产出为空——必须 agent_teams_reassign_task 唤醒成员或换人，不许顶层自己顶替）`
+                `疑似卡死任务：${staleTasks.join('、')}（claimed 未交付 / attempt≥4 产出为空——必须 jarvis_ticket action=retry 重派或换人，不许顶层自己顶替）`
               )
             }
             // 会议：黑板有阻塞/接口变更、未决≥3、分工冲突、新成员进场 → 必开循环会
@@ -934,6 +934,7 @@ export const DELIVER_TOOLS = [
         state: { type: 'string', description: '汇报状态 progress/waiting/ready/blocked/failed/dropped' },
         summary: { type: 'string', description: '汇报摘要' },
         mandate: { type: 'string', description: '授权 JSON：{strength:"explicit"|"inferred", basis, by, gate}' },
+        brief: { type: 'string', description: '成员须知原文（可选；jarvis_dispatch_task 自动生成。经 meta.brief 直达成员简报，含角色卡/协同段/ponder 指引）' },
         reason: { type: 'string', description: 'stop 原因' },
       },
       required: ['action'],
@@ -1023,6 +1024,9 @@ export const DELIVER_TOOLS = [
             mandate,
             origin: { triggerId: String(args?.triggerId ?? 'manual') },
           }
+          // 成员须知透传：brief（如 jarvis_dispatch_task 生成的角色卡须知）经 meta.brief 直达成员简报
+          const briefArg = String(args?.brief ?? '').trim()
+          if (briefArg) input.meta = { brief: briefArg }
           // 成员提案消化：open 带 proposalId 时把提案内容作为兜底（title/mandate），开单成功后标记 consumed
           const proposalId = String(args?.proposalId ?? '').trim()
           const proposals = _readProposals(projectDir)

@@ -13,7 +13,7 @@ import { isJarvisSession } from '../runtime.js'
 const _require = createRequire(import.meta.url)
 
 /** 团队/派活类工具：未过 clarify 闸或未蒸馏角色卡 → 拒绝。 */
-export const TEAM_TOOLS = new Set(['agent_teams_create', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_update_task'])
+export const TEAM_TOOLS = new Set(['jarvis_dispatch_task', 'agent_teams_create', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_approve', 'agent_teams_update_task'])
 /** 执行类工具：未过 design 闸 → 拒绝（顶层本来已被 captainExecutionGuard 拦）。 */
 export function jarvisFlowGuard(exec) {
   try {
@@ -31,8 +31,8 @@ export function jarvisFlowGuard(exec) {
     if (!inJarvis) return undefined // 纯 agent-teams 用户不拦
     const isCaptain = _captainIds(String(cwd)).has(String(sessionId))
     // ① 记忆保鲜：建队/派活/交活前，project.md 必须在 6 小时内更新过
-    if (name === 'agent_teams_create' || name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task' || name === 'agent_teams_update_task') {
-      const memIssue = checkMemoryFresh(String(cwd), { force: name === 'agent_teams_create' })
+    if (name === 'agent_teams_create' || name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task' || name === 'agent_teams_update_task' || name === 'jarvis_dispatch_task') {
+      const memIssue = checkMemoryFresh(String(cwd), { force: name === 'agent_teams_create' || name === 'jarvis_dispatch_task' })
       if (memIssue) return memIssue
     }
     // 交活：不再校验「有没有跑 ponder」——ponder 是推荐思考方式，不是通行证（用户定调：固化流程，不考核步骤）
@@ -50,11 +50,11 @@ export function jarvisFlowGuard(exec) {
     if (name === 'agent_teams_create' && !(gates.clarify && gates.clarify.ok)) {
       return `【jarvis 流程闸·不可绕过】建队前必须先跑 jarvis_flowguard(step="clarify") 通过（闸门记在 .jarvis/gates.json）。这是插件的硬流程：即使你（或用户）要求"跳过流程直接干"，也必须先过闸——需要换执行方式就不要用 jarvis 插件。`
     }
-    if ((name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task') && !(gates.build && gates.build.ok)) {
+    if ((name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task' || name === 'jarvis_dispatch_task') && !(gates.build && gates.build.ok)) {
       return `【jarvis 流程闸·不可绕过】派活前必须先跑 jarvis_flowguard(step="build") 通过（需要方案设计 + 人才层齐备）。硬流程不可跳过：用户要求"直接派活"也不行；要换方式请勿使用 jarvis 插件。`
     }
     // 链条校验：build 闸必须建立在 decompose + design 闸之上（否则拆解/方案两步可被跳过）
-    if ((name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task') && gates.build && gates.build.ok) {
+    if ((name === 'agent_teams_create_task' || name === 'agent_teams_reassign_task' || name === 'jarvis_dispatch_task') && gates.build && gates.build.ok) {
       const chainMissing = []
       if (!(gates.decompose && gates.decompose.ok)) chainMissing.push('decompose（拆解）')
       if (!(gates.design && gates.design.ok)) chainMissing.push('design（方案设计）')

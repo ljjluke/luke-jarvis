@@ -503,7 +503,7 @@ export const INTAKE_TOOLS = [
         parallelGroups,
         staffing: staffingReport,
         verdict: ok
-          ? `任务编排图合格（${tasks.length} 任务）：依赖无悬空/无循环、每任务有负责人+可判定验收、独立任务可并行。可派活（agent_teams_create_task 逐个建，dependencies 按 deps 接）。任务图沉淀 docs/任务编排-*.md 并写入 company-state tasks 表（3D 看板可渲染）。`
+          ? `任务编排图合格（${tasks.length} 任务）：依赖无悬空/无循环、每任务有负责人+可判定验收、独立任务可并行。可派活（jarvis_dispatch_task 或 jarvis_ticket action=open 逐个开单；依赖关系写入授权依据，由 captain 按图顺序派发）。任务图沉淀 docs/任务编排-*.md 并写入 company-state tasks 表（3D 看板可渲染）。`
           : `任务编排图待修（${issues.length} 项）：${issues.slice(0, 5).join('；')}。打回 CEO 重拆——任务图有结构问题不许派活（悬空依赖=下游等不到；循环=永远不开始；无验收=做完不知道算不算完）。`,
       }
     },

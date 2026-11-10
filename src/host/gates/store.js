@@ -134,7 +134,7 @@ export function recordGate(cwd, step, ok) {
 // 蒸馏/开会/flowguard/CEO 绩效 全部 0 次。文字协议拦不住，必须让它**机械失败**。
 //
 // 规则（领域无关、只对「jarvis 工作区 + 团队 captain」生效）：
-//   1) 首次用 agent_teams_create/create_task/reassign_task 前，必须已过 jarvis_flowguard(clarify)
+//   1) 首次建队/派活（jarvis_dispatch_task、jarvis_ticket open）前，必须已过 jarvis_flowguard(clarify)
 //      —— 即工作区 .jarvis/ 下已有需求规格或基线清单（flowguard 产出）。
 //   2) 建队/派活前必须已蒸馏角色卡：.jarvis/cards/ 至少 2 张（带队 + 岗位），否则拒绝建队。
 //   3) 开工（执行类工具）前必须已过 design 闸：.jarvis/docs/方案设计-*.md 存在。
