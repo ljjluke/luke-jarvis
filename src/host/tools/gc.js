@@ -176,7 +176,7 @@ export const GC_TOOLS = [
       const action = String(args?.action ?? 'sweep').trim()
       if (!projectDir) return { action, verdict: '⛔ 未定位到工作区（传 projectDir 或在有活动会话时调用）' }
       const absRoot = path.resolve(projectDir)
-      if (/(^|\/)\.jarvis$|luke-jarvis/.test(absRoot)) return { action, verdict: '⛔ 插件仓库/.jarvis 目录不是工作区，拒绝 GC（STATE_ROOT_CONFLICT）' }
+      if (/(^|[\\/])\.jarvis$|luke-jarvis/.test(absRoot)) return { action, verdict: '⛔ 插件仓库/.jarvis 目录不是工作区，拒绝 GC（STATE_ROOT_CONFLICT）' }
       // 到期清理每次先跑（保留期语义的自动执行点）
       const { purged } = purgeExpired(absRoot)
       if (action === 'list') {
@@ -226,7 +226,7 @@ const GC_FLAG = () => pathMod().join('.jarvis', 'gc.auto.json')
 export function maybeAutoGc(projectDir) {
   let absRoot = ''
   try { absRoot = pathMod().resolve(String(projectDir || '')) } catch { return null }
-  if (!absRoot || /(^|\/)\.jarvis$|luke-jarvis/.test(absRoot)) return null
+  if (!absRoot || /(^|[\\/])\.jarvis$|luke-jarvis/.test(absRoot)) return null
   try { if (!fs().statSync(pathMod().join(absRoot, '.jarvis')).isDirectory()) return null } catch { return null }
   const flag = pathMod().join(absRoot, GC_FLAG())
   try { if (Date.now() - fs().statSync(flag).mtimeMs < AUTO_GC_INTERVAL_MS) return null } catch { /* 首次运行 */ }
