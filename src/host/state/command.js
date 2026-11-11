@@ -18,7 +18,7 @@ export const TOOL_GROUPS = {
   '记忆与知识': ['jarvis_store', 'jarvis_lesson', 'jarvis_snapshot', 'jarvis_board', 'jarvis_essence'],
   '流程与闸': ['jarvis_flowguard', 'jarvis_ticket', 'jarvis_escalate', 'jarvis_review'],
   '交付与验收': ['jarvis_baseline', 'jarvis_coverage', 'jarvis_fingerprint', 'jarvis_release', 'jarvis_dispatch_task'],
-  '运行与协作': ['jarvis_meeting', 'jarvis_company', 'jarvis_update'],
+  '运行与协作': ['jarvis_meeting', 'jarvis_company', 'jarvis_update', 'jarvis_gc'],
   '深度思考': ['jarvis_think', 'jarvis_think_deep', 'jarvis_ponder_check'],
   '自进化闭环': ['jarvis_report_issue', 'jarvis_issue_sync', 'jarvis_release_check'],
 }

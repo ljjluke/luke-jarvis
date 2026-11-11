@@ -1992,7 +1992,7 @@ test('jarvis_member_brief：ponder 给成可用资源（不下"必须跑"的命�
 test('jarvis_member_brief：执行场景不强制 ponder（按任务做/汇报/查资料）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
   const r = await def.execute({ roleName: '开发A', task: '实现' })
-  assert.ok(r.brief.includes('执行已定方案'), '说明执行场景不需要重新决策')
+  assert.ok(r.brief.includes('执行类小活走推演即可，不用硬跑十阶段'), '说明执行场景不需要重新决策（推演即可不跑十阶段）')
   assert.ok(!/必须先跑 ponder/.test(r.brief), '执行场景不能用命令口吻')
 })
 
@@ -2025,7 +2025,7 @@ test('jarvis_member_brief broadcast：生成协议刷新消息（含思考必pon
   assert.ok(r.protocolRefresh.includes('卡住限时上报'), '含卡住上报')
   assert.ok(r.protocolRefresh.includes('上下文准入'), '含上下文准入')
   assert.deepStrictEqual(r.members, ['领域专家-A', '领域专家-B'], '目标成员')
-  assert.ok(r.hint.includes('send_message'), '发送提示')
+  assert.ok(r.hint.includes('jarvis_meeting'), '发送提示（开会宣贯协议刷新）')
   assert.ok(r.verdict.includes('升级后不刷新'), '提示升级后需刷新')
 })
 
@@ -2455,7 +2455,7 @@ test('/jarvis 命令：显式调用 → 输出严格模式（能力自检/顶层
   assert.ok(r.content.includes('能力自检'), '要求能力自检')
   assert.ok(r.content.includes('jarvis_flowguard'), '要求走步骤守卫')
   assert.ok(r.content.includes('绝不亲自实现'), '顶层不亲自实现')
-  assert.ok(r.content.includes('agent_teams_reassign_task'), '卡住要唤醒成员而非自己顶替')
+  assert.ok(r.content.includes('jarvis_ticket（action=retry）'), '卡住要重派成员子会话而非自己顶替')
   assert.ok(r.content.includes('jarvis 能力未注册'), '缺能力时明确告知不硬做')
 })
 
@@ -2483,7 +2483,7 @@ test('/jarvis 继续：识别为续跑意图（不反问"想做什么"），给�
     assert.ok(r.content.includes('续跑'), `${q} 应识别为续跑`)
     assert.ok(!r.content.includes('判不出领域'), `${q} 不应被判模糊`)
     assert.ok(r.content.includes('不要重新建队'), `${q} 提示不重建队`)
-    assert.ok(r.content.includes('agent_teams_reassign_task'), `${q} 应给唤醒成员动作`)
+    assert.ok(r.content.includes('jarvis_ticket（action=retry）'), `${q} 应给重派成员动作`)
     assert.ok(r.content.includes('无法接管旧团队'), `${q} 应说明非 captain 无法接管`)
     assert.ok(r.content.includes('严格模式'), `${q} 应附严格模式`)
   }
@@ -3658,7 +3658,9 @@ test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效
   // volatile 字段解析后是 { get() } 引用（DSH 设置面板实时源），读取走 .get()
   const parsed = typeof mod.Config === 'function' ? mod.Config({}) : {}
   assert.strictEqual(parsed.ui.get(), 'wings')
-  assert.strictEqual(parsed.voice.get().provider, 'browser')
+  // 语音改多供应商结构：{ active, providers[] }，未配置 = 空（前端回退浏览器）
+  assert.strictEqual(parsed.voice.get().active, '')
+  assert.ok(Array.isArray(parsed.voice.get().providers), 'voice 应为多供应商 providers 结构')
   const routes = []
   const ctx = {
     get: () => undefined,
@@ -3668,7 +3670,11 @@ test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效
     systemPrompt: { section: () => () => {} },
   }
   // 用真实 volatile ref 配置（Config 解析产物）驱动 apply——与 DSH 运行时传入的形状一致
-  mod.apply(ctx, mod.Config({ ui: 'legacy', defaultWorkspace: '', voice: { provider: 'openai' } }))
+  mod.apply(ctx, mod.Config({
+    ui: 'legacy',
+    defaultWorkspace: '',
+    voice: { active: '面板兜底', providers: [{ name: '面板兜底', protocol: 'openai', baseUrl: 'https://cfg.example.com/v1', model: 'cfg-model', voice: 'cfg-voice', apiKey: 'sk-cfg' }] },
+  }))
   const ui = routes.find((r) => r.path === '/jarvis-ui')
   const res = { writeHead: (code, headers) => { res.code = code; res.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui', method: 'GET' }, res)
@@ -3676,13 +3682,14 @@ test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效
   const res2 = { writeHead: (code, headers) => { res2.code = code; res2.headers = headers }, end: () => {} }
   await ui.handler({ url: '/jarvis-ui?ui=wings', method: 'GET' }, res2)
   assert.strictEqual(res2.headers.location, '/jarvis-wings', '查询参数可覆盖配置默认值')
-  // 语音合并：config.voice 为兜底，voice.json 保存值优先
+  // 语音合并：voice.json 为空时用 Config.voice.providers 兜底
   const voice = routes.find((r) => r.path === '/api/jarvis/voice')
   const vres = { writeHead: (code, headers) => { vres.code = code; vres.headers = headers }, end: (d) => { vres.body = d } }
   await voice.handler({ method: 'GET', headers: {}, url: '/api/jarvis/voice' }, vres)
   const vbody = JSON.parse(vres.body)
   assert.strictEqual(vbody.ok, true)
-  assert.strictEqual(vbody.config.provider, 'openai', 'GET 应返回合并后的 provider')
+  assert.strictEqual(vbody.config.active, '面板兜底', 'GET 应返回合并后的 active 供应商')
+  assert.strictEqual(vbody.config.providers[0].baseUrl, 'https://cfg.example.com/v1')
   // 恢复默认配置，避免污染后续测试（PLUGIN_CONFIG 是模块级单例）
   mod.apply({ get: () => undefined, effect: () => {}, tools: { register: () => () => {} }, webServer: { register: () => {} }, systemPrompt: { section: () => () => {} } }, mod.Config({}))
 })
@@ -4428,7 +4435,7 @@ test('角色卡：jarvis_dispatch_task 一步完成「卡+须知+建任务」（
         const v = await briefTool.execute(req.arguments, {})
         return { isError: false, value: v, content: [{ type: 'text', text: 'ok' }] }
       }
-      if (req.name === 'agent_teams_create_task') return { isError: false, value: { taskId: 'T-42' }, content: [{ type: 'text', text: 'created' }] }
+      if (req.name === 'jarvis_ticket') return { isError: false, value: { ok: true, ticket: { id: 'T-42' } }, content: [{ type: 'text', text: 'created' }] }
       return { isError: true, error: { code: 'UNKNOWN', message: 'unknown tool' }, content: [] }
     },
   }
@@ -4444,13 +4451,13 @@ test('角色卡：jarvis_dispatch_task 一步完成「卡+须知+建任务」（
   assert.strictEqual(r.dispatched, true)
   assert.strictEqual(r.taskId, 'T-42')
   assert.ok(r.cardPath.includes('产品增长-张一鸣.md'), `应注入该角色卡：${r.cardPath}`)
-  // 内部调用轨迹：brief → create_task
-  assert.deepStrictEqual(inner.map((i) => i.name), ['jarvis_member_brief', 'agent_teams_create_task'])
+  // 内部调用轨迹：brief → jarvis_ticket（自建执行器：开单即派成员子会话，卡+须知经 brief 字段直达成员简报）
+  assert.deepStrictEqual(inner.map((i) => i.name), ['jarvis_member_brief', 'jarvis_ticket'])
   const created = inner[1].args
-  assert.ok(created.description.includes('## 六、你的角色卡'), '任务描述里必须含卡注入段（插件自动拼，不靠人抄）')
-  assert.ok(created.description.includes('延迟满足'), '卡里的方法论要真进描述')
-  assert.ok(created.description.includes('十阶段'), '须知里的 ponder 指引也要真进描述')
-  assert.ok(created.description.includes('每档含成本/预期/风险'), '原有验收标准不能丢')
+  assert.ok(created.brief.includes('## 六、你的角色卡'), '任务简报里必须含卡注入段（插件自动拼，不靠人抄）')
+  assert.ok(created.brief.includes('延迟满足'), '卡里的方法论要真进简报')
+  assert.ok(created.brief.includes('十阶段'), '须知里的 ponder 指引也要真进简报')
+  assert.ok(created.brief.includes('每档含成本/预期/风险'), '原有验收标准不能丢')
 })
 
 
@@ -4600,13 +4607,15 @@ test('压缩/新会话：agent 创建即挂「当前阶段 + 续接事实」段�
     webServer: { register: () => () => {} },
     effect: (fn) => { try { fn() } catch {} },
     get: () => undefined,
-    on: (ev, fn) => { handlers[ev] = fn; return () => {} },
+    // 真实宿主是事件总线：阶段段与权限钉扎都监听 agent/created，桩必须支持多监听者（不能 last-wins 覆盖）
+    on: (ev, fn) => { (handlers[ev] = handlers[ev] || []).push(fn); return () => {} },
   }
   apply(ctx)
-  assert.ok(typeof handlers['agent/created'] === 'function', '必须监听 agent/created（否则新会话/压缩后首个请求看不到阶段）')
+  assert.ok(Array.isArray(handlers['agent/created']) && handlers['agent/created'].length >= 2, '阶段段与权限钉扎都要监听 agent/created')
+  const dispatch = (payload) => { for (const fn of handlers['agent/created']) fn(payload) }
   const sections = []
   const agent = { session: { header: { cwd: proj } }, ctx: { systemPrompt: { section: (s) => { sections.push(s); return () => {} } } } }
-  handlers['agent/created']({ agent, source: 'compact' })
+  dispatch({ agent, source: 'compact' })
   assert.strictEqual(sections.length, 1, '创建即挂阶段段')
   assert.strictEqual(sections[0].name, 'luke-jarvis:stage')
   const txt = sections[0].text()
@@ -4616,12 +4625,12 @@ test('压缩/新会话：agent 创建即挂「当前阶段 + 续接事实」段�
   assert.ok(txt.includes('进度：'), '进度来自 project.md，不是模型记忆')
   assert.ok(!/必须(先|要)|不要凭记忆/.test(txt), '不允许用提示词命令模型做事（流程要固化）')
   // 幂等：重复创建事件不重复挂
-  handlers['agent/created']({ agent, source: 'compact' })
+  dispatch({ agent, source: 'compact' })
   assert.strictEqual(sections.length, 1, '同一 agent 只挂一次 section')
   // startup：不加压缩提醒（新开会话正常从阶段开始）
   const s2 = []
   const agent2 = { session: { header: { cwd: proj } }, ctx: { systemPrompt: { section: (x) => { s2.push(x); return () => {} } } } }
-  handlers['agent/created']({ agent: agent2, source: 'startup' })
+  dispatch({ agent: agent2, source: 'startup' })
   assert.ok(s2[0].text().includes('续接事实'), 'startup 也给事实（同样来自磁盘）')
 })
 
@@ -4704,7 +4713,7 @@ test('UI 契约 v1：/api/jarvis/summary 轻量摘要 + /api/jarvis/capabilities
   const r2 = mk()
   await caps.handler({ url: '/api/jarvis/capabilities?workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, r2)
   const b2 = JSON.parse(r2.body)
-  assert.strictEqual(b2.tools.length, 34, '能力清单要列全 34 个工具')
+  assert.strictEqual(b2.tools.length, 35, '能力清单要列全 35 个工具（34 + jarvis_gc）')
   assert.ok(b2.panels.includes('meetings'), '面板 id 固定（UI 契约）')
   assert.ok(b2.plugin.version, '要报插件版本')
 })
@@ -4774,7 +4783,7 @@ function fakeRes() {
   }
 }
 
-test('语音设置：GET 返回预设+掩码配置；PUT 保存后 configured=true 且 key 不回显明文', async () => {
+test('语音设置：GET 返回预设+多供应商配置；PUT 保存后 configured=true 且 key 不回显明文', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'voicehome-'))
   const oldHome = process.env.HOME
   process.env.HOME = home
@@ -4794,23 +4803,26 @@ test('语音设置：GET 返回预设+掩码配置；PUT 保存后 configured=tr
     await voice.handler(fakeReq('GET', null), r1)
     const b1 = JSON.parse(r1.body)
     assert.strictEqual(b1.ok, true)
-    assert.strictEqual(b1.config.provider, 'browser', '默认浏览器语音（零依赖）')
+    assert.strictEqual(b1.config.active, '', '未配置供应商 = 空（前端据此回退浏览器语音，零依赖兜底不变）')
     assert.ok(b1.presets.voices.length >= 5, '要有多音色可选')
     assert.ok(b1.presets.models.length >= 3, '要有多模型可选')
-    // 保存语音模型配置
+    // 保存语音供应商配置（多供应商协议卡片，可增删切换）
     const r2 = fakeRes()
-    await voice.handler(fakeReq('PUT', { provider: 'openai', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test-123456789', model: 'cosyvoice-v2', voice: 'longxiaochun', speed: 0.9 }), r2)
+    await voice.handler(fakeReq('PUT', { provider: 'openai-compatible', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-test-123456789', model: 'cosyvoice-v2', voice: 'longxiaochun', speed: 0.9 }), r2)
     const b2 = JSON.parse(r2.body)
     assert.strictEqual(b2.ok, true)
-    assert.strictEqual(b2.config.configured, true)
-    assert.ok(!String(b2.config.apiKeyMasked).includes('123456789'), `key 必须掩码：${b2.config.apiKeyMasked}`)
+    assert.strictEqual(b2.config.providers.length, 1)
+    assert.strictEqual(b2.config.providers[0].configured, true)
+    assert.ok(!String(b2.config.providers[0].apiKeyMasked).includes('123456789'), `key 必须掩码：${b2.config.providers[0].apiKeyMasked}`)
     assert.ok(fs.existsSync(path.join(home, '.dsh/luke-jarvis/voice.json')), '配置落盘到全局路径')
-    // 再次 GET：仍掩码
+    // 再次 GET：active 指向该供应商，仍掩码，明文 key 不出现在响应
     const r3 = fakeRes()
     await voice.handler(fakeReq('GET', null), r3)
     const b3 = JSON.parse(r3.body)
-    assert.strictEqual(b3.config.voice, 'longxiaochun')
-    assert.ok(b3.config.apiKeyMasked.includes('…'), '掩码形态')
+    assert.strictEqual(b3.config.active, '默认供应商')
+    assert.strictEqual(b3.config.providers[0].voice, 'longxiaochun')
+    assert.ok(b3.config.providers[0].apiKeyMasked.includes('…'), '掩码形态')
+    assert.ok(!JSON.stringify(b3).includes('sk-test-123456789'), '明文 key 不得出现在任何响应里')
   } finally {
     process.env.HOME = oldHome
   }
@@ -4905,13 +4917,13 @@ test('v2 会话输入不伪造执行（未接指令通道必须明说，而不�
   assert.ok(/只是?只读|只读数据面/.test(js), '必须写明当前只接了只读数据面')
 })
 
-// ── 能力台：31 个工具全部接入（清单/校验/执行/闸拒绝/界面覆盖）──────────────
-test('能力台：toolSpecs 覆盖全部 31 个工具，且每个工具都在界面的分组里（无遗漏）', async () => {
+// ── 能力台：全部工具接入（清单/校验/执行/闸拒绝/界面覆盖）──────────────
+test('能力台：toolSpecs 覆盖全部 35 个工具，且每个工具都在界面的分组里（无遗漏）', async () => {
   const { TOOL_GROUPS, toolSpecs } = await import('../src/host/state/command.js')
   const { TOOLS } = await import('../src/host/tools/index.js')
   const specs = toolSpecs()
   assert.strictEqual(specs.length, TOOLS.length, 'spec 数必须等于真实工具数')
-  assert.strictEqual(TOOLS.length, 34)
+  assert.strictEqual(TOOLS.length, 35)
   const names = new Set(TOOLS.map((t) => t.name))
   const grouped = new Set()
   for (const [g, list] of Object.entries(TOOL_GROUPS)) {
@@ -5023,7 +5035,7 @@ test('能力台：闸拒绝要如实回传（denied=true），不能被界面吞
   assert.ok(out.error.includes('流程闸'))
 })
 
-test('能力台路由：/api/jarvis/tools 返回 31 条；/api/jarvis/command 拒绝缺 tool / 缺工作区', async () => {
+test('能力台路由：/api/jarvis/tools 返回 35 条；/api/jarvis/command 拒绝缺 tool / 缺工作区', async () => {
   const routes = []
   const ctx = {
     get: (k) => (k === 'agents' ? { list: () => [] } : undefined),
@@ -5039,7 +5051,7 @@ test('能力台路由：/api/jarvis/tools 返回 31 条；/api/jarvis/command �
   await toolsRoute.handler({ url: '/api/jarvis/tools', method: 'GET', headers: {} }, r1)
   const b1 = JSON.parse(r1.body)
   assert.strictEqual(b1.ok, true)
-  assert.strictEqual(b1.tools.length, 34, `能力台必须暴露 34 个工具，实际 ${b1.tools.length}`)
+  assert.strictEqual(b1.tools.length, 35, `能力台必须暴露 35 个工具，实际 ${b1.tools.length}`)
 
   const cmdRoute = routes.find((r) => r.path === '/api/jarvis/command')
   assert.ok(cmdRoute, '应注册 /api/jarvis/command')
