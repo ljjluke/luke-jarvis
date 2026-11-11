@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html,body{margin:0;padding:0;background:#fff;overflow:hidden;}
+  text{font-family:"Microsoft YaHei","PingFang SC",sans-serif;}
+</style>
+</head>
+<body>
+<svg width="1280" height="960" viewBox="0 0 1280 960" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1280" height="960" fill="#FFFFFF"/>
+  <text x="640" y="34" text-anchor="middle" font-size="22" font-weight="600" fill="#26215C">Jarvis 自进化闭环 · 问题上报 → 研发修复 → 稳定版分发</text>
+
+  <rect x="60" y="120" width="1160" height="170" rx="12" fill="#FAEEDA"/>
+  <text x="80" y="146" font-size="15" font-weight="600" fill="#854F0B">① 信号上报（用户环境 · 零复现开销）</text>
+  <rect x="60" y="300" width="1160" height="190" rx="12" fill="#E6F1FB"/>
+  <text x="80" y="326" font-size="15" font-weight="600" fill="#0C447C">② 研发过滤与人工审批</text>
+  <rect x="60" y="500" width="1160" height="150" rx="12" fill="#EEEDFE"/>
+  <text x="80" y="526" font-size="15" font-weight="600" fill="#3C3489">③ 修复与批量发布</text>
+  <rect x="60" y="660" width="1160" height="200" rx="12" fill="#E1F5EE"/>
+  <text x="80" y="686" font-size="15" font-weight="600" fill="#085041">④ 稳定版分发与升级</text>
+
+  <rect x="80" y="58" width="200" height="66" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+  <text x="180" y="84" text-anchor="middle" font-size="16" font-weight="600" fill="#0C447C">研发环境 Jarvis</text>
+  <text x="180" y="106" text-anchor="middle" font-size="12" fill="#5F5E5A">工作区 = jarvis 源码</text>
+  <line x1="180" y1="124" x2="180" y2="890" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="5 5"/>
+
+  <rect x="460" y="58" width="200" height="66" rx="10" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+  <text x="560" y="84" text-anchor="middle" font-size="16" font-weight="600" fill="#2C2C2A">GitHub 仓库</text>
+  <text x="560" y="106" text-anchor="middle" font-size="12" fill="#5F5E5A">issues · PR · releases</text>
+  <line x1="560" y1="124" x2="560" y2="890" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="5 5"/>
+
+  <rect x="840" y="58" width="200" height="66" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="1"/>
+  <text x="940" y="84" text-anchor="middle" font-size="16" font-weight="600" fill="#085041">用户环境 Jarvis</text>
+  <text x="940" y="106" text-anchor="middle" font-size="12" fill="#5F5E5A">大量用户实例 · 只上报</text>
+  <line x1="940" y1="124" x2="940" y2="890" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="5 5"/>
+
+  <rect x="1070" y="58" width="150" height="66" rx="10" fill="#FAEEDA" stroke="#993C1D" stroke-width="1"/>
+  <text x="1145" y="84" text-anchor="middle" font-size="16" font-weight="600" fill="#712B13">用户 / 审批人</text>
+  <text x="1145" y="106" text-anchor="middle" font-size="12" fill="#5F5E5A">人工把关</text>
+  <line x1="1145" y1="124" x2="1145" y2="890" stroke="#B4B2A9" stroke-width="1" stroke-dasharray="5 5"/>
+
+  <line x1="1145" y1="165" x2="946" y2="165" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="1045" y="155" text-anchor="middle" font-size="14" fill="#444441">反馈疑似问题 / 要求自检</text>
+
+  <path d="M940 195 h24 v24 h-18" fill="none" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="974" y="212" font-size="14" fill="#444441">整理疑点 · 不做复现（零沙盒开销）</text>
+
+  <line x1="940" y1="245" x2="566" y2="245" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="753" y="235" text-anchor="middle" font-size="14" fill="#444441">提交 issue（确认门 + 去重指纹）</text>
+
+  <line x1="1145" y1="272" x2="566" y2="272" stroke="#888780" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+  <text x="855" y="262" text-anchor="middle" font-size="14" fill="#888780">手动提 issue（旁路）</text>
+
+  <line x1="560" y1="350" x2="186" y2="350" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="373" y="340" text-anchor="middle" font-size="14" fill="#444441">定时拉取 open issues</text>
+
+  <path d="M180 380 h24 v24 h-18" fill="none" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="214" y="397" font-size="14" fill="#444441">沙盒复现 · 过滤真伪</text>
+  <text x="214" y="417" font-size="13" fill="#888780">误报 → 回复说明并关闭</text>
+
+  <line x1="180" y1="455" x2="1139" y2="455" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="660" y="445" text-anchor="middle" font-size="14" fill="#444441">发送审批工单（待修清单 · 批准前不动源码）</text>
+
+  <line x1="1145" y1="480" x2="186" y2="480" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="665" y="470" text-anchor="middle" font-size="14" fill="#444441">人工批准</text>
+
+  <path d="M180 530 h24 v24 h-18" fill="none" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="214" y="547" font-size="14" fill="#444441">修改源码 → 沙盒回归测试</text>
+  <text x="214" y="567" font-size="13" fill="#888780">全部通过才允许发布</text>
+
+  <line x1="180" y1="615" x2="554" y2="615" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="367" y="595" text-anchor="middle" font-size="14" fill="#444441">发布稳定版 release</text>
+  <text x="367" y="613" text-anchor="middle" font-size="14" fill="#444441">批量关联 fixes #N..#M</text>
+
+  <line x1="560" y1="722" x2="934" y2="722" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="747" y="700" text-anchor="middle" font-size="14" fill="#444441">定时查 releases</text>
+  <text x="747" y="718" text-anchor="middle" font-size="14" fill="#444441">semver 判定稳定版</text>
+
+  <line x1="940" y1="748" x2="1139" y2="748" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="1040" y="738" text-anchor="middle" font-size="14" fill="#444441">横幅通知 + 更新日志</text>
+
+  <line x1="1145" y1="776" x2="946" y2="776" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="1045" y="766" text-anchor="middle" font-size="14" fill="#444441">确认升级（人把关）</text>
+
+  <path d="M940 800 h24 v24 h-18" fill="none" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="974" y="817" font-size="14" fill="#444441">备份 → 替换 → 重启校验</text>
+
+  <line x1="940" y1="842" x2="566" y2="842" stroke="#444441" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="753" y="832" text-anchor="middle" font-size="14" fill="#444441">升级校验 · 批量关闭 issue</text>
+
+  <path d="M940 880 C 840 916 340 916 192 884" fill="none" stroke="#888780" stroke-width="1.5" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+  <text x="566" y="940" text-anchor="middle" font-size="14" fill="#888780">闭环：issue 关闭，回到持续巡检</text>
+</svg>
+</body>
+</html>

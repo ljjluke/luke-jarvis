@@ -1,0 +1,432 @@
+{
+  "schemaVersion": 1,
+  "asset": {
+    "id": "code-agent",
+    "revision": "abce309793416a3f"
+  },
+  "adapterId": "pixoffice.frame",
+  "adapterApiVersion": 1,
+  "rendererApiVersion": "pixi-1",
+  "presentationProfileId": "office-character-v1",
+  "capabilities": {
+    "variants": [
+      {
+        "variantId": "core.idle.standing.front",
+        "actionId": "core.idle",
+        "poseId": "standing",
+        "view": "front",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.walk.standing.front",
+        "actionId": "core.walk",
+        "poseId": "standing",
+        "view": "front",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "distance"
+        ]
+      },
+      {
+        "variantId": "core.idle.standing.back",
+        "actionId": "core.idle",
+        "poseId": "standing",
+        "view": "back",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.walk.standing.back",
+        "actionId": "core.walk",
+        "poseId": "standing",
+        "view": "back",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "distance"
+        ]
+      },
+      {
+        "variantId": "core.idle.seated.back",
+        "actionId": "core.idle",
+        "poseId": "seated",
+        "view": "back",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.idle.standing.left",
+        "actionId": "core.idle",
+        "poseId": "standing",
+        "view": "left",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.walk.standing.left",
+        "actionId": "core.walk",
+        "poseId": "standing",
+        "view": "left",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "distance"
+        ]
+      },
+      {
+        "variantId": "core.idle.seated.left",
+        "actionId": "core.idle",
+        "poseId": "seated",
+        "view": "left",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.idle.standing.right",
+        "actionId": "core.idle",
+        "poseId": "standing",
+        "view": "right",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.walk.standing.right",
+        "actionId": "core.walk",
+        "poseId": "standing",
+        "view": "right",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "distance"
+        ]
+      },
+      {
+        "variantId": "core.idle.seated.right",
+        "actionId": "core.idle",
+        "poseId": "seated",
+        "view": "right",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.sit-down.transition.back",
+        "actionId": "core.sit-down",
+        "poseId": "transition",
+        "view": "back",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.stand-up.transition.back",
+        "actionId": "core.stand-up",
+        "poseId": "transition",
+        "view": "back",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "office.type.seated.back",
+        "actionId": "office.type",
+        "poseId": "seated",
+        "view": "back",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.emote.wave.standing.front",
+        "actionId": "core.emote.wave",
+        "poseId": "standing",
+        "view": "front",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.emote.thinking.standing.front",
+        "actionId": "core.emote.thinking",
+        "poseId": "standing",
+        "view": "front",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.emote.surprised.standing.front",
+        "actionId": "core.emote.surprised",
+        "poseId": "standing",
+        "view": "front",
+        "channel": "base",
+        "clockModes": [
+          "time",
+          "progress"
+        ]
+      },
+      {
+        "variantId": "core.speak.standing.front",
+        "actionId": "core.speak",
+        "poseId": "standing",
+        "view": "front",
+        "channel": "speech",
+        "clockModes": [
+          "time"
+        ]
+      },
+      {
+        "variantId": "core.speak.standing.left",
+        "actionId": "core.speak",
+        "poseId": "standing",
+        "view": "left",
+        "channel": "speech",
+        "clockModes": [
+          "time"
+        ]
+      },
+      {
+        "variantId": "core.speak.seated.left",
+        "actionId": "core.speak",
+        "poseId": "seated",
+        "view": "left",
+        "channel": "speech",
+        "clockModes": [
+          "time"
+        ]
+      },
+      {
+        "variantId": "core.speak.standing.right",
+        "actionId": "core.speak",
+        "poseId": "standing",
+        "view": "right",
+        "channel": "speech",
+        "clockModes": [
+          "time"
+        ]
+      },
+      {
+        "variantId": "core.speak.seated.right",
+        "actionId": "core.speak",
+        "poseId": "seated",
+        "view": "right",
+        "channel": "speech",
+        "clockModes": [
+          "time"
+        ]
+      }
+    ],
+    "combinations": [
+      [
+        "core.idle.standing.front"
+      ],
+      [
+        "core.walk.standing.front"
+      ],
+      [
+        "core.idle.standing.back"
+      ],
+      [
+        "core.walk.standing.back"
+      ],
+      [
+        "core.idle.seated.back"
+      ],
+      [
+        "core.idle.standing.left"
+      ],
+      [
+        "core.walk.standing.left"
+      ],
+      [
+        "core.idle.seated.left"
+      ],
+      [
+        "core.idle.standing.right"
+      ],
+      [
+        "core.walk.standing.right"
+      ],
+      [
+        "core.idle.seated.right"
+      ],
+      [
+        "core.sit-down.transition.back"
+      ],
+      [
+        "core.stand-up.transition.back"
+      ],
+      [
+        "office.type.seated.back"
+      ],
+      [
+        "core.emote.wave.standing.front"
+      ],
+      [
+        "core.emote.thinking.standing.front"
+      ],
+      [
+        "core.emote.surprised.standing.front"
+      ],
+      [
+        "core.idle.standing.front",
+        "core.speak.standing.front"
+      ],
+      [
+        "core.idle.standing.left",
+        "core.speak.standing.left"
+      ],
+      [
+        "core.idle.seated.left",
+        "core.speak.seated.left"
+      ],
+      [
+        "core.idle.standing.right",
+        "core.speak.standing.right"
+      ],
+      [
+        "core.idle.seated.right",
+        "core.speak.seated.right"
+      ]
+    ],
+    "contactProfiles": [
+      "office-desk-v1"
+    ],
+    "sockets": [
+      {
+        "id": "root.ground",
+        "policy": "stable"
+      },
+      {
+        "id": "ui.label",
+        "policy": "stable"
+      }
+    ]
+  },
+  "source": {
+    "format": "pixoffice-frame-v1",
+    "uri": "../code-agent/manifest-abce309793416a3f.json",
+    "bindings": {
+      "core.idle.standing.front": {
+        "clip": "idle.front",
+        "mouthLayer": false
+      },
+      "core.walk.standing.front": {
+        "clip": "walk.front",
+        "mouthLayer": false
+      },
+      "core.idle.standing.back": {
+        "clip": "idle.back",
+        "mouthLayer": false
+      },
+      "core.walk.standing.back": {
+        "clip": "walk.back",
+        "mouthLayer": false
+      },
+      "core.idle.seated.back": {
+        "clip": "sit.back",
+        "mouthLayer": false
+      },
+      "core.idle.standing.left": {
+        "clip": "idle.left",
+        "mouthLayer": false
+      },
+      "core.walk.standing.left": {
+        "clip": "walk.left",
+        "mouthLayer": false
+      },
+      "core.idle.seated.left": {
+        "clip": "talk.seated-left",
+        "mouthLayer": false
+      },
+      "core.idle.standing.right": {
+        "clip": "idle.right",
+        "mouthLayer": false
+      },
+      "core.walk.standing.right": {
+        "clip": "walk.right",
+        "mouthLayer": false
+      },
+      "core.idle.seated.right": {
+        "clip": "talk.seated-right",
+        "mouthLayer": false
+      },
+      "core.sit-down.transition.back": {
+        "clip": "sit-down.back",
+        "mouthLayer": false
+      },
+      "core.stand-up.transition.back": {
+        "clip": "stand-up.back",
+        "mouthLayer": false
+      },
+      "office.type.seated.back": {
+        "clip": "work.quiet-back",
+        "mouthLayer": false
+      },
+      "core.emote.wave.standing.front": {
+        "clip": "emote.wave",
+        "mouthLayer": false
+      },
+      "core.emote.thinking.standing.front": {
+        "clip": "emote.thinking",
+        "mouthLayer": false
+      },
+      "core.emote.surprised.standing.front": {
+        "clip": "emote.surprised",
+        "mouthLayer": false
+      },
+      "core.speak.standing.front": {
+        "clip": "mouth.front-speaking",
+        "mouthLayer": true
+      },
+      "core.speak.standing.left": {
+        "clip": "mouth.right-speaking",
+        "mouthLayer": true
+      },
+      "core.speak.seated.left": {
+        "clip": "mouth.right-speaking",
+        "mouthLayer": true
+      },
+      "core.speak.standing.right": {
+        "clip": "mouth.right-speaking",
+        "mouthLayer": true
+      },
+      "core.speak.seated.right": {
+        "clip": "mouth.right-speaking",
+        "mouthLayer": true
+      }
+    }
+  }
+}

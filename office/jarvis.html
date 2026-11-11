@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/jarvis-office/brand/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="jarvis 官方 UI：PixOffice 场景 + 本公司实时数据面板（数据源 /api/luke-jarvis/company）" />
+    <title>jarvis 办公室 · PixOffice（本公司数据）</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #0b0f14; color: #e6edf3;
+        font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans CJK SC", sans-serif; }
+      #app { display: flex; height: 100vh; min-height: 640px; }
+      /* 左侧：本公司实时数据面板（机械可验证层；数据来自 /api/luke-jarvis/company） */
+      #jarvis-panel { width: 380px; flex: 0 0 380px; padding: 14px 16px; overflow: auto;
+        border-right: 1px solid #1f2937; background: #0d1117; }
+      #jarvis-panel h1 { font-size: 16px; margin: 0 0 4px; }
+      #jarvis-panel .sub { font-size: 12px; color: #8b949e; margin-bottom: 12px; }
+      .phase { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: #161b22;
+        border: 1px solid #21262d; margin-bottom: 12px; word-break: break-all; }
+      .sec-title { font-size: 12px; color: #8b949e; margin: 14px 0 6px; letter-spacing: .04em; }
+      .emp { display: flex; gap: 8px; align-items: baseline; padding: 7px 9px; border-radius: 8px;
+        background: #11161d; border: 1px solid #1d2530; margin-bottom: 6px; }
+      .emp .role { font-weight: 600; font-size: 13px; }
+      .emp .persona { color: #9aa4b2; font-size: 12px; }
+      .emp .st { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #1f2937; color: #c9d1d9; }
+      .task { display: flex; gap: 8px; font-size: 12px; padding: 6px 9px; border-radius: 8px;
+        background: #11161d; border: 1px solid #1d2530; margin-bottom: 5px; }
+      .task .id { color: #79c0ff; font-variant-numeric: tabular-nums; }
+      .task .ttl { flex: 1; color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .task .ts { font-size: 11px; color: #8b949e; }
+      .empty { color: #f85149; font-size: 12px; }
+      /* 右侧：PixOffice 场景层（上游 demo 渲染；明确标注数据来源边界） */
+      #scene-wrap { position: relative; flex: 1 1 auto; min-width: 0; background: #05070a; }
+      #scene { width: 100%; height: 100%; border: 0; display: block; }
+      #scene-note { position: absolute; left: 10px; bottom: 10px; font-size: 11px; color: #c9d1d9;
+        background: rgba(13,17,23,.82); border: 1px solid #21262d; padding: 6px 9px; border-radius: 8px; max-width: 70%; }
+      .warn { color: #d29922; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="jarvis-panel" data-testid="jarvis-panel">
+        <h1>jarvis 办公室</h1>
+        <div class="sub">数据源 <code>/api/luke-jarvis/company</code> · 本页实时轮询</div>
+        <div class="phase" id="jarvis-phase" data-testid="jarvis-phase">阶段加载中…</div>
+        <div class="sec-title">员工（<span id="jarvis-emp-count">0</span>）</div>
+        <div id="jarvis-employees" data-testid="jarvis-employees"></div>
+        <div class="sec-title">任务（<span id="jarvis-task-count">0</span>）</div>
+        <div id="jarvis-tasks" data-testid="jarvis-tasks"></div>
+        <div class="sec-title">会议 / 招募</div>
+        <div id="jarvis-extra" data-testid="jarvis-extras"></div>
+      </aside>
+      <div id="scene-wrap">
+        <iframe id="scene" title="PixOffice 场景（relay 接本公司数据）" src="/jarvis-office/jarvis-scene.html" data-relayUrl="/api/pixoffice"></iframe>
+        <div id="scene-note">场景层 = 上游 PixOffice 渲染，经 relay（relayUrl=/api/pixoffice，SSE 快照）接本公司数据；
+          左侧面板为同源直读（DOM 可机械校验，见 <code>window.__JARVIS_UI__</code>）；场景是否真绑上需重启后目视确认（见 README 边界）。</div>
+      </div>
+    </div>
+    <script type="module" src="/jarvis-office/jarvis-adapter.js"></script>
+  </body>
+</html>

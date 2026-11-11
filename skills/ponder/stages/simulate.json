@@ -1,0 +1,87 @@
+{
+  "name": "simulate",
+  "label": "推演",
+  "stepGoal": "对每个幸存方案做多场景模拟推演，发现隐藏风险和关键瓶颈",
+  "engine_ref": [
+    "engine/mcts-simulate.md"
+  ],
+  "prompt": "⛔ 无论赌注高低必做，不受可逆小事门控影响。必须等方案评分后，对每个幸存方案起一个 agent(mcts-simulator)。\n\n推演规则:\n1. 读方案评分产出的 scored_survivors 列表（含各维度单项分和总分），每个方案起一个 agent 做独立模拟\n2. 每个方案穷举场景直到无新的有意义演变路径。起步至少跑乐观/现实/悲观三种，之后持续变换条件——灰犀牛、黑天鹅、对手反击、政策突变——直到\"再变也差不多\"才停。不是凑3种交差\n3. 推演时参考方案评分的各维度分数——高分维度验证假设是否站得住，低分维度作为风险场景入口\n4. 全部 agent 返回后，汇总为推演结果表格\n\n输出要求:\n- 必须展示推演结果表格（方案名/场景/综合评分/主要风险/关键瓶颈）\n- 💡 关键发现单独写一段，不塞在表格里\n- 禁止输出 JSON、文件路径、Bash 命令\n- 禁止出现框架内部术语（V/σ²/UCB 等）\n\n方案评分结果（各维度单项分+总分）: {{scored_survivors}}\n原始幸存方案列表: {{survivors}}\n用户画像: {{userProfile}}",
+  "args": [
+    "scored_survivors",
+    "survivors",
+    "userProfile"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "simulations": {
+        "type": "array",
+        "description": "每个方案的推演结果",
+        "minItems": 3,
+        "items": {
+          "type": "object",
+          "properties": {
+            "solution_name": {
+              "type": "string",
+              "description": "方案名称"
+            },
+            "scenarios": {
+              "type": "array",
+              "description": "穷举场景直到无新的有意义演变路径，不是固定3种交差",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "scenario": {
+                    "type": "string",
+                    "description": "场景名: optimistic/realistic/pessimistic"
+                  },
+                  "score": {
+                    "type": "number",
+                    "description": "该场景下的综合评分 0-1"
+                  },
+                  "key_finding": {
+                    "type": "string",
+                    "description": "该场景下的关键发现"
+                  },
+                  "risks": {
+                    "type": "string",
+                    "description": "该场景暴露的主要风险"
+                  },
+                  "bottleneck": {
+                    "type": "string",
+                    "description": "该场景下的关键瓶颈/最脆弱前提"
+                  }
+                },
+                "required": [
+                  "scenario",
+                  "score",
+                  "key_finding"
+                ]
+              }
+            }
+          },
+          "required": [
+            "solution_name",
+            "scenarios"
+          ]
+        }
+      },
+      "key_insights": {
+        "type": "string",
+        "description": "💡 跨所有方案的总体关键发现"
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      }
+    },
+    "required": [
+      "simulations",
+      "key_insights",
+      "certainty"
+    ]
+  }
+}

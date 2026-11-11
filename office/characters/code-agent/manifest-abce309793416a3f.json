@@ -1,0 +1,1217 @@
+{
+  "schemaVersion": 1,
+  "id": "code-agent",
+  "label": "李研",
+  "profile": "office",
+  "canvas": {
+    "width": 256,
+    "height": 384
+  },
+  "pivot": {
+    "x": 128,
+    "y": 344
+  },
+  "referenceHeight": 280,
+  "displayHeight": 84,
+  "portrait": "idle.front",
+  "mouth": {
+    "pivot": {
+      "x": 128,
+      "y": 192
+    },
+    "views": {
+      "front": {
+        "closed": "mouth.front-closed",
+        "speaking": "mouth.front-speaking"
+      },
+      "right": {
+        "closed": "mouth.right-closed",
+        "speaking": "mouth.right-speaking"
+      }
+    }
+  },
+  "work": {
+    "shoulders": {
+      "left": {
+        "x": 92.552,
+        "y": 276.841
+      },
+      "right": {
+        "x": 160.853,
+        "y": 276.841
+      }
+    },
+    "upper": {
+      "clip": "part.work-upper",
+      "root": {
+        "x": 128.25,
+        "y": 159.6
+      },
+      "tip": {
+        "x": 123.5,
+        "y": 189.51999999999998
+      }
+    },
+    "forearm": {
+      "clip": "part.work-forearm",
+      "root": {
+        "x": 128.34,
+        "y": 159.92
+      },
+      "tip": {
+        "x": 128.34,
+        "y": 210.07999999999998
+      }
+    },
+    "hand": {
+      "clip": "part.work-hand",
+      "root": {
+        "x": 127.8,
+        "y": 160.5
+      },
+      "tip": {
+        "x": 127.8,
+        "y": 179.5
+      }
+    },
+    "previewSurface": {
+      "keyboardLeft": {
+        "x": 100.46376811594203,
+        "y": 212.3485990338164
+      },
+      "keyboardRight": {
+        "x": 144.52173913043478,
+        "y": 212.3485990338164
+      },
+      "mouse": {
+        "x": 178.29951690821255,
+        "y": 210.69642512077294
+      },
+      "bounds": {
+        "left": -9.681159420289845,
+        "right": 263.8454106280193,
+        "back": 167.18917874396135,
+        "front": 232.72541062801932
+      }
+    }
+  },
+  "revision": "abce309793416a3f",
+  "pages": [
+    {
+      "width": 453,
+      "height": 539,
+      "image": "atlas-0-55ae466e92f09bd3.webp",
+      "group": "startup"
+    },
+    {
+      "width": 1151,
+      "height": 1379,
+      "image": "atlas-1-a8afd11c687c45b3.webp",
+      "group": "deferred"
+    }
+  ],
+  "frames": {
+    "work/quiet-back-v4/001.png": {
+      "page": 0,
+      "rect": {
+        "width": 147,
+        "height": 270,
+        "x": 2,
+        "y": 2
+      },
+      "offset": {
+        "x": 55,
+        "y": 109
+      }
+    },
+    "work/quiet-back-v4/003.png": {
+      "page": 0,
+      "rect": {
+        "width": 147,
+        "height": 270,
+        "x": 153,
+        "y": 2
+      },
+      "offset": {
+        "x": 55,
+        "y": 109
+      }
+    },
+    "work/quiet-back-v4/002.png": {
+      "page": 0,
+      "rect": {
+        "width": 158,
+        "height": 261,
+        "x": 2,
+        "y": 276
+      },
+      "offset": {
+        "x": 44,
+        "y": 119
+      }
+    },
+    "work/quiet-back-v4/004.png": {
+      "page": 0,
+      "rect": {
+        "width": 147,
+        "height": 261,
+        "x": 164,
+        "y": 276
+      },
+      "offset": {
+        "x": 55,
+        "y": 119
+      }
+    },
+    "standard-v2/sit/back/001.png": {
+      "page": 0,
+      "rect": {
+        "width": 140,
+        "height": 257,
+        "x": 304,
+        "y": 2
+      },
+      "offset": {
+        "x": 59,
+        "y": 122
+      }
+    },
+    "standard-v2/walk/front/003.png": {
+      "page": 1,
+      "rect": {
+        "width": 158,
+        "height": 287,
+        "x": 2,
+        "y": 2
+      },
+      "offset": {
+        "x": 49,
+        "y": 59
+      }
+    },
+    "standard-v2/walk/front/004.png": {
+      "page": 1,
+      "rect": {
+        "width": 157,
+        "height": 287,
+        "x": 164,
+        "y": 2
+      },
+      "offset": {
+        "x": 50,
+        "y": 59
+      }
+    },
+    "standard-v2/walk/front/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 157,
+        "height": 286,
+        "x": 2,
+        "y": 293
+      },
+      "offset": {
+        "x": 50,
+        "y": 60
+      }
+    },
+    "standard-v2/walk/front/002.png": {
+      "page": 1,
+      "rect": {
+        "width": 158,
+        "height": 286,
+        "x": 163,
+        "y": 293
+      },
+      "offset": {
+        "x": 49,
+        "y": 60
+      }
+    },
+    "body/idle/front/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 158,
+        "height": 280,
+        "x": 325,
+        "y": 2
+      },
+      "offset": {
+        "x": 49,
+        "y": 64
+      }
+    },
+    "body/idle/right/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 174,
+        "height": 280,
+        "x": 487,
+        "y": 2
+      },
+      "offset": {
+        "x": 41,
+        "y": 64
+      }
+    },
+    "body/walk/right/003.png": {
+      "page": 1,
+      "rect": {
+        "width": 174,
+        "height": 280,
+        "x": 325,
+        "y": 286
+      },
+      "offset": {
+        "x": 41,
+        "y": 64
+      }
+    },
+    "emote/surprised/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 154,
+        "height": 280,
+        "x": 503,
+        "y": 286
+      },
+      "offset": {
+        "x": 51,
+        "y": 64
+      }
+    },
+    "emote/thinking/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 155,
+        "height": 280,
+        "x": 2,
+        "y": 583
+      },
+      "offset": {
+        "x": 51,
+        "y": 64
+      }
+    },
+    "emote/wave/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 162,
+        "height": 280,
+        "x": 161,
+        "y": 583
+      },
+      "offset": {
+        "x": 47,
+        "y": 64
+      }
+    },
+    "idle/back/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 145,
+        "height": 280,
+        "x": 327,
+        "y": 570
+      },
+      "offset": {
+        "x": 56,
+        "y": 64
+      }
+    },
+    "run/back/004.png": {
+      "page": 1,
+      "rect": {
+        "width": 160,
+        "height": 280,
+        "x": 476,
+        "y": 570
+      },
+      "offset": {
+        "x": 48,
+        "y": 64
+      }
+    },
+    "run/back/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 159,
+        "height": 279,
+        "x": 665,
+        "y": 2
+      },
+      "offset": {
+        "x": 49,
+        "y": 65
+      }
+    },
+    "run/back/002.png": {
+      "page": 1,
+      "rect": {
+        "width": 159,
+        "height": 279,
+        "x": 665,
+        "y": 285
+      },
+      "offset": {
+        "x": 49,
+        "y": 65
+      }
+    },
+    "run/back/003.png": {
+      "page": 1,
+      "rect": {
+        "width": 160,
+        "height": 279,
+        "x": 661,
+        "y": 568
+      },
+      "offset": {
+        "x": 48,
+        "y": 65
+      }
+    },
+    "body/walk/right/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 175,
+        "height": 278,
+        "x": 828,
+        "y": 2
+      },
+      "offset": {
+        "x": 40,
+        "y": 66
+      }
+    },
+    "body/walk/right/002.png": {
+      "page": 1,
+      "rect": {
+        "width": 173,
+        "height": 278,
+        "x": 828,
+        "y": 284
+      },
+      "offset": {
+        "x": 42,
+        "y": 66
+      }
+    },
+    "standard-v2/walk/back/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 145,
+        "height": 269,
+        "x": 825,
+        "y": 568
+      },
+      "offset": {
+        "x": 56,
+        "y": 77
+      }
+    },
+    "standard-v2/walk/back/003.png": {
+      "page": 1,
+      "rect": {
+        "width": 146,
+        "height": 267,
+        "x": 2,
+        "y": 867
+      },
+      "offset": {
+        "x": 56,
+        "y": 79
+      }
+    },
+    "standard-v2/walk/back/002.png": {
+      "page": 1,
+      "rect": {
+        "width": 146,
+        "height": 266,
+        "x": 152,
+        "y": 867
+      },
+      "offset": {
+        "x": 55,
+        "y": 80
+      }
+    },
+    "standard-v2/walk/back/004.png": {
+      "page": 1,
+      "rect": {
+        "width": 146,
+        "height": 265,
+        "x": 302,
+        "y": 867
+      },
+      "offset": {
+        "x": 56,
+        "y": 81
+      }
+    },
+    "work/computer-v1/body.png": {
+      "page": 1,
+      "rect": {
+        "width": 139,
+        "height": 252,
+        "x": 452,
+        "y": 854
+      },
+      "offset": {
+        "x": 59,
+        "y": 126
+      }
+    },
+    "standard-v2/pose/rise/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 145,
+        "height": 251,
+        "x": 595,
+        "y": 854
+      },
+      "offset": {
+        "x": 56,
+        "y": 106
+      }
+    },
+    "standard-v2/talk/seated-right/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 165,
+        "height": 244,
+        "x": 825,
+        "y": 841
+      },
+      "offset": {
+        "x": 47,
+        "y": 135
+      }
+    },
+    "work/typing-back-v2/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 142,
+        "height": 240,
+        "x": 1007,
+        "y": 2
+      },
+      "offset": {
+        "x": 58,
+        "y": 140
+      }
+    },
+    "work/typing-back-v2/002.png": {
+      "page": 1,
+      "rect": {
+        "width": 142,
+        "height": 240,
+        "x": 1007,
+        "y": 246
+      },
+      "offset": {
+        "x": 58,
+        "y": 140
+      }
+    },
+    "work/typing-back-v2/003.png": {
+      "page": 1,
+      "rect": {
+        "width": 142,
+        "height": 240,
+        "x": 1005,
+        "y": 490
+      },
+      "offset": {
+        "x": 58,
+        "y": 140
+      }
+    },
+    "work/typing-back-v2/004.png": {
+      "page": 1,
+      "rect": {
+        "width": 143,
+        "height": 240,
+        "x": 994,
+        "y": 734
+      },
+      "offset": {
+        "x": 57,
+        "y": 140
+      }
+    },
+    "standard-v2/pose/lean/001.png": {
+      "page": 1,
+      "rect": {
+        "width": 140,
+        "height": 239,
+        "x": 2,
+        "y": 1138
+      },
+      "offset": {
+        "x": 59,
+        "y": 133
+      }
+    },
+    "work/computer-v1/forearm.png": {
+      "page": 1,
+      "rect": {
+        "width": 34,
+        "height": 66,
+        "x": 744,
+        "y": 851
+      },
+      "offset": {
+        "x": 111,
+        "y": 152
+      }
+    },
+    "work/computer-v1/upper.png": {
+      "page": 1,
+      "rect": {
+        "width": 25,
+        "height": 44,
+        "x": 974,
+        "y": 566
+      },
+      "offset": {
+        "x": 112,
+        "y": 153
+      }
+    },
+    "work/computer-v1/hand.png": {
+      "page": 1,
+      "rect": {
+        "width": 20,
+        "height": 25,
+        "x": 974,
+        "y": 614
+      },
+      "offset": {
+        "x": 116,
+        "y": 158
+      }
+    },
+    "mouth/front/open-3.png": {
+      "page": 1,
+      "rect": {
+        "width": 16,
+        "height": 9,
+        "x": 327,
+        "y": 854
+      },
+      "offset": {
+        "x": 120,
+        "y": 188
+      }
+    },
+    "mouth/front/closed.png": {
+      "page": 1,
+      "rect": {
+        "width": 14,
+        "height": 4,
+        "x": 974,
+        "y": 643
+      },
+      "offset": {
+        "x": 120,
+        "y": 190
+      }
+    },
+    "mouth/front/open-2.png": {
+      "page": 1,
+      "rect": {
+        "width": 14,
+        "height": 8,
+        "x": 347,
+        "y": 854
+      },
+      "offset": {
+        "x": 121,
+        "y": 188
+      }
+    },
+    "mouth/front/open-1.png": {
+      "page": 1,
+      "rect": {
+        "width": 12,
+        "height": 5,
+        "x": 974,
+        "y": 651
+      },
+      "offset": {
+        "x": 122,
+        "y": 190
+      }
+    },
+    "mouth/right/open-3.png": {
+      "page": 1,
+      "rect": {
+        "width": 8,
+        "height": 7,
+        "x": 1141,
+        "y": 734
+      },
+      "offset": {
+        "x": 124,
+        "y": 189
+      }
+    },
+    "mouth/right/open-2.png": {
+      "page": 1,
+      "rect": {
+        "width": 7,
+        "height": 5,
+        "x": 1141,
+        "y": 745
+      },
+      "offset": {
+        "x": 125,
+        "y": 190
+      }
+    },
+    "mouth/right/closed.png": {
+      "page": 1,
+      "rect": {
+        "width": 6,
+        "height": 4,
+        "x": 1141,
+        "y": 754
+      },
+      "offset": {
+        "x": 125,
+        "y": 190
+      }
+    },
+    "mouth/right/open-1.png": {
+      "page": 1,
+      "rect": {
+        "width": 5,
+        "height": 4,
+        "x": 1141,
+        "y": 762
+      },
+      "offset": {
+        "x": 126,
+        "y": 190
+      }
+    }
+  },
+  "clips": {
+    "idle.front": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "mouth": {
+            "x": 120,
+            "y": 190,
+            "view": "front",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "body/idle/front/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "walk.front": {
+      "frames": [
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 128.2124542124542,
+            "y": 188.00806451612905,
+            "view": "front",
+            "scale": 0.9999999999999999,
+            "rotation": 0
+          },
+          "frame": "standard-v2/walk/front/001.png"
+        },
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 128,
+            "y": 188.00806451612905,
+            "view": "front",
+            "scale": 0.9999999999999999,
+            "rotation": 0
+          },
+          "frame": "standard-v2/walk/front/002.png"
+        },
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 127.71062271062272,
+            "y": 187.4556451612903,
+            "view": "front",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "standard-v2/walk/front/003.png"
+        },
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 128.21139705882354,
+            "y": 187.4556451612903,
+            "view": "front",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "standard-v2/walk/front/004.png"
+        }
+      ],
+      "loop": true
+    },
+    "idle.right": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "mouth": {
+            "x": 184,
+            "y": 184,
+            "view": "right",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "body/idle/right/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "walk.right": {
+      "frames": [
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 184,
+            "y": 185,
+            "view": "right",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "body/walk/right/001.png"
+        },
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 184,
+            "y": 184,
+            "view": "right",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "body/walk/right/002.png"
+        },
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 183,
+            "y": 185,
+            "view": "right",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "body/walk/right/003.png"
+        },
+        {
+          "durationMs": 200,
+          "mouth": {
+            "x": 184,
+            "y": 184,
+            "view": "right",
+            "scale": 1,
+            "rotation": 0
+          },
+          "frame": "body/walk/right/002.png"
+        }
+      ],
+      "loop": true
+    },
+    "idle.back": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "idle/back/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "idle.left": {
+      "alias": "idle.right",
+      "mirrorX": true
+    },
+    "walk.left": {
+      "alias": "walk.right",
+      "mirrorX": true
+    },
+    "walk.back": {
+      "frames": [
+        {
+          "durationMs": 200,
+          "frame": "standard-v2/walk/back/001.png"
+        },
+        {
+          "durationMs": 200,
+          "frame": "standard-v2/walk/back/002.png"
+        },
+        {
+          "durationMs": 200,
+          "frame": "standard-v2/walk/back/003.png"
+        },
+        {
+          "durationMs": 200,
+          "frame": "standard-v2/walk/back/004.png"
+        }
+      ],
+      "loop": true
+    },
+    "run.back": {
+      "frames": [
+        {
+          "durationMs": 200,
+          "frame": "run/back/001.png"
+        },
+        {
+          "durationMs": 200,
+          "frame": "run/back/002.png"
+        },
+        {
+          "durationMs": 200,
+          "frame": "run/back/003.png"
+        },
+        {
+          "durationMs": 200,
+          "frame": "run/back/004.png"
+        }
+      ],
+      "loop": true
+    },
+    "emote.wave": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "emote/wave/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "emote.thinking": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "emote/thinking/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "emote.surprised": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "emote/surprised/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "sit.back": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "standard-v2/sit/back/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "talk.seated-right": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "mouth": {
+            "x": 182.63855421686745,
+            "y": 243.34016393442624,
+            "view": "right",
+            "scale": 0.85995188810865,
+            "rotation": 0
+          },
+          "frame": "standard-v2/talk/seated-right/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "talk.seated-left": {
+      "alias": "talk.seated-right",
+      "mirrorX": true
+    },
+    "pose.lean": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "standard-v2/pose/lean/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "pose.rise": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "standard-v2/pose/rise/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "stand-up.back": {
+      "frames": [
+        {
+          "durationMs": 52,
+          "frame": "standard-v2/sit/back/001.png"
+        },
+        {
+          "durationMs": 182,
+          "frame": "standard-v2/pose/lean/001.png"
+        },
+        {
+          "durationMs": 224,
+          "frame": "standard-v2/pose/rise/001.png"
+        },
+        {
+          "durationMs": 62,
+          "frame": "idle/back/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "sit-down.back": {
+      "frames": [
+        {
+          "durationMs": 62,
+          "frame": "idle/back/001.png"
+        },
+        {
+          "durationMs": 224,
+          "frame": "standard-v2/pose/rise/001.png"
+        },
+        {
+          "durationMs": 182,
+          "frame": "standard-v2/pose/lean/001.png"
+        },
+        {
+          "durationMs": 52,
+          "frame": "standard-v2/sit/back/001.png"
+        }
+      ],
+      "loop": false
+    },
+    "speak.front": {
+      "alias": "idle.front",
+      "mirrorX": false
+    },
+    "speak.right": {
+      "alias": "idle.right",
+      "mirrorX": false
+    },
+    "speak.seated-right": {
+      "alias": "talk.seated-right",
+      "mirrorX": false
+    },
+    "speak.left": {
+      "alias": "idle.left",
+      "mirrorX": false
+    },
+    "speak.seated-left": {
+      "alias": "talk.seated-left",
+      "mirrorX": false
+    },
+    "mouth.front-closed": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "mouth/front/closed.png"
+        }
+      ],
+      "loop": false
+    },
+    "mouth.front-speaking": {
+      "frames": [
+        {
+          "durationMs": 110,
+          "frame": "mouth/front/open-1.png"
+        },
+        {
+          "durationMs": 100,
+          "frame": "mouth/front/open-2.png"
+        },
+        {
+          "durationMs": 100,
+          "frame": "mouth/front/closed.png"
+        },
+        {
+          "durationMs": 120,
+          "frame": "mouth/front/open-3.png"
+        },
+        {
+          "durationMs": 90,
+          "frame": "mouth/front/open-2.png"
+        },
+        {
+          "durationMs": 210,
+          "frame": "mouth/front/closed.png"
+        }
+      ],
+      "loop": true
+    },
+    "mouth.right-closed": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "mouth/right/closed.png"
+        }
+      ],
+      "loop": false
+    },
+    "mouth.right-speaking": {
+      "frames": [
+        {
+          "durationMs": 110,
+          "frame": "mouth/right/open-1.png"
+        },
+        {
+          "durationMs": 100,
+          "frame": "mouth/right/open-2.png"
+        },
+        {
+          "durationMs": 100,
+          "frame": "mouth/right/closed.png"
+        },
+        {
+          "durationMs": 120,
+          "frame": "mouth/right/open-3.png"
+        },
+        {
+          "durationMs": 90,
+          "frame": "mouth/right/open-2.png"
+        },
+        {
+          "durationMs": 210,
+          "frame": "mouth/right/closed.png"
+        }
+      ],
+      "loop": true
+    },
+    "work.typing-back": {
+      "frames": [
+        {
+          "durationMs": 210,
+          "frame": "work/typing-back-v2/001.png"
+        },
+        {
+          "durationMs": 110,
+          "frame": "work/typing-back-v2/002.png"
+        },
+        {
+          "durationMs": 210,
+          "frame": "work/typing-back-v2/003.png"
+        },
+        {
+          "durationMs": 110,
+          "frame": "work/typing-back-v2/004.png"
+        }
+      ],
+      "loop": true
+    },
+    "work.computer-back": {
+      "frames": [
+        {
+          "durationMs": 12000,
+          "frame": "work/computer-v1/body.png"
+        }
+      ],
+      "loop": true
+    },
+    "part.work-upper": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "work/computer-v1/upper.png"
+        }
+      ],
+      "loop": false
+    },
+    "part.work-forearm": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "work/computer-v1/forearm.png"
+        }
+      ],
+      "loop": false
+    },
+    "part.work-hand": {
+      "frames": [
+        {
+          "durationMs": 1000,
+          "frame": "work/computer-v1/hand.png"
+        }
+      ],
+      "loop": false
+    },
+    "work.quiet-back": {
+      "frames": [
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/001.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/002.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/003.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/004.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/001.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/002.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/003.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/004.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/001.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/002.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/003.png"
+        },
+        {
+          "durationMs": 250,
+          "frame": "work/quiet-back-v4/004.png"
+        },
+        {
+          "durationMs": 1000,
+          "frame": "work/quiet-back-v4/001.png"
+        }
+      ],
+      "loop": true
+    }
+  }
+}

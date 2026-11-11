@@ -1,0 +1,1 @@
+import"./FrameAdapter-DBGZw1W2.js";

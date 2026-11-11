@@ -1,0 +1,74 @@
+{
+  "name": "converge",
+  "label": "收敛",
+  "stepGoal": "淘汰弱方案，保留3-5个最优",
+  "engine_ref": [
+    "engine/converge.md",
+    "engine/mcts-converge.md",
+    "engine/working-stance.md"
+  ],
+  "tool_ref": [],
+  "prompt": "对所有方案进行对比淘汰。淘汰顺序: 边界违规→不可行→风险不可控→被其他方案全面压制。保留所有有本质差异的幸存者。不设上限——如果5个方案各代表不同方向且都有道理，全保留。⛔下限3个（少于3说明上游发散不够，应回到方案步骤补充而非硬凑）。⛔淘汰标准要严格——\"风险较高\"≠\"风险不可控\"，\"成本较高\"≠\"不可行\"，\"不如A方案\"≠\"被全面压制\"（只有当B方案在所有维度都不如A时才算被全面压制）。只有真正触碰硬约束（边界违规/绝对不可行/风险超出承受能力/被全面压制）的方案才淘汰，有缺点但仍有独特价值的方案必须保留。收敛后给每个幸存方案评分(0-1),每个方案附保留理由。自检和盲点审计见 engine/mcts-converge.md。多样性自检：幸存方案是否各代表本质不同的方向（若多个方案只是同一思路的参数微调，说明多样性不足，应回到方案步骤补充真正不同方向的方案）——由你自行判断，不依赖外部脚本。\n\n**工作立场(门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏))**: 收敛是框架第一次下场选择而非罗列——在幸存方案里明确表态此刻倾向哪个,凭什么倾向它(引用本步及之前步骤的具体产出),以及出现什么新证据会改倾向。⛔有倾向是硬约束:一旦填就不许骑墙(不许\"各有优劣\"——骑墙=没立场=等同没填,不如留空)。方法见 engine/working-stance.md。内部自检元认知(不展示标签):本步对淘汰判断的置信度有多高?依据是什么?若置信高但依据弱(仅凭直觉/缺乏具体产出引用)→危险的元认知偏差,应降低置信度并标注依据薄弱点。内部自检坐忘:若连续淘汰方案的理由高度相似(如均因\"风险不可控\"淘汰多个)→考虑完全放弃当前策略方向从零重判,而非在同一逻辑下继续淘汰(坐忘——最好的判断有时是承认需要重新开始)。",
+  "args": [
+    "plans",
+    "stake"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "survivors": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "score": {
+              "type": "number",
+              "description": "0-1"
+            },
+            "reason": {
+              "type": "string",
+              "description": "保留理由"
+            }
+          },
+          "required": [
+            "name",
+            "score",
+            "reason"
+          ]
+        },
+        "minItems": 3
+      },
+      "working_stance": {
+        "type": "object",
+        "description": "框架此刻的工作立场（高赌注问题必填；可逆小事留空对象）",
+        "properties": {
+          "current_lean": {
+            "type": "string",
+            "description": "框架此刻倾向的方向/方案（一句话，不许\"各有优劣\"骑墙，骑墙等同没填不如留空）"
+          },
+          "grounds": {
+            "type": "string",
+            "description": "凭什么倾向它——引用本步及之前步骤的具体产出（哪个发现支撑了倾向），不接受\"综合考虑\"无来源话"
+          },
+          "would_change_mind": {
+            "type": "string",
+            "description": "出现什么新证据框架会改倾向（可被质疑的锚点，喂给综合fallibilism）"
+          }
+        }
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      }
+    },
+    "required": [
+      "survivors",
+      "certainty"
+    ]
+  }
+}

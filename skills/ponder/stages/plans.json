@@ -1,0 +1,80 @@
+{
+  "name": "plans",
+  "label": "方案",
+  "stepGoal": "根据问题复杂度生成5-10个可选方案",
+  "prompt": "穷举方案方向直到无本质不同的新方向。简单问题5-6个够，复杂问题持续生成直到新方案与前案有本质差异而非微调。⛔不是凑数——如果生到第7个发现跟第3个同质，说明该停了,每个:名称+依据+条件。简单问题5-6个,复杂问题8-10个。方案之间要有本质差异,不能只是微调。方案的可行性假设必须标注（不能把未经证实的假设当事实）。\n\n**起方案agent前,读神思stake(门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏)):level=high先做终态画像,level=low跳过end_state_vision留空**: ⛔优先读取画像中的end_state_vision（需求打磨阶段已建立的终态初稿），在此基础上深化——补充反向链拆解（要达成终态X需前置Y,要Y需Z,每环扣紧前置条件不跳步,不接受\"要成功需努力\"伪前置），直到今天能执行的第一步。若画像中无end_state_vision（旧数据兜底），则从零生成终态画像：先描述\"这件事成了\"的具体样子(⛔终态必须可判定,能说清什么样子算成了,像验收标准;❌不接受\"成为更好的X\"这类空话),再反向链拆解。然后把终态画像注入每个方案agent——方案不是\"现有约束下能做什么\",而是\"从今天第一步到终态的路径上的一个走法\",每个方案要回答它如何朝终态收敛。终态画像方法见 engine/teleology.md。\n\n每个方案做辩证运动(正题→反题→合题),门控:读神思stake字段{{stake}}。level=high触发,level=low跳过留空,无stake字段(旧数据)默认按high(宁多不漏):level=low(取名/调参)跳过辩证,antithesis/synthesis填\"无需(可逆小事)\";level=high/复杂问题(投资/方向/不可逆)必须做——生成方案(正题)后,写出它具体在什么条件下失效(反题,⛔必须写\"当X时该方案不成立\",不接受\"成本较高/需注意边界\"这类软否定),再写吸收反题后如何修正方案或划清边界(合题)。反题只谈本方案自身失效,不上升到整体结论层(那是综合阶段的活)。⛔若反题的失效条件就是终态画像反向链上某一环不成立,写\"如终态画像所列[某前置]不成立时本方案失效\",引用而不重写该前置(防对象收敛时各层重复登记同一不确定性)。没有经过反题的高赌注方案不完整。反题合题用自然语言,不出现辩证法等术语。每个方案必须由独立 specialist 处理。",
+  "args": [
+    "key_finding",
+    "stake"
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "plans": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "方案名称"
+            },
+            "rationale": {
+              "type": "string",
+              "description": "依据"
+            },
+            "condition": {
+              "type": "string",
+              "description": "适用条件"
+            },
+            "antithesis": {
+              "type": "string",
+              "description": "反题:此方案具体在什么条件下失效(必须写\"当X时不成立\",不接受软否定;可逆小事填\"无需(可逆小事)\")"
+            },
+            "synthesis": {
+              "type": "string",
+              "description": "合题:吸收反题后如何修正方案或划清边界(可逆小事填\"无需(可逆小事)\")"
+            }
+          },
+          "required": [
+            "name",
+            "rationale",
+            "condition",
+            "antithesis",
+            "synthesis"
+          ]
+        },
+        "minItems": 5,
+        "maxItems": 10
+      },
+      "certainty": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "本步结论确定性，0-1；依据证据强度、未验证假设和分歧程度校准"
+      },
+      "end_state_vision": {
+        "type": "object",
+        "description": "终态画像（优先深化用户画像已有 end_state_vision；高赌注问题必填，可逆小事留空对象）",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "成了的具体样子（须可判定，像验收标准；不接受\"成为更好的X\"空话）"
+          },
+          "reverse_chain": {
+            "type": "string",
+            "description": "反向链拆解：从终态往回倒推到今天第一步，每环扣紧前置条件"
+          }
+        }
+      }
+    },
+    "required": [
+      "plans",
+      "certainty"
+    ]
+  },
+  "engine_ref": [
+    "engine/teleology.md",
+    "engine/mcts-diverge.md"
+  ]
+}

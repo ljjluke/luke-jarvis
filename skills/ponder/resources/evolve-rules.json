@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "description": "已验证通过的自进化规则。每条规则在沙箱通过验证后才能加入。",
+  "rules": [
+    {
+      "id": "v4-market-research",
+      "status": "active",
+      "verified": "2026-06-19",
+      "sandbox_exp": "exp-v4d",
+      "condition": {
+        "question_type": ["市场分析"],
+        "step": "divergence",
+        "trigger": "清晰率<80%（基线75%，提升到100%）"
+      },
+      "action": {
+        "type": "prepend_step",
+        "step_name": "market_research",
+        "description": "在发散前执行一轮WebSearch收集市场数据",
+        "details": "对于市场分析/战略决策类问题，先让agent执行一轮数据收集（market_overview, key_stats, trends），然后将收集到的数据注入发散prompt作为参考上下文",
+        "prompt_template": "参考数据: {research_context}\n基于数据写分析"
+      },
+      "effect": {
+        "divergence_clarity": "75% → 100%",
+        "side_effects": "发散问题数从2.3增至3.3（更具体，可接受）；维度步骤不受影响"
+      }
+    }
+  ]
+}
