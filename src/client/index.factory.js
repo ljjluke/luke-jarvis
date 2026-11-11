@@ -144,7 +144,7 @@ const FIELDS = [
   // 2026-11-09 界面语言：增强 UI 全量国际化（zh/en）。
   { id: 'lang', section: 'basic', path: ['lang'], type: 'select', options: ['zh', 'en'], fallback: 'zh', label: 'field.lang' },
   // 2026-11-09 语音播报开关：TTS 总开关移入设置（原 UI 内按钮已移除）。
-  { id: 'voiceEnabled', section: 'basic', path: ['voiceEnabled'], type: 'checkbox', fallback: true, label: 'field.voiceEnabled' },
+  { id: 'voiceEnabled', section: 'basic', path: ['voiceEnabled'], type: 'checkbox', fallback: false, label: 'field.voiceEnabled' },
   // 2026-11-09 精简：只暴露核心字段；TTS 细节（apiKey/baseUrl/model/voice/speed）
   // 不再出现在设置卡片，已保存的值仍从服务端 accepted 配置读取并生效。
   // 2026-11-09 语音供应商不锁死：按协议接入，多卡片可增删与切换（事实源 voice.json）。

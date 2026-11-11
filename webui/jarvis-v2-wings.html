@@ -88,6 +88,7 @@ body.jarvis-speaking .plasma-layer{animation-duration:2.4s}
 @media(max-width:1180px){.team-layout{grid-template-columns:205px minmax(430px,1fr) 275px}.team-room{padding-left:22px;padding-right:22px}.top-actions{gap:6px;margin-right:12px}.team-entry{display:none}.voice-toggle{padding:0 8px}.member-task{display:none}.member{grid-template-columns:34px 1fr}.decision-copy span{display:none}}
 @media(max-width:900px){.top-actions{margin-right:8px}.voice-toggle span{display:none}.voice-toggle{padding:0 8px}.team-layout{grid-template-columns:1fr;height:auto}.team-room{padding:18px}.team-head{align-items:flex-start}.team-presence{display:none}.team-panel{min-height:0}.office-floor{min-height:520px}.team-side{grid-template-rows:auto auto}.chat-panel{min-height:360px}.decision-bar{flex-direction:column;align-items:flex-start}.team-layout .team-panel:first-child{order:2}.team-layout .office-space{order:1}.team-layout .team-side{order:3}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}.scanline{display:none}}
+.voice-strip{display:none!important}
 </style>
 </head>
 <body>
@@ -426,7 +427,7 @@ if('speechSynthesis'in window){selectJarvisVoice();speechSynthesis.addEventListe
 // 助手名字：设置里可配置（默认 Jarvis），界面称呼与语音唤醒词共用。
 window.JARVIS_NAME=(()=>{try{return localStorage.getItem('jarvis.name')||'Jarvis'}catch(e){return 'Jarvis'}})();
 function applyPersonaName(){const n=String(window.JARVIS_NAME||'Jarvis');const brand=document.querySelector('.brand-copy b');if(brand)brand.textContent='· '+n;const mt=document.querySelector('.menu-title');if(mt)mt.textContent=t('menu.title');const sum=document.querySelector('.jarvis-menu summary');if(sum)sum.setAttribute('aria-label',t('menu.aria'))}
-window.JARVIS_VOICE_ON=true;window.personaReady=(async function loadPersona(){try{const r=await fetch('/api/jarvis/persona',{cache:'no-store'});const b=await r.json();if(b&&b.ok&&b.name){window.JARVIS_NAME=String(b.name).trim()||'Jarvis';try{localStorage.setItem('jarvis.name',window.JARVIS_NAME)}catch(e){}}if(b&&b.ok&&(b.lang==='zh'||b.lang==='en')){window.JARVIS_LANG=b.lang;try{localStorage.setItem('jarvis.lang',b.lang)}catch(e){}}if(b&&b.ok&&b.voiceEnabled===false){window.JARVIS_VOICE_ON=false;voiceEnabled=false;speakingNow=false;try{speechSynthesis.cancel()}catch(e){};updateSpeakerUI()}
+window.JARVIS_VOICE_ON=false;window.personaReady=(async function loadPersona(){try{const r=await fetch('/api/jarvis/persona',{cache:'no-store'});const b=await r.json();if(b&&b.ok&&b.name){window.JARVIS_NAME=String(b.name).trim()||'Jarvis';try{localStorage.setItem('jarvis.name',window.JARVIS_NAME)}catch(e){}}if(b&&b.ok&&(b.lang==='zh'||b.lang==='en')){window.JARVIS_LANG=b.lang;try{localStorage.setItem('jarvis.lang',b.lang)}catch(e){}}const vOn=!!(b&&b.ok&&b.voiceEnabled===true);window.JARVIS_VOICE_ON=vOn;voiceEnabled=vOn;if(!vOn){speakingNow=false;try{speechSynthesis.cancel()}catch(e){}}else{try{startRecognition()}catch(e){}};updateSpeakerUI()
 if(b&&b.ok){applyStaticI18n();refreshJSTexts();applyPersonaName();try{dispatchEvent(new CustomEvent('jarvis:lang'))}catch(e){}}}catch(e){}})();
 // 麦克风、实时声纹与中文语音指令（待命唤醒模式：叫名字才进入对话，18 秒无语音自动回到待命）。
 let micStream=null,audioContext=null,analyser=null,micData=null,micRaf=0,recognition=null,micActive=false,micMode='off',wakeTimer=0;
@@ -492,6 +493,18 @@ function eventLine(e){
     return t('ev.command').replace('{tool}',tool||t('ev.fallback')).replace('{r}',d.ok?t('ev.ok'):t('ev.fail'));
   }
   return t('ev.fallback');
+}
+function tickClock(){
+  try{
+    const now=new Date();const lang=window.JARVIS_LANG==='en'?'en-US':'zh-CN';
+    const cl=document.querySelector('.clock');
+    if(cl)cl.textContent=now.toLocaleTimeString(lang,{hour:'2-digit',minute:'2-digit',hour12:false});
+    const dt=document.querySelector('.date');
+    if(dt&&dt.firstChild){
+      const ds=now.toLocaleDateString(lang,{month:'long',day:'numeric',weekday:'long'});
+      dt.firstChild.textContent=ds;
+    }
+  }catch(e){}
 }
 function eventTime(e){try{return new Date(e.at).toLocaleTimeString(window.JARVIS_LANG==='en'?'en-US':'zh-CN',{hour12:false})}catch{return ''}}
 
@@ -644,7 +657,7 @@ function cardRecent(){
 LIVE.pages=[];
 async function loadPages(){
   try{
-    const r=await fetch(apiUrl('/api/jarvis/pages'),{cache:'no-store'});
+    const r=await fetch(apiUrl('/api/luke-jarvis/pages'),{cache:'no-store'});
     const b=await r.json();
     const changed=JSON.stringify((b&&b.pages)||[])!==JSON.stringify(LIVE.pages);
     LIVE.pages=(b&&b.pages)||[];
@@ -666,7 +679,7 @@ function cardPages(){
   if(!LIVE.pages.length)return null;
   const latest=LIVE.pages[0];
   const ago=Math.max(1,Math.round((Date.now()-(latest.created||Date.now()))/60000));
-  return {id:'page-'+latest.id,kind:'page',k:t('card.pages'),st:LIVE.pages.length+t('card.pages.n'),title:latest.title,
+  return {id:'page-'+latest.id,kind:'page',k:t('card.pages'),st:LIVE.pages.length+t('card.pages.n'),title:(latest.title&&latest.title!==latest.id)?latest.title:'动态结果页',
     copy:t('card.pages.copy').replace('{m}',ago),
     detail:{pagesList:true}}
 }
@@ -684,7 +697,7 @@ function showPageIframe(id,title){
   const body=document.getElementById('detailBody');
   setText('#detailKicker',t('card.pages'));
   setText('#detailTitle',title||id);
-  body.innerHTML=`<div class="board-meta" style="padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>${esc(t('pages.banner'))}</span><a href="#" id="backToPages" style="color:var(--cyan)">${esc(t('pages.back'))}</a></div><iframe src="/jarvis-pages/${encodeURIComponent(id)}.html" style="width:100%;height:70vh;border:1px solid rgba(112,234,255,.25);border-radius:8px;background:#020b11"></iframe>`;
+  body.innerHTML=`<div class="board-meta" style="padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center"><span>${esc(t('pages.banner'))}</span><a href="#" id="backToPages" style="color:var(--cyan)">${esc(t('pages.back'))}</a></div><iframe src="/jarvis-wings/dyn/${encodeURIComponent(id)}.html" style="width:100%;height:70vh;border:1px solid rgba(112,234,255,.25);border-radius:8px;background:#020b11"></iframe>`;
   document.getElementById('backToPages').addEventListener('click',e=>{e.preventDefault();showPageDetail()});
   activateView(detailView,'#detail');
 }
@@ -1052,7 +1065,8 @@ document.getElementById('detailBody').addEventListener('keydown',e=>{
 loadState();loadEvents();loadPages();loadRecent();
 setInterval(loadState,5000);
 setInterval(loadEvents,3000);
-setInterval(loadPages,15000);setInterval(loadRecent,10000);
+setInterval(loadPages,15000);
+tickClock();setInterval(tickClock,1000);setInterval(loadRecent,10000);
 })();
 </script>
 
