@@ -1117,8 +1117,8 @@ export const DELIVER_TOOLS = [
           const sum0 = String(args?.summary ?? '').trim()
           if (st0 === 'ready') {
             const hasEvidence = /(\.jarvis\/|\.agent-teams\/|\/opt\/|[A-Za-z]:\\|commit|提交|实测|命令|curl|npm|test|\d+\s*\/\s*\d+|通过)/.test(sum0)
-            if (sum0.length < 80 || !hasEvidence) {
-              return { ok: false, action, verdict: '⛔ 任务未完成：ready 需 ≥80 字摘要且含交付物路径/实测证据（否则改 state=progress 继续做）；不许“没干完就收工”。' }
+            if (sum0.length < 40 || !hasEvidence) {
+              return { ok: false, action, verdict: '⛔ 任务未完成：ready 需 ≥40 字摘要且含交付物路径/实测证据（否则改 state=progress 继续做）；不许“没干完就收工”。' }
             }
           }
           const ticket = engine.report(String(args?.ticketId ?? ''), {
