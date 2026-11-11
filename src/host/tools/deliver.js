@@ -740,6 +740,17 @@ export const DELIVER_TOOLS = [
             const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '任务编排')
             if (!found) missing.push('任务编排图（.jarvis/docs/任务编排-*.md 不存在——没拆解不许写方案）')
             else _dropMissing(missing, (m) => m.startsWith('任务编排'))
+            // 思考类硬闸：方案设计前必须有 ponder 全量思考记录（真跑十阶段、可核验），不许拍脑袋
+            try {
+              const fsx = _require('node:fs')
+              const pathx = _require('node:path')
+              const verifyDir = pathx.join(projectDir, '.jarvis/docs/ponder-verify')
+              const runsDir = pathx.join(projectDir, '.jarvis/ponder-runs')
+              const hasVerify = fsx.existsSync(verifyDir) && fsx.readdirSync(verifyDir).length > 0
+              const hasRuns = fsx.existsSync(runsDir) && fsx.readdirSync(runsDir).length > 0
+              if (!hasVerify && !hasRuns) missing.push('ponder 全量思考记录（思考类方案必须先 jarvis_think_deep(force) 跑十阶段 + jarvis_ponder_check 留 PASS 记录）')
+              else _dropMissing(missing, (m) => m.startsWith('ponder 全量思考记录'))
+            } catch { /* 检查失败按缺省不阻断 */ }
           },
           next: '出《方案设计》（.jarvis/docs/方案设计-*.md 每条需求→实现落点）',
         },

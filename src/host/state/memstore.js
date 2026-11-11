@@ -14,6 +14,39 @@ const CACHE = new Map() // dir -> { mtimeMs, docs:Map, order, postings:Map, byte
 function sharedDir() { return path.join(os.homedir(), '.dsh', 'luke-jarvis', 'shared-memory') }
 function sharedFile() { return path.join(sharedDir(), 'entries.jsonl') }
 
+const LOCK_WAIT = new Int32Array(new SharedArrayBuffer(4))
+function sleepMs(ms) { try { Atomics.wait(LOCK_WAIT, 0, 0, ms) } catch { /* 非主线程忽略 */ } }
+/** 跨平台写锁（文件锁，Windows/Linux/macOS 通用）；拿不到锁重试最多 3s。 */
+function withLock(dir, fn) {
+  const lock = path.join(dir, '.lock')
+  let fd = null
+  for (let i = 0; i < 150; i++) {
+    try { fd = fs.openSync(lock, 'wx'); fs.writeSync(fd, String(process.pid)); break } catch (e) {
+      if (e && e.code === 'EEXIST') {
+        try { if (Date.now() - fs.statSync(lock).mtimeMs > 30000) fs.unlinkSync(lock) } catch {}
+        sleepMs(20); continue
+      }
+      break
+    }
+  }
+  try { return fn() } finally {
+    if (fd != null) { try { fs.closeSync(fd) } catch {} ; try { fs.unlinkSync(lock) } catch {} }
+  }
+}
+/** 每日备份（保留 7 份）：写入前若当天备份不存在则复制 JSONL。 */
+function backupDaily(dir) {
+  try {
+    const src = path.join(dir, 'entries.jsonl')
+    if (!fs.existsSync(src)) return
+    const d = new Date(); const tag = d.toISOString().slice(0, 10)
+    const bdir = path.join(dir, 'backups'); fs.mkdirSync(bdir, { recursive: true })
+    const dst = path.join(bdir, 'entries-' + tag + '.jsonl')
+    if (!fs.existsSync(dst)) fs.copyFileSync(src, dst)
+    const old = fs.readdirSync(bdir).filter((n) => /^entries-\d{4}-\d{2}-\d{2}\.jsonl$/.test(n)).sort()
+    while (old.length > 7) { try { fs.unlinkSync(path.join(bdir, old.shift())) } catch {} }
+  } catch { /* 备份失败不阻断 */ }
+}
+
 function memDir(projectDir) { return path.join(String(projectDir || ''), '.jarvis', 'memory') }
 function entriesFile(projectDir) { return path.join(memDir(projectDir), 'entries.jsonl') }
 function rawDir(projectDir) { return path.join(memDir(projectDir), 'raw') }
@@ -120,7 +153,7 @@ export function addEntry(projectDir, entry) {
   } catch { /* 首次写入无索引 */ }
   const target = e.lane === 'shared' ? sharedFile() : entriesFile(projectDir)
   if (e.lane === 'shared') fs.mkdirSync(sharedDir(), { recursive: true })
-  fs.appendFileSync(target, JSON.stringify(e) + '\n', 'utf8')
+  withLock(memDir(projectDir), () => { backupDaily(memDir(projectDir)); fs.appendFileSync(target, JSON.stringify(e) + '\n', 'utf8') })
   if (e.body) {
     try { fs.mkdirSync(rawDir(projectDir), { recursive: true }); fs.writeFileSync(path.join(rawDir(projectDir), sha(e.body)), e.body, 'utf8') } catch { /* 证据落盘失败不阻断 */ }
   }
@@ -161,6 +194,7 @@ export function recall(projectDir, query, opts = {}) {
     if (!e) continue
     if (lane && !(e.lane === lane || (includeShared && e.lane === 'shared'))) continue
     if (e.valid_to) continue
+    if (e.expires_at && Number(e.expires_at) < nowMs()) continue
     out.push({ id, lane: e.lane, kind: e.kind, title: e.title, snippet: String(e.body || '').slice(0, 240), confidence: e.confidence, disputed: Boolean(e.disputed), tags: e.tags || [], score: Math.round(sc * 1000) / 1000 })
   }
   out.sort((a, b) => b.score - a.score)
@@ -198,7 +232,7 @@ export function addEntriesBulk(projectDir, list) {
     added.push(e.id)
     if (e.body) { try { fs.mkdirSync(rawDir(projectDir), { recursive: true }); fs.writeFileSync(path.join(rawDir(projectDir), sha(e.body)), e.body, 'utf8') } catch {} }
   }
-  if (lines.length) fs.appendFileSync(entriesFile(projectDir), lines.join('\n') + '\n', 'utf8')
+  if (lines.length) withLock(dir, () => { backupDaily(dir); fs.appendFileSync(entriesFile(projectDir), lines.join('\n') + '\n', 'utf8') })
   CACHE.delete(dir)
   return { added: added.length, ids: added.slice(0, 50) }
 }
@@ -214,7 +248,7 @@ export function promoteToShared(projectDir, id, evidence) {
   const sanitize = (t) => t.replace(/[A-Za-z]:?[\\/][^\s，。；;）)]*/g, '<path>').replace(/\b[0-9a-f]{8,}\b/gi, '<id>')
   const body = sanitize(e.body).slice(0, 2000)
   const out = addEntry(projectDir, {
-    lane: 'shared', kind: 'knowledge', title: e.title, body,
+    lane: 'shared', kind: 'knowledge', title: e.title, body, expires_at: nowMs() + 90 * 86400000,
     tags: ['shared', 'promoted', e.kind], confidence: 'provisional',
     source: { type: 'promotion', ref: id + ' | evidence: ' + ev.slice(0, 200) },
   })
