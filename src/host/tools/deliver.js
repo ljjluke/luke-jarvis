@@ -1112,6 +1112,15 @@ export const DELIVER_TOOLS = [
           return { ok: true, action, proposal: rec, verdict: `已驳回提案 ${pid}（${reason}）——提案人可看 board/纪要了解驳回原因` }
         }
         if (action === 'report') {
+          // 完成质量闸：ready 必须有交付物路径/证据，否则视为"提前收工"打回（保持任务 open）
+          const st0 = String(args?.state ?? 'progress').trim()
+          const sum0 = String(args?.summary ?? '').trim()
+          if (st0 === 'ready') {
+            const hasEvidence = /(\.jarvis\/|\.agent-teams\/|\/opt\/|[A-Za-z]:\\|commit|提交|实测|命令|curl|npm|test|\d+\s*\/\s*\d+|通过)/.test(sum0)
+            if (sum0.length < 80 || !hasEvidence) {
+              return { ok: false, action, verdict: '⛔ 任务未完成：ready 需 ≥80 字摘要且含交付物路径/实测证据（否则改 state=progress 继续做）；不许“没干完就收工”。' }
+            }
+          }
           const ticket = engine.report(String(args?.ticketId ?? ''), {
             assignmentId: String(args?.assignmentId ?? '').trim() || undefined,
             state: String(args?.state ?? 'progress').trim(),

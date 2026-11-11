@@ -161,6 +161,11 @@ export function addEntry(projectDir, entry) {
   return e
 }
 
+/** 读取可选同义词表（<ws>/.jarvis/memory/synonyms.json：{"记忆":["存储","知识"],...}）。 */
+function synonymsFor(projectDir) {
+  try { return JSON.parse(fs.readFileSync(path.join(memDir(projectDir), 'synonyms.json'), 'utf8')) } catch { return {} }
+}
+
 function idf(n, df) { return Math.log(1 + (n - df + 0.5) / (df + 0.5)) }
 
 /** 检索：bigram/拉丁词倒排 + 标题加权 + 子串兜底（短查询）+ lane 过滤。 */
@@ -172,9 +177,16 @@ export function recall(projectDir, query, opts = {}) {
   const includeShared = opts.includeShared !== false
   if (!q) return []
   const qt = tokens(q)
+  // 同义词扩展：真实用户换词（记忆→知识/存储）也能命中；失败则纯原词
+  const syn = synonymsFor(projectDir)
+  const extra = []
+  for (const [term, list] of Object.entries(syn || {})) {
+    if (!q.includes(term)) continue
+    for (const w of (Array.isArray(list) ? list : [])) for (const tk of tokens(String(w))) if (!qt.includes(tk)) extra.push(tk)
+  }
   const scores = new Map()
   const N = snap.docs.size || 1
-  for (const tk of qt) {
+  for (const tk of qt.concat(extra)) {
     const set = snap.postings.get(tk)
     if (!set) continue
     const w = idf(N, set.size)
