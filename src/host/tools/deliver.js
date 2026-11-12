@@ -985,6 +985,7 @@ export const DELIVER_TOOLS = [
         reason: { type: 'string', description: '驳回提案的理由（dismiss 用）' },
         projectDir: { type: 'string', description: '项目工作区（默认当前会话 cwd）' },
         title: { type: 'string', description: '任务单标题（open/adjudicate）' },
+        requirementId: { type: 'string', description: '(可选) 关联需求编号（R1/F1），完成时自动回写需求状态' },
         stage: { type: 'string', description: '所属阶段 clarify/decompose/design/build/verify/close（默认 build）' },
         role: { type: 'string', description: '承接角色（默认 captain）' },
         ticketId: { type: 'string', description: '任务单 id（get/report/retry/stop）' },
@@ -1084,7 +1085,8 @@ export const DELIVER_TOOLS = [
           }
           // 成员须知透传：brief（如 jarvis_dispatch_task 生成的角色卡须知）经 meta.brief 直达成员简报
           const briefArg = String(args?.brief ?? '').trim()
-          if (briefArg) input.meta = { brief: briefArg }
+          const reqArg = String(args?.requirementId ?? '').trim()
+          if (briefArg || reqArg) input.meta = { brief: briefArg, requirementId: reqArg }
           // 成员提案消化：open 带 proposalId 时把提案内容作为兜底（title/mandate），开单成功后标记 consumed
           const proposalId = String(args?.proposalId ?? '').trim()
           const proposals = _readProposals(projectDir)
@@ -1190,6 +1192,20 @@ export const DELIVER_TOOLS = [
             state: String(args?.state ?? 'progress').trim(),
             summary: String(args?.summary ?? ''),
           })
+          // 关联需求 → 完成自动回写（不再手工 set）
+          try {
+            if (st0 === 'ready' && ticket && ticket.meta && ticket.meta.requirementId) {
+              const reqId = String(ticket.meta.requirementId)
+              const fsx = _require('node:fs'); const pathx = _require('node:path')
+              const file = pathx.join(projectDir, '.jarvis/requirements-status.json')
+              let cur = { items: {} }
+              try { cur = JSON.parse(fsx.readFileSync(file, 'utf8')) } catch {}
+              cur.items = cur.items || {}
+              cur.items[reqId] = { status: 'done', note: String(args?.summary ?? '').slice(0, 200), at: new Date().toISOString() }
+              fsx.mkdirSync(pathx.dirname(file), { recursive: true })
+              fsx.writeFileSync(file, JSON.stringify(cur, null, 1))
+            }
+          } catch { /* 回写失败不影响汇报 */ }
           const view = engine.view(ticket.id)
           // 任务终态/失败 → 自动回流记忆（幂等批量，跨平台）
           try {
