@@ -104,10 +104,10 @@ done
 echo "   CORE-LAYOUT-OK"
 node -e "
 import('./src/host/plugin.js').then((m) => {
-  if (!Array.isArray(m.TOOLS) || m.TOOLS.length !== 34) { console.error('TOOLS.length=' + (m.TOOLS && m.TOOLS.length)); process.exit(1) }
+  if (!Array.isArray(m.TOOLS) || m.TOOLS.length !== 35) { console.error('TOOLS.length=' + (m.TOOLS && m.TOOLS.length)); process.exit(1) }
   const bad = m.TOOLS.filter((t) => !t || !t.name || typeof t.execute !== 'function' || typeof (t.output && t.output.render) !== 'function')
   if (bad.length) { console.error('工具定义不完整: ' + bad.map((b) => b && b.name).join(',')); process.exit(1) }
-})" >/dev/null 2>&1 && echo "   TOOLS-COUNT-OK（34 个工具，execute 齐全）" || { echo "   TOOLS-COUNT-FAIL"; exit 1; }
+})" >/dev/null 2>&1 && echo "   TOOLS-COUNT-OK（35 个工具，execute 齐全）" || { echo "   TOOLS-COUNT-FAIL"; exit 1; }
 node -e "
 import('./src/host/plugin.js').then((m) => {
   const t = m.TOOLS.find((x) => x.name === 'jarvis_ticket')

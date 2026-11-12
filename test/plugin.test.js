@@ -4676,7 +4676,8 @@ test('UI 契约 v1：/api/jarvis/state 返回带 schema 的全量快照（磁盘
   const res = { writeHead: (c, h) => { res.code = c; res.headers = h }, end: (b) => { res.body = b } }
   await state.handler({ url: '/api/jarvis/state?workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, res)
   assert.strictEqual(res.code, 200)
-  assert.strictEqual(res.headers['access-control-allow-origin'], '*', 'UI 跨源要允许')
+  // 0.15 审计修复：项目内容（任务/黑板/记忆）不该被任意站点跨源读取；本页同源，不需要通配 CORS
+  assert.strictEqual(res.headers['access-control-allow-origin'], undefined, '不再回通配 CORS')
   const body = JSON.parse(res.body)
   assert.strictEqual(body.schema, 'jarvis.snapshot/1', '快照必须带版本（UI 只认版本）')
   const snap = body.snapshot
@@ -4909,12 +4910,12 @@ test('v2 静态托管：/jarvis-office/v2/index.html 能取到（prefix 路由�
   assert.ok(String(res.body).includes('JARVIS 全息任务中枢 v2'), '返回的确实是 v2 页面')
 })
 
-test('v2 会话输入不伪造执行（未接指令通道必须明说，而不是假装回复"收到/我会推进"）', () => {
+test('v2 会话输入接真投递但仍不伪造执行（不能说"我会按流程推进"）', () => {
   const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
   const js = fs.readFileSync(path.join(repo, '../office/v2/jarvis-v2.js'), 'utf8')
   assert.ok(!/我会按流程推进/.test(js), '不能出现假的执行承诺')
-  assert.ok(/没有发出去|还没接|只做只读/.test(js), '必须明确告诉用户消息没发出去')
-  assert.ok(/只是?只读|只读数据面/.test(js), '必须写明当前只接了只读数据面')
+  assert.ok(/\/api\/jarvis\/chat/.test(js), '指令面必须真投递（agent.followup）')
+  assert.ok(/不替它编回答/.test(js), '要说明：投递≠执行完，回答由模型下一轮产出')
 })
 
 // ── 能力台：全部工具接入（清单/校验/执行/闸拒绝/界面覆盖）──────────────
@@ -5113,4 +5114,278 @@ test('v2 协作空间静态托管：场景页 + 上游构建资源都能取到�
   // 配置里 relay 指向同源（否则场景会去跑上游 demo 假数据）
   const cfgRes = await get('/jarvis-office/jarvis-scene-config.js')
   assert.ok(/relayUrl:\s*''/.test(String(cfgRes.body)), 'relayUrl 必须为空字符串（同源 → /api/pixoffice/events）')
+})
+test('事件流增量：nextSeq 防漏事件、tail 取最新、hasMore 提示翻页', async () => {
+  const ev = await import('../src/host/state/events.js')
+  const path = await import('node:path')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'evseq-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  for (let i = 1; i <= 12; i += 1) ev.appendEvent(proj, 'gate', { step: 's' + i })
+  // since=0 limit=5：只回最旧 5 条，但必须告诉调用方 nextSeq=5 且 hasMore=true
+  const a = ev.readEvents(proj, { since: 0, limit: 5 })
+  assert.strictEqual(a.events.length, 5)
+  assert.strictEqual(a.nextSeq, 5, 'nextSeq 必须是本次返回的最后一条（不是全库最后一条）')
+  assert.strictEqual(a.lastSeq, 12)
+  assert.strictEqual(a.hasMore, true)
+  // 用它翻页不丢事件
+  const b = ev.readEvents(proj, { since: a.nextSeq, limit: 5 })
+  assert.deepStrictEqual(b.events.map((e) => e.seq), [6, 7, 8, 9, 10])
+  // tail=1：首屏直接拿最新一批（否则"最新事件"节点会显示第 5 条）
+  const t = ev.readEvents(proj, { tail: true, limit: 3 })
+  assert.deepStrictEqual(t.events.map((e) => e.seq), [10, 11, 12])
+  assert.strictEqual(t.nextSeq, 12)
+  assert.strictEqual(t.hasMore, false)
+})
+
+test('事件路由支持 tail=1（首屏取最新）', async () => {
+  const routes = []
+  const ctx = {
+    get: (k) => (k === 'agents' ? { list: () => [] } : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const route = routes.find((r) => r.path === '/api/jarvis/events')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'evtail-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const ev = await import('../src/host/state/events.js')
+  for (let i = 1; i <= 6; i += 1) ev.appendEvent(proj, 'board', { n: i })
+  const res = { writeHead() {}, end(b) { this.body = b } }
+  await route.handler({ url: '/api/jarvis/events?tail=1&limit=2&workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, res)
+  const body = JSON.parse(res.body)
+  assert.strictEqual(body.events.length, 2)
+  assert.strictEqual(body.events[1].seq, 6, 'tail 必须是最新一条在末尾')
+  assert.strictEqual(body.nextSeq, 6)
+})
+
+test('写接口同源校验：跨站 Origin 一律 403（command/voice/tts），同源与无 Origin 放行', async () => {
+  const routes = []
+  const ctx = {
+    get: (k) => (k === 'agents' ? { list: () => [] } : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const cmd = routes.find((r) => r.path === '/api/jarvis/command')
+  const voice = routes.find((r) => r.path === '/api/jarvis/voice')
+  const tts = routes.find((r) => r.path === '/api/jarvis/tts')
+  const evil = { host: '127.0.0.1:8080', origin: 'https://evil.example', 'content-type': 'text/plain' }
+  const same = { host: '127.0.0.1:8080', origin: 'http://127.0.0.1:8080', 'content-type': 'application/json' }
+  for (const [route, method, body] of [[cmd, 'POST', { tool: 'jarvis_snapshot' }], [voice, 'PUT', { provider: 'browser' }], [tts, 'POST', { text: 'x' }]]) {
+    const r1 = { writeHead(c) { this.code = c }, end(b) { this.body = b } }
+    await route.handler({ ...fakeReq(method, body), method, headers: evil }, r1)
+    const b1 = JSON.parse(String(r1.body))
+    assert.strictEqual(b1.ok, false, `${route.path} 跨站必须拒绝`)
+    assert.ok(/跨站|同源/.test(b1.error), `${route.path} 要说明同源校验：${b1.error}`)
+    assert.strictEqual(r1.headers, undefined, '写接口不能回发 CORS 通配头')
+  }
+  // 同源：voice 正常保存（用临时 HOME，别污染真实配置）
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'voicehome3-'))
+  const oldHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const r2 = { writeHead(c) { this.code = c }, end(b) { this.body = b } }
+    await voice.handler({ ...fakeReq('PUT', { provider: 'openai', baseUrl: 'https://api.example.com/v1', apiKey: 'sk-x-1234' }), method: 'PUT', headers: same }, r2)
+    assert.strictEqual(JSON.parse(String(r2.body)).ok, true, '同源写请求要放行')
+  } finally { process.env.HOME = oldHome }
+})
+
+test('能力台全部工具名通过白名单（不漏任何一个，数量随 TOOLS 增长）', async () => {
+  const { runCommand } = await import('../src/host/state/command.js')
+  const { TOOLS } = await import('../src/host/tools/index.js')
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdnames-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const ctx = { get: () => ({ execute: async () => ({ isError: false, content: [{ text: 'x' }], value: {} }) }) }
+  for (const t of TOOLS) {
+    const out = await runCommand({ ctx, projectDir: proj, tool: t.name, args: {}, agent: null })
+    // 允许两类"前置拒绝"（缺必填 / 没会话），但不许是"白名单拦下"或"未知工具"
+    assert.ok(!/只允许调用 jarvis_|未知工具/.test(out.error), `${t.name} 不该被白名单/未知工具拦下：${out.error}`)
+    assert.ok(/活动会话|缺少必填参数/.test(out.error), `${t.name} 的拒绝理由要明确：${out.error}`)
+  }
+})
+
+test('安全：/api/jarvis/* 不回通配 CORS（项目内容不该被任意站点读取）；legacy 黑板仍保留旧契约', async () => {
+  const routes = []
+  const ctx = {
+    get: (k) => (k === 'agents' ? { list: () => [] } : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  for (const p of ['/api/jarvis/state', '/api/jarvis/summary', '/api/jarvis/capabilities', '/api/jarvis/tools', '/api/jarvis/sessions', '/api/jarvis/events', '/api/jarvis/voice']) {
+    const route = routes.find((r) => r.path === p)
+    assert.ok(route, `路由 ${p} 存在`)
+    const res = { writeHead(c, h) { this.code = c; this.headers = h || {} }, end(b) { this.body = b } }
+    await route.handler({ url: p, method: 'GET', headers: {} }, res)
+    assert.notStrictEqual(res.headers['access-control-allow-origin'], '*', `${p} 不能回通配 CORS`)
+  }
+})
+
+test('UI 修复：coreState 文字与 voice-ticks 分离；能力台显示工作区', () => {
+  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const html = fs.readFileSync(path.join(repo, '../office/v2/index.html'), 'utf8')
+  const js = fs.readFileSync(path.join(repo, '../office/v2/jarvis-v2.js'), 'utf8')
+  assert.ok(html.includes('id="coreStateText"'), 'coreState 文字要有独立 span，否则 setText 会冲掉 voice-ticks 动画')
+  assert.ok(!/setText\('coreState'/.test(js), '不能再直接写 coreState（会清空子节点）')
+  assert.ok(html.includes('id="cWorkspace"'), '能力台要显示当前工作区')
+  assert.ok(js.includes("setText('cWorkspace'"), '工作区要从快照/执行结果回填')
+})
+
+test('工作区解析优先级：真实会话 > 最近的工具 exec > apply 期缓存（防"闸判 A 项目、文件写 B 项目"）', async () => {
+  const rt = await import('../src/host/runtime.js')
+  const projA = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-a-'))
+  const projB = fs.mkdtempSync(path.join(os.tmpdir(), 'ws-b-'))
+  const prev = rt.getLatestExec()
+  try {
+    rt.rememberExec({ agent: { session: { id: 's1', header: { cwd: projA } } } })
+    assert.strictEqual(rt.getLatestExec().agent.session.header.cwd, projA)
+    // rememberExec 必须是"最近一次"，不是"第一次"
+    rt.rememberExec({ agent: { session: { id: 's2', header: { cwd: projB } } } })
+    assert.strictEqual(rt.getLatestExec().agent.session.header.cwd, projB, '第二次调用必须覆盖第一次（否则一直用第一个会话的项目）')
+    // exec 的会话 cwd 最权威
+    assert.strictEqual(rt.resolveWorkspace({ get: () => undefined }, { agent: { session: { id: 'sB', header: { cwd: projA } } } }), projA)
+    // 无 exec 时：最近 exec 的 cwd 优先于 apply 期缓存
+    assert.strictEqual(rt.resolveWorkspace({ get: () => undefined }), projB, '无 exec 也要拿到最近的会话工作区')
+    // ctx scope 指向的 agent 优先于最近 exec（同进程多会话时更精确）
+    const agents = {
+      get: (id) => (id === 'sA' ? { session: { id: 'sA', header: { cwd: projA } } } : undefined),
+      list: () => [],
+    }
+    assert.strictEqual(rt.resolveWorkspace({ get: (k) => (k === 'agents' ? agents : undefined), scope: { sessionId: 'sA' } }), projA)
+  } finally {
+    // 不污染其他用例：恢复调用前的 latest exec
+    if (prev) rt.rememberExec(prev)
+  }
+})
+
+// ── 指令面：UI 一句话 → 真投递进 DSH 会话（不是前端假回复）──────────────────────
+
+test('指令面：deliverChat 构造 dsh-agent 的 UserMessage 并调 followup；空/超长/无 followup 都拒绝', async () => {
+  const chat = await import('../src/host/state/chat.js')
+  const calls = []
+  const agent = { session: { id: 'sess-1' }, followup: (m) => calls.push(m) }
+  const out = chat.deliverChat(agent, '  帮我看一下当前任务  ')
+  assert.strictEqual(out.ok, true)
+  assert.strictEqual(out.sessionId, 'sess-1')
+  assert.strictEqual(calls.length, 1)
+  assert.deepStrictEqual(calls[0].content, [{ type: 'text', text: '帮我看一下当前任务' }])
+  assert.strictEqual(calls[0].role, 'user')
+  assert.strictEqual(calls[0].source.kind, 'user')
+  assert.ok(String(calls[0].id).length > 0)
+  assert.strictEqual(chat.deliverChat(agent, '   ').ok, false)
+  assert.strictEqual(chat.deliverChat(agent, 'x'.repeat(4001)).ok, false)
+  assert.strictEqual(chat.deliverChat({}, 'hi').ok, false)
+  // followup 抛错要如实报，不能假装成功
+  const broken = { session: { id: 's2' }, followup: () => { throw new Error('队列已关') } }
+  const bad = chat.deliverChat(broken, 'hi')
+  assert.strictEqual(bad.ok, false)
+  assert.ok(/队列已关/.test(bad.error))
+})
+
+test('指令面路由：/api/jarvis/chat 真调 agent.followup、写 chat 事件；无会话/跨站/空消息都明确拒绝', async () => {
+  const routes = []
+  const mk = (agentsList) => ({
+    get: (k) => (k === 'agents' ? { list: () => agentsList, get: (id) => agentsList.find((a) => a.session?.id === id) } : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  })
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'chatroute-'))
+  fs.mkdirSync(path.join(proj, '.jarvis'), { recursive: true })
+  const calls = []
+  const agent = { session: { id: 'cap-1', header: { cwd: proj } }, followup: (m) => calls.push(m) }
+  apply(mk([agent]))
+  const route = routes.find((r) => r.path === '/api/jarvis/chat')
+  assert.ok(route, 'chat 路由存在')
+  const call = async (req) => {
+    const res = { writeHead(c, h) { this.code = c; this.headers = h || {} }, end(b) { this.body = b } }
+    await route.handler(req, res)
+    return { code: res.code, body: JSON.parse(String(res.body)) }
+  }
+  const ok = await call({ ...fakeReq('POST', { text: '继续推进' }), method: 'POST', headers: { host: 'x', origin: 'http://x' }, url: '/api/jarvis/chat?workspace=' + encodeURIComponent(proj) })
+  assert.strictEqual(ok.body.ok, true, JSON.stringify(ok.body))
+  assert.strictEqual(calls.length, 1)
+  assert.deepStrictEqual(calls[0].content, [{ type: 'text', text: '继续推进' }])
+  const ev = fs.readFileSync(path.join(proj, '.jarvis/events.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.ok(ev.some((e) => e.type === 'chat' && e.data.sessionId === 'cap-1'), '要落 chat 事件（可审计：谁在何时把什么话投给了谁）')
+  // 跨站拒绝
+  const evil = await call({ ...fakeReq('POST', { text: 'x' }), method: 'POST', headers: { host: 'x', origin: 'https://evil.example' }, url: '/api/jarvis/chat' })
+  assert.strictEqual(evil.body.ok, false)
+  assert.ok(/跨站/.test(evil.body.error))
+  // 空消息拒绝
+  const empty = await call({ ...fakeReq('POST', { text: '  ' }), method: 'POST', headers: { host: 'x' }, url: '/api/jarvis/chat' })
+  assert.strictEqual(empty.body.ok, false)
+  assert.ok(/为空/.test(empty.body.error))
+})
+
+test('指令面路由：没有活动会话时明确说"没有活动会话"（不假装投递）', async () => {
+  const routes = []
+  const ctx = {
+    get: (k) => (k === 'agents' ? { list: () => [] } : undefined),
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  const route = routes.find((r) => r.path === '/api/jarvis/chat')
+  const res = { writeHead(c, h) { this.code = c; this.headers = h || {} }, end(b) { this.body = b } }
+  await route.handler({ ...fakeReq('POST', { text: 'hi' }), method: 'POST', headers: { host: 'x' }, url: '/api/jarvis/chat' }, res)
+  const body = JSON.parse(String(res.body))
+  assert.strictEqual(body.ok, false)
+  assert.ok(/没有活动会话/.test(body.error), body.error)
+})
+
+test('UI 指令面：提交走 /api/jarvis/chat，且不伪造"收到"式回复', () => {
+  const repo = path.dirname(new URL(import.meta.url).pathname)
+  const js = fs.readFileSync(path.join(repo, '../office/v2/jarvis-v2.js'), 'utf8')
+  assert.ok(js.includes("fetch('/api/jarvis/chat' + workspaceQuery()"), '必须真调聊天投递接口')
+  assert.ok(/已投递到会话/.test(js), '成功要说清"投递到哪个会话队列"')
+  assert.ok(!/收到，我会按流程推进/.test(js), '不能伪造流程性回复')
+  assert.ok(/没有投递成功/.test(js), '失败要如实说没投递成功')
+})
+
+test('relay 写接口也做同源校验（跨站不能推进场景命令），事件流只读不受影响', async () => {
+  const routes = []
+  const ctx = {
+    get: () => undefined,
+    effect: (fn) => { try { fn() } catch {} },
+    tools: { register: () => () => {} },
+    webServer: { register: (r) => { routes.push(r); return () => {} } },
+    systemPrompt: { section: () => () => {} },
+  }
+  apply(ctx)
+  for (const p of ['/api/pixoffice/messages', '/api/pixoffice/reply']) {
+    const route = routes.find((r) => r.path === p)
+    assert.ok(route, `${p} 存在`)
+    const res = { writeHead(c, h) { this.code = c; this.headers = h || {} }, end(b) { this.body = b } }
+    await route.handler({ ...fakeReq('POST', { teamId: 'jarvis-x', command: { sceneId: 'jarvis-x', commandId: 'c1', kind: 'map.edit' } }), method: 'POST', headers: { host: 'x', origin: 'https://evil.example' }, url: p }, res)
+    const body = JSON.parse(String(res.body))
+    assert.strictEqual(res.code, 403, `${p} 跨站必须 403`)
+    assert.strictEqual(body.error, 'cross-origin-denied')
+  }
+})
+
+test('语音服务地址防 SSRF（多供应商模型）：只允许 http(s)，拒绝 file:/data:/javascript:/内嵌账号', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'voicehome5-'))
+  const oldHome = process.env.HOME
+  process.env.HOME = home
+  try {
+    const v = await import('../src/host/state/voice.js')
+    for (const bad of ['file:///etc/passwd', 'javascript:alert(1)', 'data:text/plain,x', 'https://user:pass@api.example.com/v1', 'not-a-url']) {
+      assert.throws(
+        () => v.saveVoiceConfig({ providers: [{ name: 'x', protocol: 'openai', baseUrl: bad }], active: 'x' }),
+        /http\/https|账号密码|合法 URL/,
+        `必须拒绝 ${bad}`,
+      )
+    }
+    assert.ok(v.assertSafeServiceUrl('https://api.example.com/v1').startsWith('https://'), '合法地址放行')
+  } finally { process.env.HOME = oldHome }
 })
