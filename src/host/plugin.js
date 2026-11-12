@@ -19,6 +19,7 @@
 
 
 
+import { requirementsDigest } from './state/requirements.js'
 import { stats as memStats, listRecent as memListRecent, digest as memDigest } from './state/memstore.js'
 import { execSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -907,6 +908,23 @@ export function apply(ctx, config) {
           })
         )
 
+        // 0.965) 需求视角（老板卡）：需求清单总数/完成/正在做第几条
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/requirements',
+            handler: async (req, res) => {
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return sendJson(res, 200, { ok: true, active: false, digest: null })
+                return sendJson(res, 200, { ok: true, active: true, digest: requirementsDigest(cwd) })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, digest: null, error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+
         // 0.98) Wings 静态资源（页内相对图片/素材）：/jarvis-wings-assets/* → webui/*
         ctx.effect(() =>
           webSvc2.register({
@@ -951,6 +969,7 @@ export function apply(ctx, config) {
                 if (!file) return sendJson(res, 200, { ok: true, reports: [], reason: 'no transcript' })
                 const text = cp.execSync(`zstdcat "${file}" | tail -n 400`, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 20000 })
                 const reports = []
+                let latestAssistant = ''
                 for (const line of text.split('\n')) {
                   if (!line.trim()) continue
                   try {
@@ -960,6 +979,7 @@ export function apply(ctx, config) {
                     const parts = Array.isArray(msg.content) ? msg.content : []
                     const body = parts.filter((x) => x && x.type === 'text').map((x) => String(x.text || '')).join(' ').trim()
                     if (!body) continue
+                    latestAssistant = body.slice(0, 400)
                     if (/^<[^>]+>/.test(body) && body.length < 120) continue
                     reports.push({ time: Number(e.time || 0), text: body.slice(0, 600) })
                   } catch { /* 坏行跳过 */ }
@@ -984,7 +1004,7 @@ export function apply(ctx, config) {
                 } catch { /* 无团队目录 */ }
                 taskReports.sort((a, b) => b.time - a.time)
                 const merged = [...taskReports.slice(0, 4), ...last].slice(0, 6)
-                return sendJson(res, 200, { ok: true, reports: merged })
+                return sendJson(res, 200, { ok: true, reports: merged, latestAssistant })
               } catch (e) {
                 return sendJson(res, 200, { ok: false, reports: [], error: String((e && e.message) || e).slice(0, 200) })
               }

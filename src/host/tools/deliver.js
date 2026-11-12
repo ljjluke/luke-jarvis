@@ -19,6 +19,7 @@ import { meetingGaps } from '../state/meetings.js'
 import { auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 
 import { ingestSources as memIngest } from '../state/memstore.js'
+import { requirementsDigest } from '../state/requirements.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
@@ -58,6 +59,50 @@ const _writeProposals = (projectDir, list) => {
 
 /** 本组工具（按原始顺序）；由 tools/index.js 汇总成 TOOLS。 */
 export const DELIVER_TOOLS = [
+  {
+    name: 'jarvis_requirements',
+    description:
+      '需求清单状态（老板/用户视角）：list=读需求规格并给出每条状态（done/doing/pending，人工状态优先）；set=维护需求状态（id+status+note），写入 .jarvis/requirements-status.json（精确覆盖关键词启发式）。主页面需求卡读的就是这份状态。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'list（默认）/ set' },
+        id: { type: 'string', description: 'set 用：需求编号（R1/F1…）' },
+        status: { type: 'string', description: 'set 用：done / doing / pending' },
+        note: { type: 'string', description: 'set 用：证据/说明（交付物路径或验收结论）' },
+        projectDir: { type: 'string', description: '工作区目录（默认当前会话）' },
+      },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true, properties: { action: { type: 'string' }, digest: { type: 'object' }, verdict: { type: 'string' } }, required: ['action'] },
+      render: (r) => {
+        const NL = String.fromCharCode(10)
+        const d = r.digest || {}
+        const rows = (d.items || []).map((x) => '- ' + x.id + ' [' + x.status + '] ' + String(x.title).slice(0, 50))
+        return '【需求清单 · ' + r.action + '】共 ' + (d.total || 0) + ' 条，完成 ' + (d.done || 0) + NL + rows.join(NL) + (r.verdict ? NL + r.verdict : '')
+      },
+    },
+    execute: async (args, exec) => {
+      const path = _require('node:path'); const fsx = _require('node:fs')
+      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
+      const action = String(args?.action ?? 'list').trim()
+      if (action === 'set') {
+        const id = String(args?.id ?? '').trim()
+        const status = String(args?.status ?? '').trim()
+        if (!id || !['done', 'doing', 'pending'].includes(status)) return { action, verdict: 'set 需要 id 且 status ∈ done/doing/pending' }
+        const file = path.join(projectDir, '.jarvis/requirements-status.json')
+        let cur = { items: {} }
+        try { cur = JSON.parse(fsx.readFileSync(file, 'utf8')) } catch {}
+        cur.items = cur.items || {}
+        cur.items[id] = { status, note: String(args?.note ?? ''), at: new Date().toISOString() }
+        fsx.mkdirSync(path.dirname(file), { recursive: true })
+        fsx.writeFileSync(file, JSON.stringify(cur, null, 1))
+        return { action, digest: requirementsDigest(projectDir), verdict: '已更新 ' + id + ' → ' + status }
+      }
+      return { action, digest: requirementsDigest(projectDir) }
+    },
+  },
+
   {
     name: 'jarvis_release',
     description:
@@ -1116,6 +1161,25 @@ export const DELIVER_TOOLS = [
           const st0 = String(args?.state ?? 'progress').trim()
           const sum0 = String(args?.summary ?? '').trim()
           if (st0 === 'ready') {
+            // ponder 机械闸：必须有近期 PASS 核验记录（成员真跑过十阶段，不是嘴上说）
+            try {
+              const fsx = _require('node:fs')
+              const pathx = _require('node:path')
+              const vdir = pathx.join(projectDir, '.jarvis/docs/ponder-verify')
+              const outs = fsx.existsSync(vdir) ? fsx.readdirSync(vdir).filter((n) => n.endsWith('.json')) : []
+              const now = Date.now()
+              const okRecord = outs.some((n) => {
+                try {
+                  const rec = JSON.parse(fsx.readFileSync(pathx.join(vdir, n), 'utf8'))
+                  const pass = String(rec.verdict || '').toUpperCase() === 'PASS'
+                  const mt = fsx.statSync(pathx.join(vdir, n)).mtimeMs
+                  return pass && now - mt < 24 * 3600 * 1000
+                } catch { return false }
+              })
+              if (!okRecord) {
+                return { ok: false, action, verdict: '⛔ 思考过程未核验：ready 前必须真实跑 ponder 十阶段，并用 jarvis_ponder_check(taskId=本任务, …) 留下 PASS 记录（.jarvis/docs/ponder-verify/）。没核验=裸干交付，不许收工。' }
+              }
+            } catch { /* 检查异常不误杀 */ }
             const hasEvidence = /(\.jarvis\/|\.agent-teams\/|\/opt\/|[A-Za-z]:\\|commit|提交|实测|命令|curl|npm|test|\d+\s*\/\s*\d+|通过)/.test(sum0)
             if (sum0.length < 40 || !hasEvidence) {
               return { ok: false, action, verdict: '⛔ 任务未完成：ready 需 ≥40 字摘要且含交付物路径/实测证据（否则改 state=progress 继续做）；不许“没干完就收工”。' }
