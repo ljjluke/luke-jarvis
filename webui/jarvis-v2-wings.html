@@ -645,12 +645,32 @@ function cardEvents(){
 }
 /* 动态页面：Jarvis 把 HTML 写到 <工作区>/.jarvis/pages/<id>.html，服务端闲置 24h 回收，GC 48h 兜底 */
 LIVE.recent=[];
+function cleanCaption(raw){
+  let t=String(raw||'');
+  t=t.replace(/```[\s\S]*?```/g,' ').replace(/`[^`]*`/g,' ')
+   .replace(/https?:\/\/\S+/g,' ').replace(/[A-Za-z]:?[\\/][^\s，。；;）)]*/g,' ')
+   .replace(/→|·|…|✅|⚠️|⛔/g,' ').replace(/[#*_>|-]+/g,' ')
+   .replace(/（[^）]*）/g,' ').replace(/\([^)]*\)/g,' ')
+   .replace(/\s{2,}/g,' ').trim();
+  let first=(t.split(/(?<=[。！？!?])/)[0]||t).trim();
+  first=first.split('；')[0].split('，').slice(0,2).join('，');
+  first=first.replace(/[，,、：:；;\-—]+$/,'').trim();
+  return first.slice(0,54);
+}
+async function loadCaption(){
+  try{
+    const sid=qsSession||window.__activeSessionId||'';
+    const r=await fetch(apiUrl('/api/jarvis/boss-caption')+(apiUrl('/api/jarvis/boss-caption').includes('?')?'&':'?')+'session='+encodeURIComponent(sid),{cache:'no-store'});
+    const b=await r.json();
+    if(b&&b.caption){LIVE.liveCaption=String(b.caption);LIVE.liveCaptionAt=Date.now();if(!speakingNow){const cap=document.getElementById('captionText');if(cap&&cap.textContent!==LIVE.liveCaption)cap.textContent=LIVE.liveCaption}}
+  }catch(e){}
+}
 async function loadRecent(){
   try{
     const r=await fetch(apiUrl('/api/jarvis/session-recent')+(apiUrl('/api/jarvis/session-recent').includes('?')?'&':'?')+'session='+encodeURIComponent(qsSession||window.__activeSessionId||''),{cache:'no-store'});
     const b=await r.json();
     LIVE.recent=(b&&b.reports)||[];
-    try{if(b&&b.latestAssistant){const raw=String(b.latestAssistant).replace(/[#*`>\-]+/g,' ').replace(/\s+/g,' ').trim();const first=raw.split(/(?<=[。！？!?])/)[0]||raw;const txt=first.slice(0,96);if(txt){LIVE.liveCaption=txt;LIVE.liveCaptionAt=Date.now();if(!speakingNow){const cap=document.getElementById('captionText');if(cap&&cap.textContent!==txt)cap.textContent=txt}}}}catch(e){}
+    try{if(b&&b.latestAssistant){const txt=cleanCaption(b.latestAssistant);if(txt){LIVE.liveCaption=txt;LIVE.liveCaptionAt=Date.now();if(!speakingNow){const cap=document.getElementById('captionText');if(cap&&cap.textContent!==txt)cap.textContent=txt}}}}catch(e){}
     if(LIVE.snap)renderCards(LIVE.snap);
   }catch{/* 汇报读取失败不影响主状态 */}
 }
@@ -696,7 +716,7 @@ function cardRequirement(){
     copy:'已完成 '+d.done+' 条 · '+String(d.activeTasks||0)+' 项进行中'+(d.risks?(' · ⚠ '+d.risks+' 条有风险'):'')+' · 最近更新 '+hm(d.updatedAt),
     detail:{kicker:'BOSS REPORT · 需求交付',title:(d.doc||'需求规格'),
       meta:[['需求总数',String(d.total)],['已完成',String(d.done)+'（'+pct+'%）'],['进行中',String(d.activeTasks||0)],['最近更新',hm(d.updatedAt)]],
-      rows:(d.items||[]).map(function(x){var chips=[{t:x.status==='done'?'已完成':x.status==='doing'?'进行中':'待开始',c:x.status==='done'?'ok':x.status==='doing'?'mut':''}];if(x.risk&&x.status!=='done')chips.push({t:'风险',c:'bad'});return {main:reportText(String(x.title),110),chips:chips,sub:x.status==='done'?'已交付':(x.risk?'有失败/阻塞，需要关注':(x.status==='doing'?'团队在做':'待启动'))}})}}
+      rows:(d.items||[]).filter(function(x){return !(x.status==='done'&&x.at&&Date.now()-x.at>2*3600000)}).map(function(x){var chips=[{t:x.status==='done'?'已完成':x.status==='doing'?'进行中':'待开始',c:x.status==='done'?'ok':x.status==='doing'?'mut':''}];if(x.risk&&x.status!=='done')chips.push({t:'风险',c:'bad'});return {main:reportText(String(x.title),110),chips:chips,sub:x.status==='done'?'已交付':(x.risk?'有失败/阻塞，需要关注':(x.status==='doing'?'团队在做':'待启动'))}})}}
 }
 LIVE.pages=[];
 async function loadPages(){
@@ -1114,11 +1134,11 @@ document.getElementById('detailBody').addEventListener('keydown',e=>{
   const row=e.target.closest&&e.target.closest('[data-page]');
   if(row)showPageIframe(row.dataset.page,row.dataset.ptitle);
 });
-loadState();loadEvents();loadPages();loadRecent();loadMemory();loadReq();
+loadState();loadEvents();loadPages();loadRecent();loadMemory();loadReq();loadCaption();
 setInterval(loadState,5000);
 setInterval(loadEvents,3000);
 setInterval(loadPages,15000);
-tickClock();setInterval(tickClock,1000);setInterval(loadRecent,10000);setInterval(loadMemory,15000);setInterval(loadReq,5000);
+tickClock();setInterval(tickClock,1000);setInterval(loadRecent,10000);setInterval(loadMemory,15000);setInterval(loadReq,5000);setInterval(loadCaption,10000);
 })();
 </script>
 

@@ -78,7 +78,10 @@ export function requirementsDigest(projectDir) {
       if (o && ['done', 'doing', 'pending'].includes(String(o.status))) {
         it.status = String(o.status)
         it.note = String(o.note || '')
+        it.at = Number(o.at ? Date.parse(o.at) : 0) || 0
+        it.dueAt = Number(o.dueAt || 0) || 0
         it.source = 'status'
+        if (it.status !== 'done' && it.dueAt && Date.now() > it.dueAt) { it.risk = true; it.overdue = true }
       }
     }
   } catch { /* 无状态文件 */ }

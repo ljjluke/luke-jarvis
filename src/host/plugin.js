@@ -908,6 +908,72 @@ export function apply(ctx, config) {
           })
         )
 
+        // 0.96) 老板字幕：读会话最近几条，用 LLM 归纳成一句（≤60 字，老板视角）
+        ctx.effect(() => {
+          const __capCache = { key: '', at: 0, text: '' }
+          return webSvc2.register({
+            kind: 'exact',
+            path: '/api/jarvis/boss-caption',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '')
+                const sid = (url.match(/[?&]session=([^&]+)/) || [])[1] || ''
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) return sendJson(res, 200, { ok: true, caption: '' })
+                const os = _require('node:os')
+                const cp = _require('node:child_process')
+                const enc = '--' + String(cwd).replace(/^\//, '').replace(/\//g, '-') + '--'
+                const file = path.join(os.homedir(), '.dsh/sessions', enc, sid, 'session.v4.jsonl.zstd')
+                if (!sid || !fsm.existsSync(file)) return sendJson(res, 200, { ok: true, caption: '' })
+                let text = ''
+                try { text = cp.execSync(`zstdcat "${file}" | tail -n 300`, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 }) } catch { text = '' }
+                const msgs = []
+                for (const line of text.split('\n')) {
+                  if (!line.trim()) continue
+                  try {
+                    const e = JSON.parse(line)
+                    if (e.type !== 'assistant/message') continue
+                    const parts = (e.data && e.data.message && e.data.message.content) || []
+                    const body = (Array.isArray(parts) ? parts : []).filter((x) => x && x.type === 'text').map((x) => String(x.text || '')).join(' ').trim()
+                    if (body) msgs.push(body.slice(0, 300))
+                  } catch {}
+                }
+                const last = msgs.slice(-5).join('\n---\n')
+                if (!last) return sendJson(res, 200, { ok: true, caption: '' })
+                const key = cwd + '|' + sid + '|' + last.slice(-120)
+                if (__capCache.key === key && Date.now() - __capCache.at < 60000) return sendJson(res, 200, { ok: true, caption: __capCache.text, cached: true })
+                let caption = ''
+                try {
+                  const llm = ctx.get('llm')
+                  const dm = ctx.get('agentDefaultModel')
+                  const sel = dm && typeof dm.currentSelection === 'function' ? dm.currentSelection() : null
+                  if (llm && typeof llm.stream === 'function' && sel && sel.provider && sel.model) {
+                    const prompt = [
+                      '下面是工程师最近的工作记录（可能含技术细节）：',
+                      last,
+                      '请站在公司老板角度，用一句中文（≤60 字）说清楚：最近做出了什么结果 / 还差什么。',
+                      '不要出现文件名、命令、工具名、代码、缩写；不要编造；只输出一句话。',
+                    ].join('\n')
+                    for await (const ch of llm.stream({ provider: sel.provider, model: sel.model, temperature: 0.2, maxTokens: 120, system: '你用老板听得懂的中文，一句话总结进展，不堆术语。', messages: [{ role: 'user', content: prompt }] })) {
+                      if (ch && ch.type === 'text-delta' && typeof ch.text === 'string') caption += ch.text
+                      if (ch && ch.type === 'finish' && ch.reason && ch.reason.kind === 'error') break
+                    }
+                  }
+                } catch { caption = '' }
+                if (!caption) {
+                  const raw = last.split('\n---\n').pop() || last
+                  caption = raw.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ').replace(/[#*_>|-]+/g, ' ').replace(/[A-Za-z]:?[\\/][^\s，。；;）)]*/g, ' ').replace(/\s{2,}/g, ' ').trim().split(/(?<=[。！？!?])/)[0].slice(0, 60)
+                }
+                caption = String(caption || '').replace(/\s{2,}/g, ' ').trim().slice(0, 60)
+                __capCache.key = key; __capCache.at = Date.now(); __capCache.text = caption
+                return sendJson(res, 200, { ok: true, caption })
+              } catch (e) {
+                return sendJson(res, 200, { ok: false, caption: '', error: String((e && e.message) || e) })
+              }
+            },
+          })
+        })
+
         // 0.965) 需求视角（老板卡）：需求清单总数/完成/正在做第几条
         ctx.effect(() =>
           webSvc2.register({
@@ -990,7 +1056,9 @@ export function apply(ctx, config) {
                     const parts = Array.isArray(msg.content) ? msg.content : []
                     const body = parts.filter((x) => x && x.type === 'text').map((x) => String(x.text || '')).join(' ').trim()
                     if (!body) continue
-                    latestAssistant = body.slice(0, 400)
+                    // 字幕只收自然语言汇报，拒收工程日志（否则老板看不懂）
+                    const logish = /^#|本轮完成|已推送|已继续|commit|修复|实现|步骤|代码|测试通过|部署/.test(body)
+                    if (!logish && body.length <= 300) latestAssistant = body.slice(0, 400)
                     if (/^<[^>]+>/.test(body) && body.length < 120) continue
                     reports.push({ time: Number(e.time || 0), text: body.slice(0, 600) })
                   } catch { /* 坏行跳过 */ }

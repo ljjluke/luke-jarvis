@@ -70,6 +70,7 @@ export const DELIVER_TOOLS = [
         id: { type: 'string', description: 'set 用：需求编号（R1/F1…）' },
         status: { type: 'string', description: 'set 用：done / doing / pending' },
         note: { type: 'string', description: 'set 用：证据/说明（交付物路径或验收结论）' },
+        dueAt: { type: 'number', description: 'set 用：计划完成时间（epoch ms，用于逾期风险）' },
         projectDir: { type: 'string', description: '工作区目录（默认当前会话）' },
       },
     },
@@ -94,9 +95,17 @@ export const DELIVER_TOOLS = [
         let cur = { items: {} }
         try { cur = JSON.parse(fsx.readFileSync(file, 'utf8')) } catch {}
         cur.items = cur.items || {}
-        cur.items[id] = { status, note: String(args?.note ?? ''), at: new Date().toISOString() }
+        cur.items[id] = { status, note: String(args?.note ?? ''), at: new Date().toISOString(), dueAt: Number(args?.dueAt || 0) || 0 }
         fsx.mkdirSync(path.dirname(file), { recursive: true })
         fsx.writeFileSync(file, JSON.stringify(cur, null, 1))
+        // 单条完成 → 追加归档（回收前留痕，可回看）
+        try {
+          if (status === 'done') {
+            const ad = path.join(projectDir, '.jarvis/reports/requirements-archive.jsonl')
+            fsx.mkdirSync(path.dirname(ad), { recursive: true })
+            fsx.appendFileSync(ad, JSON.stringify({ id, status, note: String(args?.note ?? ''), at: new Date().toISOString() }) + '\n')
+          }
+        } catch {}
         return { action, digest: requirementsDigest(projectDir), verdict: '已更新 ' + id + ' → ' + status }
       }
       return { action, digest: requirementsDigest(projectDir) }
@@ -1173,7 +1182,7 @@ export const DELIVER_TOOLS = [
               const okRecord = outs.some((n) => {
                 try {
                   const rec = JSON.parse(fsx.readFileSync(pathx.join(vdir, n), 'utf8'))
-                  const pass = String(rec.verdict || '').toUpperCase() === 'PASS'
+                  const pass = String(rec.verdict || '').toUpperCase() === 'PASS' && String(rec.taskId || '') === String(args?.ticketId || '')
                   const mt = fsx.statSync(pathx.join(vdir, n)).mtimeMs
                   return pass && now - mt < 24 * 3600 * 1000
                 } catch { return false }

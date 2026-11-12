@@ -840,6 +840,7 @@ export const ORG_TOOLS = [
       taskId: { type: 'string', description: '沿用旧任务编号（可选，仅记录进授权依据）' },
       stakes: { type: 'string', description: '赌注 high/medium/low（默认 medium，影响 ponder 深度说明）' },
       dependencies: { type: 'string', description: '依赖说明（可选；写入授权依据，由 captain 按依赖顺序派发）' },
+      requirementId: { type: 'string', description: '关联需求编号（R1/F1…）：完成时自动回写需求状态，强烈建议填' },
       projectDir: { type: 'string', description: '项目目录（默认当前会话工作区）' },
     },
     required: ['assignee', 'subject'],
@@ -871,6 +872,7 @@ export const ORG_TOOLS = [
     const assignee = String(args.assignee ?? '').trim()
     const subject = String(args.subject ?? '').trim()
     if (!assignee || !subject) return { ok: false, summary: '⛔ 派活需要 assignee（成员名）与 subject（任务标题）' }
+    if (!String(args.requirementId ?? '').trim()) return { ok: false, summary: '⛔ 派活必须关联需求编号 requirementId（R1/F1…）：否则完成无法回写需求状态，老板看不到交付进度' }
     const projectDir = String(args.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || ''
     const rt = getRuntimeContext()
     const toolsSvc = rt && typeof rt.get === 'function' ? rt.get('tools') : undefined
@@ -923,11 +925,13 @@ export const ORG_TOOLS = [
     ].filter(Boolean).join('\n')
     const depNote = args.dependencies ? `依赖：${String(args.dependencies).trim()}` : ''
     const teamNote = args.team ? `归属：${String(args.team).trim()}${args.taskId ? `（沿用编号 ${String(args.taskId).trim()}）` : ''}` : ''
+    const requirementId = String(args.requirementId ?? '').trim()
     const ticketArgs = {
       action: 'open',
       title: subject,
       role: assignee,
       stage: 'build',
+      requirementId,
       brief,
       mandate: JSON.stringify({ strength: 'explicit', basis: [body || subject, acceptance ? `验收标准：${acceptance}` : '', depNote, teamNote].filter(Boolean).join('；'), by: 'captain:dispatch_task' }),
     }
@@ -965,7 +969,7 @@ export const ORG_TOOLS = [
         cardMissing,
         briefChars: brief.length,
         inner,
-        summary: `任务「${subject}」已开单派给 ${assignee}（原生 subagents 执行，单号 ${taskId || '见 jarvis_ticket list'}）；须知（含${cardPath ? '角色卡' : '角色卡缺失提示'} + ponder 指引）已经 meta.brief 直达成员简报。${cardMissing ? '⚠️ 该角色还没有卡：建议先蒸馏再让他开工。' : ''}${meetingHint}`,
+        summary: `任务「${subject}」已开单派给 ${assignee}（原生 subagents 执行，单号 ${taskId || '见 jarvis_ticket list'}）；须知（含${cardPath ? '角色卡' : '角色卡缺失提示'} + ponder 指引）已经 meta.brief 直达成员简报。${cardMissing ? '⚠️ 该角色还没有卡：建议先蒸馏再让他开工。' : ''}${requirementId ? '' : '⚠️ 未关联需求编号（requirementId）：需求状态不会自动回写。'}${meetingHint}`,
       }
     } catch (e) {
       return { ok: false, dispatched: false, cardPath, cardMissing, briefChars: brief.length, inner, summary: `⚠️ 建任务抛错：${String((e && e.message) || e)}` }
