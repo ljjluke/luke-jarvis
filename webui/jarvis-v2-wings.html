@@ -650,6 +650,7 @@ async function loadRecent(){
     const r=await fetch(apiUrl('/api/jarvis/session-recent')+(apiUrl('/api/jarvis/session-recent').includes('?')?'&':'?')+'session='+encodeURIComponent(qsSession||window.__activeSessionId||''),{cache:'no-store'});
     const b=await r.json();
     LIVE.recent=(b&&b.reports)||[];
+    try{if(b&&b.latestAssistant){const raw=String(b.latestAssistant).replace(/[#*`>\-]+/g,' ').replace(/\s+/g,' ').trim();const first=raw.split(/(?<=[。！？!?])/)[0]||raw;const txt=first.slice(0,96);if(txt){LIVE.liveCaption=txt;LIVE.liveCaptionAt=Date.now();if(!speakingNow){const cap=document.getElementById('captionText');if(cap&&cap.textContent!==txt)cap.textContent=txt}}}}catch(e){}
     if(LIVE.snap)renderCards(LIVE.snap);
   }catch{/* 汇报读取失败不影响主状态 */}
 }
@@ -677,6 +678,25 @@ function cardMemory(){
    detail:{kicker:'BOSS VIEW · 决策/风险/交付',title:'该让你知道的',
     meta:[['决策',String(c.decisions||0)],['风险',String(c.risks||0)],['冲突',String(c.conflicts||0)],['交付',String(c.deliverables||0)]],
     rows:rows.slice(0,14)}}
+}
+LIVE.req=null;
+async function loadReq(){try{const r=await fetch(apiUrl('/api/jarvis/requirements'),{cache:'no-store'});LIVE.req=await r.json();if(LIVE.snap)renderCards(LIVE.snap)}catch(e){LIVE.req=null}}
+function cardRequirement(){
+  const d=LIVE.req&&LIVE.req.ok&&LIVE.req.digest;
+  if(!d||!d.total)return null;
+  // 全部完成 → 保留 2 小时后自动回收（老板已看过即可消失）
+  if(d.done===d.total){
+    try{const k='jarvis.reqDoneAt';if(!localStorage.getItem(k))localStorage.setItem(k,String(Date.now()));else if(Date.now()-Number(localStorage.getItem(k))>2*3600000)return null}catch(e){}
+  }else{try{localStorage.removeItem('jarvis.reqDoneAt')}catch(e){}}
+  const hm=(ms)=>{try{const t=new Date(Number(ms));return String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0')}catch(e){return '—'}};
+  const pct=d.total?Math.round(d.done/d.total*100):0;
+  const doneItems=(d.items||[]).filter(x=>x.status==='done');
+  return {id:'req-digest',kind:'requirement',k:'老板汇报 · 需求交付',st:d.done+'/'+d.total+'（'+pct+'%）',
+    title:'需求完成 '+d.done+'/'+d.total+' 条',
+    copy:'已完成 '+d.done+' 条 · '+String(d.activeTasks||0)+' 项进行中'+(d.risks?(' · ⚠ '+d.risks+' 条有风险'):'')+' · 最近更新 '+hm(d.updatedAt),
+    detail:{kicker:'BOSS REPORT · 需求交付',title:(d.doc||'需求规格'),
+      meta:[['需求总数',String(d.total)],['已完成',String(d.done)+'（'+pct+'%）'],['进行中',String(d.activeTasks||0)],['最近更新',hm(d.updatedAt)]],
+      rows:(d.items||[]).map(function(x){var chips=[{t:x.status==='done'?'已完成':x.status==='doing'?'进行中':'待开始',c:x.status==='done'?'ok':x.status==='doing'?'mut':''}];if(x.risk&&x.status!=='done')chips.push({t:'风险',c:'bad'});return {main:reportText(String(x.title),110),chips:chips,sub:x.status==='done'?'已交付':(x.risk?'有失败/阻塞，需要关注':(x.status==='doing'?'团队在做':'待启动'))}})}}
 }
 LIVE.pages=[];
 async function loadPages(){
@@ -734,7 +754,7 @@ function actionMarkup(c,i){
 function renderCards(snap){
   if(LIVE.dragging){LIVE.pendingSnap=snap;return}
   // 只展示「有价值」的卡片，按优先级取前 4 张；空工作区一张都不显示（不摆空壳/提示）
-  const order=[cardDecision,cardProposal,cardBlocked,cardPages,cardRecent,cardMemory,cardMission,cardReport,cardQueue,cardTeam,cardGC];
+  const order=[cardRequirement,cardPages];
   const cards=order.map(f=>{try{return f(snap)}catch(e){console.warn('card',e);return null}}).filter(Boolean);
   const picked=cards.filter(c=>c&&c.title).slice(0,4);
   const layer=$('#cardLayer'),svg=$('#linkLines');if(!layer)return;
@@ -864,7 +884,13 @@ mainView.addEventListener('keydown',e=>{
 function renderMain(snap){
   renderCards(snap);
   const cap=$('#captionText');
-  let capText='当前没有待办。你可以直接告诉我下一个目标。';
+  let capText='待命中：当前没有进行中的需求，你可以直接告诉我下一个目标。';
+  // 优先跟随 DSH 会话最新内容（30s 内有效），其次需求进度
+  if(LIVE.liveCaption&&Date.now()-(LIVE.liveCaptionAt||0)<30000)capText=LIVE.liveCaption;
+  else if(LIVE.req&&LIVE.req.ok&&LIVE.req.digest&&LIVE.req.digest.total){
+    const dg=LIVE.req.digest;
+    capText='老板汇报：需求已完成 '+dg.done+'/'+dg.total+' 条，'+String(dg.activeTasks||0)+' 项在进行'+(dg.risks?('，⚠ '+dg.risks+' 条有风险'):'')+'，最近更新 '+(dg.updatedAt?new Date(Number(dg.updatedAt)).toTimeString().slice(0,5):'—')+'。';
+  }
   const cards=LIVE.cards||[],decision=cards.find(c=>c.kind==='decision'),blocked=cards.find(c=>c.kind==='blocked'),doing=cards.find(c=>c.kind==='doing'),done=cards.find(c=>c.kind==='done');
   if(decision)capText=`需要你决定：${taskText(decision.title,58)}。可以点卡片选择，也可以直接告诉我。`;
   else if(blocked)capText=`有一项工作需要协调：${taskText(blocked.title,58)}。${reportText(blocked.copy,55)}`;
@@ -1088,11 +1114,11 @@ document.getElementById('detailBody').addEventListener('keydown',e=>{
   const row=e.target.closest&&e.target.closest('[data-page]');
   if(row)showPageIframe(row.dataset.page,row.dataset.ptitle);
 });
-loadState();loadEvents();loadPages();loadRecent();loadMemory();
+loadState();loadEvents();loadPages();loadRecent();loadMemory();loadReq();
 setInterval(loadState,5000);
 setInterval(loadEvents,3000);
 setInterval(loadPages,15000);
-tickClock();setInterval(tickClock,1000);setInterval(loadRecent,10000);setInterval(loadMemory,15000);
+tickClock();setInterval(tickClock,1000);setInterval(loadRecent,10000);setInterval(loadMemory,15000);setInterval(loadReq,5000);
 })();
 </script>
 

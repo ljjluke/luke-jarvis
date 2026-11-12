@@ -917,7 +917,18 @@ export function apply(ctx, config) {
               try {
                 const cwd = requestWorkspace(ctx, req)
                 if (!cwd) return sendJson(res, 200, { ok: true, active: false, digest: null })
-                return sendJson(res, 200, { ok: true, active: true, digest: requirementsDigest(cwd) })
+                const digest = requirementsDigest(cwd)
+                // 全部完成 → 回收前先归档一页老板简报（可回看，不静默消失）
+                try {
+                  if (digest && digest.total && digest.done === digest.total) {
+                    const fsx = _require('node:fs'); const pathx = _require('node:path')
+                    const d = new Date().toISOString().slice(0, 10)
+                    const file = pathx.join(cwd, '.jarvis/reports/boss-' + d + '.json')
+                    fsx.mkdirSync(pathx.dirname(file), { recursive: true })
+                    if (!fsx.existsSync(file)) fsx.writeFileSync(file, JSON.stringify({ at: new Date().toISOString(), digest }, null, 1))
+                  }
+                } catch { /* 归档失败不影响读 */ }
+                return sendJson(res, 200, { ok: true, active: true, digest })
               } catch (e) {
                 return sendJson(res, 200, { ok: false, digest: null, error: String((e && e.message) || e) })
               }

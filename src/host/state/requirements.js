@@ -65,6 +65,7 @@ export function requirementsDigest(projectDir) {
       if (n > bestN) { bestN = n; best = t }
     }
     it.status = best && bestN >= 1 ? (TERM.has(best.status) ? 'done' : (['in_progress', 'claimed', 'working'].includes(best.status) ? 'doing' : 'pending')) : 'pending'
+    it.risk = Boolean(best && ['failed', 'blocked', 'cancelled'].includes(best.status))
     it.task = best ? best.subject.slice(0, 50) : ''
     seen.push(it)
   }
@@ -98,5 +99,6 @@ export function requirementsDigest(projectDir) {
   } catch {}
   try { const dd = path.join(base, 'docs'); for (const n of fs.readdirSync(dd).slice(0, 80)) touch(path.join(dd, n)) } catch {}
   const activeTasks = tasks.filter((t) => ['in_progress', 'claimed', 'working'].includes(t.status)).length
-  return { doc: docFile, total: seen.length, done, doing, current: current >= 0 ? current + 1 : null, activeTasks, updatedAt, items: seen.slice(0, 20) }
+  const risks = seen.filter((x) => x.risk && x.status !== 'done').length
+  return { doc: docFile, total: seen.length, done, doing, risks, current: current >= 0 ? current + 1 : null, activeTasks, updatedAt, items: seen.slice(0, 20) }
 }
