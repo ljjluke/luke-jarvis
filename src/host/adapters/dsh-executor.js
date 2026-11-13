@@ -160,6 +160,61 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     saveExecMap(root, execMap)
   }
 
+  /* ── 按角色复用子会话 ────────────────────────────────────────────────
+     问题（用户实测）：每派一单就新开一个子会话，子会话数随任务线性叠加；
+     同一角色（如「前端」）做了 10 单就开了 10 个子会话，且新会话没有角色记忆。
+     正确做法：一个角色在整个项目里只开一个子会话，后续任务用 followup 投递进去。
+
+     实现：exec-map.json 里已有 childId 记录（跨进程存活），按 role 反查。
+     复用条件（全部满足才复用）：
+       ① 该角色确有 childId；
+       ② 该子会话仍活着（agent 存在且非已终结）；
+       ③ 它当前不在「正在执行另一单」的状态（避免两单交错写入）。
+     否则新建——宁可多开一个，也不能把任务投进一个可能已死的会话。 */
+  function findReusableChild(runtime, role) {
+    const wanted = String(role || '').trim()
+    if (!wanted) return null
+    let ctx = null
+    try { ctx = getRuntimeContext() } catch { return null }
+    const agents = (() => { try { return ctx && ctx.agents && ctx.agents.list ? ctx.agents.list() : [] } catch { return [] } })()
+    const liveIds = new Map()
+    for (const a of Array.isArray(agents) ? agents : []) {
+      try {
+        const sid = String((a && a.session && a.session.id) || '')
+        if (sid) liveIds.set(sid, a)
+      } catch { /* 单个坏条目跳过 */ }
+    }
+    // 反查：这个角色最近一次派发用的 childId（retired 的跳过——已换人）
+    let best = null
+    for (const [, slot] of Object.entries(execMap)) {
+      for (const [, info] of Object.entries(slot || {})) {
+        if (String(info && info.role || '') !== wanted) continue
+        if (info && info.retired) continue
+        const childId = String(info && info.childId || '')
+        if (!childId) continue
+        const at = String(info.startedAt || '')
+        if (!best || at > best.at) best = { childId, at }
+      }
+    }
+    if (!best) return null
+    const agent = liveIds.get(best.childId)
+    if (!agent) return null                       // 会话已不存在：不复用
+    let status = ''
+    try { status = String(agent.status || '') } catch { status = '' }
+    if (status === 'ended' || status === 'closed' || status === 'terminated') return null
+    // 正在跑另一单：不复用（避免交错）
+    if (status === 'running' || status === 'working') {
+      try {
+        const engine = getEngine && getEngine()
+        const agentTicket = engine && typeof engine.viewByChild === 'function' ? engine.viewByChild(best.childId) : null
+        if (agentTicket && !agentTicket.ticket.ended) return null
+      } catch { /* 查不到归属就不复用（保守） */ }
+      return null
+    }
+    console.debug(`[luke-jarvis] 复用角色「${wanted}」的子会话 ${best.childId}`)
+    return best.childId
+  }
+
   async function deliverPrompt(runtime, parent, childId, content) {
     if (typeof runtime.followup === 'function' && parent) {
       return runtime.followup.call(runtime, parent, childId, content, {})
@@ -275,6 +330,29 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     const brief = memberBrief(ticket, assignment, employee, root)
     // 第 ④ 层：派发时插件自动落一份 STATUS.md 事实骨架（成员失忆也能从这里恢复）
     try { autoWriteStatus(root, ticket, assignment) } catch { /* 写失败不影响派发 */ }
+
+    // ── 按角色复用：同一角色只开一个子会话（用户实测要求）──────────────
+    // 先看这个角色是否已有活着的子会话，有就用 followup 把新任务投进去，不新建。
+    const reuseId = findReusableChild(runtime, assignment.role)
+    if (reuseId) {
+      try {
+        const content = [
+          memberResumeHint(ticket, assignment, root),
+          '',
+          brief,
+        ].join('\n')
+        await deliverPrompt(runtime, parent, reuseId, content)
+        children.add(reuseId)
+        record(ticket.id, assignment.id, { childId: reuseId, provider, role: assignment.role, reused: true, startedAt: new Date().toISOString() })
+        appendEvent(root, 'assignment.reused', { ticketId: ticket.id, assignmentId: assignment.id, role: assignment.role, childId: reuseId })
+        watchChild(ticket.id, assignment.id, reuseId, parent)
+        return reuseId
+      } catch (e) {
+        // 复用投递失败（如会话刚死）：退回新建，不让任务卡住
+        try { appendEvent(root, 'assignment.reuse.failed', { role: assignment.role, childId: reuseId, error: String((e && e.message) || e) }) } catch { /* 审计失败忽略 */ }
+      }
+    }
+
     const label = `${labelPrefix}:${ticket.id}:${assignment.role}`
     const spec = {
       provider,
@@ -328,6 +406,31 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     childOf(ticketId, assignmentId) {
       const slot = execMap[ticketId] || {}
       return slot[assignmentId] ? slot[assignmentId].childId : null
+    },
+    /** 换人（CEO 认为该角色绩效不行时才调）：终止该角色现有子会话，
+     *  并在 exec-map 里标记 retired——下次派发不会复用它，而是新建一个。
+     *  正常流程不该调用：默认按角色复用同一子会话，只有绩效问题才换。 */
+    retireRole(role, reason) {
+      const wanted = String(role || '').trim()
+      if (!wanted) return { retired: 0 }
+      let retired = 0
+      const ctx = (() => { try { return getRuntimeContext() } catch { return null } })()
+      for (const [tid, slot] of Object.entries(execMap)) {
+        for (const [aid, info] of Object.entries(slot || {})) {
+          if (String(info && info.role || '') !== wanted) continue
+          const childId = String(info && info.childId || '')
+          if (!childId) continue
+          try {
+            const agent = ctx && ctx.agents && ctx.agents.get(childId)
+            if (agent && typeof agent.cancel === 'function') agent.cancel({ kind: 'user' }, {})
+          } catch { /* 取消失败不阻断标记 */ }
+          slot[aid] = { ...info, retired: true, retiredAt: new Date().toISOString(), retireReason: String(reason || '') }
+          retired++
+        }
+      }
+      if (retired) saveExecMap(root, execMap)
+      try { appendEvent(root, 'assignment.role.retired', { role: wanted, retired, reason: String(reason || '') }) } catch { /* 审计失败忽略 */ }
+      return { retired }
     },
   }
 }

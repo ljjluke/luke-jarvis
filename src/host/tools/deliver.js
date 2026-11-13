@@ -921,7 +921,7 @@ export const DELIVER_TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'adjudicate / open / list / get / report / retry / stop / propose（成员自主找活提案）/ dismiss（驳回提案）（默认 list）' },
+        action: { type: 'string', description: 'adjudicate / open / list / get / report / retry / stop / retire（换人：终止某角色的子会话，下次派发新建）/ propose（成员自主找活提案）/ dismiss（驳回提案）（默认 list）' },
         proposalId: { type: 'string', description: '提案 id（open 引用提案开单；dismiss 驳回指定提案；propose 不用）' },
         why: { type: 'string', description: '提案的业务理由：从哪发现的活（黑板未决项 id/教训 id/待办路径）、解决了什么业务问题（propose 用）' },
         deliberation: { type: 'string', description: '提案的推演摘要：方案对比+择优理由（为什么值得干、为什么这么干最好）——没推演的提案不收（propose 用）' },
@@ -968,7 +968,7 @@ export const DELIVER_TOOLS = [
       const executor = dshExecutorFor(projectDir, () => _ticketEngines.get(projectDir) || null)
       // 成员越权守卫：本执行器派出的成员禁止 open/adjudicate/retry/stop/dismiss（captain 专属，防递归开单）
       const callerId = exec && exec.agent && exec.agent.id
-      if (callerId && executor.isChild(callerId) && ['open', 'adjudicate', 'retry', 'stop', 'dismiss'].includes(action)) {
+      if (callerId && executor.isChild(callerId) && ['open', 'adjudicate', 'retry', 'stop', 'retire', 'dismiss'].includes(action)) {
         return { ok: false, action, verdict: `⛔ 成员只可汇报（jarvis_ticket action=report, ticketId=..., assignmentId=..., state=...）与提案找活（action=propose）；open/adjudicate/retry/stop/dismiss 是 captain 专属` }
       }
       // 流程闸（与 agent-teams 派活闸同款，软启用：仅 jarvis 模式工作区生效）：开单即派单，跳步=缺陷
@@ -1155,7 +1155,20 @@ export const DELIVER_TOOLS = [
           const ticket = engine.stop(String(args?.ticketId ?? ''), String(args?.reason ?? ''))
           return { ok: true, action, ticket, text: `已结束（${ticket.ended?.outcome}）`, verdict: `已停止 ${ticket.id}` }
         }
-        return { ok: false, action, verdict: `⛔ 未知 action：${action}（adjudicate/open/list/get/report/retry/stop/propose/dismiss）` }
+        // 换人：CEO 判定某角色绩效不行时调用。终止该角色现有子会话，
+        // 并标记 retired——下次派发会新建会话而不是复用旧的。
+        // 正常流程不该用它：默认同一角色复用同一子会话（用户在实测中明确要求）。
+        if (action === 'retire') {
+          const role = String(args?.role ?? args?.assignee ?? '').trim()
+          if (!role) return { ok: false, action, verdict: '⛔ retire 需要 role（要换掉的角色名，如「前端」）' }
+          const r = executor.retireRole(role, String(args?.reason ?? ''))
+          return {
+            ok: true, action, verdict: r.retired
+              ? `✅ 已换人：角色「${role}」的 ${r.retired} 个子会话已终止，下次派发会新建（原因：${args?.reason || '未说明'}）`
+              : `没有找到角色「${role}」的子会话记录——它可能是新建的或已自然结束，下次派发会直接新建。`,
+          }
+        }
+        return { ok: false, action, verdict: `⛔ 未知 action：${action}（adjudicate/open/list/get/report/retry/stop/retire/propose/dismiss）` }
       } catch (error) {
         const code = error && error.code ? String(error.code) : ''
         return { ok: false, action, verdict: `⛔ ${String((error && error.message) || error)}${code ? `（${code}）` : ''}` }
