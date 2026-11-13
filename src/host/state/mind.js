@@ -200,6 +200,67 @@ export function mindStats(projectDir) {
   return { total: all.length, faded, pinned: all.filter((e) => e.pinned).length }
 }
 
+/** 知识库体检：用真实数据判断「记忆系统是否在用起来」。
+ *
+ *  为什么需要它：语义检索、衰减调参这些优化，只有在「有真实数据」时才有意义。
+ *  这个体检回答三个更前置的问题：
+ *    ① 库里到底有没有东西？（写入是否发生）
+ *    ② 有多少条从没被引用过？（recall 是否在生效）
+ *    ③ 有没有近义重复？（是否真的需要语义合并）
+ *  判据全部机器可算，不依赖模型。
+ */
+export function mindAudit(projectDir) {
+  const all = materialize(projectDir)
+  const now = Date.now()
+  const stats = mindStats(projectDir)
+  if (!all.length) {
+    return { ...stats, health: 'empty', verdict: '知识库是空的——说明「巩固」还没发生。优先让人真的沉淀，而不是优化检索算法。' }
+  }
+  // ① 从没被引用 = refs 停在初始值 1（remember 时记的）
+  const neverUsed = all.filter((e) => Number(e.refs || 1) <= 1)
+  // ② 近义候选：两条文本的字符集重合率 ≥ 0.85（同义不同词的粗筛，供人工判断）
+  const nearDup = []
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const a = charSet(all[i].text), b = charSet(all[j].text)
+      if (!a.size || !b.size) continue
+      let common = 0
+      for (const c of a) if (b.has(c)) common++
+      const ratio = common / Math.min(a.size, b.size)
+      if (ratio >= 0.85) nearDup.push({ a: all[i].text.slice(0, 40), b: all[j].text.slice(0, 40), ratio: Number(ratio.toFixed(2)) })
+    }
+  }
+  // ③ 分布：类型 / 领域
+  const kinds = {}, domains = {}
+  for (const e of all) {
+    kinds[e.kind || 'lesson'] = (kinds[e.kind || 'lesson'] || 0) + 1
+    for (const d of e.domains || ['common']) domains[d] = (domains[d] || 0) + 1
+  }
+  const usageRatio = all.length ? (all.length - neverUsed.length) / all.length : 0
+  let health = 'healthy', advice = ''
+  if (usageRatio < 0.2) {
+    health = 'unused'
+    advice = `仅 ${Math.round(usageRatio * 100)}% 的条目被引用过——真问题不是检索算法，是 recall 没被调用。先让模型在每个任务开工前真的调 jarvis_recall。`
+  } else if (nearDup.length > all.length * 0.3) {
+    health = 'redundant'
+    advice = `近义重复占 ${Math.round(nearDup.length / all.length * 100)}%——这时语义合并才有价值。但现在仍建议人工确认后手动合并，不要自动。`
+  } else if (stats.faded > all.length * 0.5) {
+    health = 'fading'
+    advice = '淡出条目过半——衰减可能过激，或这批经验确实没再用上。检查是否需要标红线或调低衰减率。'
+  } else {
+    advice = '知识库在正常使用：写入在发生、条目在被引用、重复率低。无需优化。'
+  }
+  return {
+    ...stats, health, usageRatio: Number(usageRatio.toFixed(2)), neverUsed: neverUsed.length,
+    nearDuplicates: nearDup.slice(0, 10), nearDupCount: nearDup.length,
+    kinds, domains, verdict: advice,
+  }
+}
+
+function charSet(text) {
+  return new Set(String(text || '').toLowerCase().replace(/[^\w一-龥]/g, '').split(''))
+}
+
 /** 压缩：把 append-only 的多行合并成单行（低频调用，防文件无限增长）。 */
 export function compactMind(projectDir) {
   try {

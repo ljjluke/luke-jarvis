@@ -9,7 +9,7 @@
  *                    是「越用越聪明」的载体。
  */
 import { createRequire } from 'node:module'
-import { remember, recall, markUsed, mindStats, domainDigest, compactMind } from '../state/mind.js'
+import { remember, recall, markUsed, mindStats, mindAudit, domainDigest, compactMind } from '../state/mind.js'
 
 const _require = createRequire(import.meta.url)
 
@@ -71,7 +71,7 @@ export const MIND_TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'consolidate 巩固沉淀 / used 记录引用 / pin 标红线 / stats 统计 / compact 压缩（默认 stats）' },
+        action: { type: 'string', description: 'consolidate 巩固沉淀 / used 记录引用 / pin 标红线 / stats 统计 / audit 体检（判断记忆系统是否真在用起来）/ compact 压缩（默认 stats）' },
         text: { type: 'string', description: 'consolidate：要沉淀的内容（一句话，可复用）' },
         kind: { type: 'string', description: 'consolidate：类型 lesson(教训)/preference(客户偏好)/domain(领域经验)/fact(事实)' },
         domains: { type: 'string', description: 'consolidate：所属领域，逗号分隔（可多个，如 电商,通用）' },
@@ -121,6 +121,21 @@ export const MIND_TOOLS = [
       if (action === 'compact') {
         const r = compactMind(cwd)
         return { action, verdict: `✅ 已压缩 ${r.compacted} 个领域文件` }
+      }
+      if (action === 'audit') {
+        // 体检：用真实数据回答「记忆系统是否在用起来」，
+        // 而不是在没有数据时就去优化检索算法。
+        const a = mindAudit(cwd)
+        const lines = [
+          `规模：${a.total} 条（红线 ${a.pinned}，淡出 ${a.faded}）`,
+          `使用率：${Math.round((a.usageRatio || 0) * 100)}%（${a.neverUsed || 0} 条从未被引用）`,
+          `近义重复：${a.nearDupCount || 0} 对${a.nearDuplicates && a.nearDuplicates.length ? '（最像的：' + a.nearDuplicates.slice(0, 2).map((x) => `${x.ratio} ${x.a}／${x.b}`).join('；') + '）' : ''}`,
+          a.total ? `类型分布：${JSON.stringify(a.kinds)}` : '',
+          a.total ? `领域分布：${JSON.stringify(a.domains)}` : '',
+          '',
+          `判断：${a.verdict}`,
+        ].filter(Boolean).join('\n')
+        return { action, verdict: lines }
       }
       const s = mindStats(cwd)
       return {

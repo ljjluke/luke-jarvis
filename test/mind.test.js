@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { remember, recall, markUsed, mindStats, domainDigest, compactMind, harvestFromReport, promoteCandidates, candidateStats } from '../src/host/state/mind.js'
+import { remember, recall, markUsed, mindStats, mindAudit, domainDigest, compactMind, harvestFromReport, promoteCandidates, candidateStats } from '../src/host/state/mind.js'
 import { MIND_TOOLS } from '../src/host/tools/mindtools.js'
 
 function mkWs() {
@@ -169,6 +169,72 @@ test('压缩：多行 append 后合并，内容不丢', () => {
     compactMind(ws)
     const after = mindStats(ws)
     assert.equal(before.total, after.total, '压缩不能丢条目')
+  } finally { rmWs(ws) }
+})
+
+// ── 体检：用真实数据判断系统是否在用起来 ─────────────────────────────
+test('体检：空库时明确说「优先让人真的沉淀，而不是优化检索」', () => {
+  const ws = mkWs()
+  try {
+    const a = mindAudit(ws)
+    assert.equal(a.total, 0)
+    assert.equal(a.health, 'empty')
+    assert.ok(a.verdict.includes('空的'), '应指出库是空的')
+    assert.ok(a.verdict.includes('沉淀'), '应指出真问题是没人写')
+  } finally { rmWs(ws) }
+})
+
+test('体检：条目都属于「从未引用」时，指出真问题是 recall 没被调用', () => {
+  const ws = mkWs()
+  try {
+    for (let i = 0; i < 5; i++) remember(ws, { text: `经验${i}：独立的经验内容第${i}号`, kind: 'lesson' })
+    const a = mindAudit(ws)
+    assert.equal(a.audit_placeholder ?? a.total, 5)
+    assert.equal(a.health, 'unused', '全部没被引用时应判为 unused')
+    assert.ok(a.verdict.includes('recall'), '应指出 recall 没被调用')
+    assert.equal(a.neverUsed, 5)
+  } finally { rmWs(ws) }
+})
+
+test('体检：引用过一部分后，使用率上升、health 改善', () => {
+  const ws = mkWs()
+  try {
+    const ids = []
+    for (let i = 0; i < 4; i++) {
+      const r = remember(ws, { text: `可复用经验${i}：每次做方案前先确认验收标准第${i}项`, kind: 'lesson' })
+      ids.push(r.id)
+    }
+    // 引用其中 3 条
+    markUsed(ws, ids.slice(0, 3))
+    // 让被引用的条目时间变新（refs 也算）
+    const a = mindAudit(ws)
+    assert.ok(a.usageRatio >= 0.5, `使用率应 ≥50%，实际 ${a.usageRatio}`)
+    assert.notEqual(a.health, 'unused', '有引用后不该再判 unused')
+  } finally { rmWs(ws) }
+})
+
+test('体检：识别近义重复（字符集重合 ≥85%），供人工判断是否合并', () => {
+  const ws = mkWs()
+  try {
+    remember(ws, { text: '客户不要紫色系，要简洁留白设计' , kind: 'preference'})
+    remember(ws, { text: '客户不要紫色系要简洁留白的设计', kind: 'preference' })
+    remember(ws, { text: '接口联调前必须先对齐字段命名规范', kind: 'lesson' })
+    const a = mindAudit(ws)
+    assert.ok(a.nearDupCount >= 1, '两条近义应被识别为候选（实际 ' + a.nearDupCount + '）')
+    const pair = a.nearDuplicates[0]
+    assert.ok(pair.ratio >= 0.85)
+  } finally { rmWs(ws) }
+})
+
+test('体检：工具面可调用 audit', async () => {
+  const ws = mkWs()
+  try {
+    const mindTool = MIND_TOOLS.find((t) => t.name === 'jarvis_mind')
+    remember(ws, { text: '体检用经验：任何需求都先确认交付标准', kind: 'lesson' })
+    const r = await mindTool.execute({ action: 'audit', projectDir: ws }, null)
+    assert.ok(r.verdict.includes('规模'), '应输出规模')
+    assert.ok(r.verdict.includes('使用率'), '应输出使用率')
+    assert.ok(r.verdict.includes('判断'), '应给出判断结论')
   } finally { rmWs(ws) }
 })
 
