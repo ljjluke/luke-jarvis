@@ -3651,6 +3651,232 @@ test('T9b Wings UI：/jarvis-wings 托管 webui/jarvis-v2-wings.html（缺失时
   assert.ok(html.includes('orbital-system'), 'Wings 页面应包含全息核心结构')
 })
 
+test('T9e Wings UI 面向老板：无技术术语、无写死的演示业务、有空状态与业务化翻译', () => {
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
+  const html = fs.readFileSync(path.join(repo, '../webui/jarvis-v2-wings.html'), 'utf8')
+  // 术语只允许作为「翻译正则」的匹配模式出现（.replace(/…/），不能作为界面文案原文出现。
+  // 做法：删掉所有 .replace(...) 调用后再检查，剩下的才是真正会显示给老板的字。
+  const withoutReplace = html.replace(/\.replace\(\s*\/[^/]*\/[gimsuy]*\s*,/g, '.replace(/*tr*/')
+  for (const bad of [
+    '闸校验', '流程闸', '蒸馏', '任务票据', '黑板', '能量链路', '覆盖矩阵',
+    'MISSION ENERGY CHAIN', 'LIVE STREAM', 'AUTO REPORT', 'HOLOGRAPHIC OFFICE',
+    'SHARED MISSION BOARD', 'MISSION ID', 'LOCAL PREVIEW', 'MEMBERS ·',
+  ]) {
+    assert.ok(!withoutReplace.includes(bad), `界面文案不应出现技术术语（仅允许在翻译正则里）：${bad}`)
+  }
+  // ② 不得再写死演示业务（编造的巡检/密钥轮换/在线人数/人名）
+  for (const bad of [
+    '全局服务巡检与优化', '密钥轮换', '备用路由', '通道巡检', '路由优化',
+    '林岚', '陈默', '苏琪', '周宁', '韩松', '许言', '5 人在线',
+  ]) {
+    assert.ok(!html.includes(bad), `界面不应写死演示业务：${bad}`)
+  }
+  // ③ 必须提供老板口径的阶段映射与空状态，保证无数据时不编造
+  assert.ok(/const BOSS_STAGE=\{[^}]*clarify:\s*'需求确认'/.test(html), '应有阶段 id → 业务语言映射')
+  assert.ok(html.includes('还没有团队') || html.includes('暂无团队'), '应有无团队时的空状态')
+  assert.ok(html.includes('暂无消息'), '应有协作消息空状态')
+  // ④ host 传入的工具串必须被翻译掉，不能原样显示
+  assert.ok(/function bossify/.test(html) && /function bossGapItem/.test(html), '应有工具串→业务说法的翻译层')
+  assert.ok(/\.replace\(/g.test(html) && html.includes("'项目目录'"), '应清理文件路径')
+  // ⑤ 页面卡：任务进行中每页一张、历史入口只读、卡片上限有溢出提示
+  assert.ok(/function cardPageCards/.test(html), '应有「每个页面一张卡」的卡片生成器')
+  assert.ok(/function makePagesMoreCard/.test(html), '卡片超出主屏容量时应有汇总卡，不静默丢弃')
+  assert.ok(html.includes('data-open-history'), '右下角应有「历史看板」入口')
+  assert.ok(/function showHistory/.test(html), '应有历史看板视图')
+  assert.ok(html.includes('/jarvis-wings/archive/'), '归档页应走只读归档路由')
+  // 历史只读：不得出现恢复按钮/恢复调用
+  assert.ok(!/history[^;]*jarvis_gc/.test(html) && !html.includes('历史看板 · 恢复'), '历史入口只做查看，不做恢复')
+  // ⑥ 主屏回归护栏：真实消息不能被空状态覆盖、决策按钮不能被 innerHTML 重建、任务点每点一卡
+  assert.ok(html.includes('teamChatEmpty') && /empty\.remove\(\)/.test(html), '真实聊天消息到达时应移除空状态占位')
+  assert.ok(!/decision-actions'\)[^;]*innerHTML/.test(html) && !/acts\.innerHTML/.test(html), '决策按钮区不得被 innerHTML 重建（会丢点击监听）')
+  // ⑦ 任务点卡片：一个任务点一张卡，不设 4 张人为上限
+  assert.ok(/function cardTaskPoints/.test(html), '应有「每个任务点一张卡」的生成器')
+  assert.ok(/const order=\[cardTaskPoints/.test(html), '任务点卡应排最高优先级')
+  assert.ok(!/slice\(0,4\)/.test(html), '不得再把主屏卡死为 4 张（任务点多时都要显示）')
+  // ⑧ 左右均分：不堆积在一边
+  assert.ok(/Math\.ceil\(free\.length\/2\)/.test(html), '卡片应按数量左右均分')
+  assert.ok(/leftArr|rightArr/.test(html), '应显式分左右两列')
+})
+
+test('T9g 语音下发任务：收集需求 → 静默2秒追问补充 → 整理复述 → 确认才开工', () => {
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
+  const html = fs.readFileSync(path.join(repo, '../webui/jarvis-v2-wings.html'), 'utf8')
+  // ① 真投递通道
+  assert.ok(/async function dispatchTask/.test(html), '应有 dispatchTask 投递函数')
+  assert.ok(html.includes('/api/jarvis/chat'), '必须调用真实投递接口 /api/jarvis/chat')
+  assert.ok(/method:'POST'/.test(html) && /text:raw/.test(html), '应以 POST 把原话投递')
+
+  // ② 三段式状态机：收集 → 追问 → 确认
+  assert.ok(/let reqState/.test(html), '应有 reqState 需求收集状态')
+  assert.ok(/SILENCE_ASK_MS=2000/.test(html), '静默阈值应为 2 秒')
+  assert.ok(/function collectRequirement/.test(html), '应有「收集需求」函数')
+  assert.ok(/function askForMore/.test(html), '应有「追问还有什么要补充」函数')
+  assert.ok(/function goConfirm/.test(html), '应有「整理并复述」函数')
+  assert.ok(/function noMoreIntent/.test(html), '应有「没有了」意图判定')
+  assert.ok(/function mergeRequirement/.test(html), '应能把多段话整理成一段需求')
+
+  // ③ 流程顺序：收集后先追问，不能一上来就问确认
+  assert.ok(/collectRequirement\(text\);voiceStatus/.test(html), '语音未命中导航时应进入收集，而不是直接问确认')
+  assert.ok(!/\/\/ ③ 以上都不是[\s\S]{0,120}askConfirm/.test(html), '不得跳过收集直接弹确认')
+  assert.ok(/setTimeout\(\(\)=>\{[\s\S]{0,400}askForMore\(p\)/.test(html), '收集后应延时追问补充')
+  assert.ok(/noMoreIntent\(text\)[\s\S]{0,400}goConfirm\(reqState\)/.test(html), '听到「没有了」应进入整理复述')
+
+  // ④ 确认阶段才投递，且投递的是整理后的需求
+  assert.ok(/reqState\.stage==='confirming'/.test(html), '应有确认阶段')
+  assert.ok(/intent==='yes'[\s\S]{0,400}dispatchTask\(summary/.test(html), '确认后投递整理好的需求')
+  assert.ok(/intent==='no'[\s\S]{0,400}confirm\.cancelled/.test(html), '听到「取消」应放弃')
+
+  // ⑤ 等待期保护：待命延长、字幕不被轮询覆盖、播报期可穿透
+  assert.ok(/\(reqState\|\|pendingQuestion\)[\s\S]{0,200}18000/.test(html), '收集/确认/待答问题期间待命超时须延长')
+  assert.ok(/!window\.__JARVIS_REQ_ACTIVE__&&!window\.__JARVIS_ASKING__/.test(html), '收集/确认/待答问题期间字幕不得被状态轮询覆盖')
+  assert.ok(/speakingNow[\s\S]{0,500}noMoreIntent\(final\)/.test(html), '播报期间应允许「没有了/确认」穿透')
+
+  // ⑥ 聊天框仍真投递
+  assert.ok(/addTeamMessage\('你',text\)[\s\S]{0,500}dispatchTask\(text/.test(html), '聊天框提交也应投递给会话')
+
+  // ⑦ 文案齐备
+  for (const k of ['req.collecting', 'req.askmore', 'req.confirm', 'confirm.accepted', 'confirm.cancelled', 'confirm.timeout']) {
+    assert.ok(html.includes(`'${k}'`), `缺少需求收集流程文案：${k}`)
+  }
+})
+
+test('T9h 卡片只显示任务总结，不显示沟通过程', () => {
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
+  const html = fs.readFileSync(path.join(repo, '../webui/jarvis-v2-wings.html'), 'utf8')
+  // ① 有专门的过滤层
+  assert.ok(/function taskDigest/.test(html), '应有任务总结过滤函数')
+  assert.ok(/TALK_WORDS/.test(html) && /RESULT_WORDS/.test(html), '应区分沟通词与结果词')
+  // ② 任务点卡与完成汇报都走过滤，不能直接吐 summary
+  assert.ok(/function cardTaskPoints/.test(html), '应有任务点卡片')
+  assert.ok(/const digest=taskDigest\(x\.summary/.test(html), '任务点卡正文应经 taskDigest 过滤')
+  assert.ok(/const digest=taskDigest\(last\.summary/.test(html), '完成汇报正文应经 taskDigest 过滤')
+  assert.ok(!/copy:x\.summary\|\|/.test(html), '卡片正文不得直接使用原始 summary（会带出沟通内容）')
+  assert.ok(!/copy:last\.summary\|\|/.test(html), '完成汇报正文不得直接使用原始 summary')
+  // ③ 纯沟通时用事实描述兜底，而不是空话
+  assert.ok(/function taskFacts/.test(html), '应有事实描述兜底')
+  assert.ok(/digest\|\|taskFacts\(x\)/.test(html), '无可读总结时应用事实描述')
+  // ④ 其余卡片也不得写过程叙述（「已经接下这件事」这类沟通式描述）
+  assert.ok(!/copy:\`\$\{queued\[0\]\.role\}已经接下/.test(html), '队列卡不得写「已经接下这件事」这类过程叙述')
+  assert.ok(!/copy:'这些事都已经安排好了/.test(html), '队列详情不得写过程叙述，应用 i18n 文案')
+  assert.ok(/copy:\[q\.role,STATUS_LABEL\(q\.state\)\]/.test(html), '队列卡应显示「负责人 · 状态」这类事实')
+  // ⑤ 提案卡理由也要过沟通过滤
+  assert.ok(/const why=taskDigest\(p\.why\|\|p\.basis/.test(html), '提案理由应经 taskDigest 过滤')
+  assert.ok(!/copy:reportText\(p\.why\|\|p\.basis/.test(html), '提案卡不得直接用 reportText 吐原始理由')
+  // ⑥ 左上角只留自定义名字，不留固定标语
+  assert.ok(!html.includes('工作汇报'), '左上角不应出现固定的「工作汇报」字样')
+  assert.ok(/<div class="brand-copy"><b>JARVIS<\/b><\/div>/.test(html), '左上角应只有名字占位，由 applyPersonaName 填自定义名')
+  assert.ok(/brand\.textContent=n;/.test(html), '名字应直接写入（不加前缀符号）')
+  // ⑦ 主屏不放历史流水：最近汇报/回收站清单都进历史看板
+  assert.ok(!/cardRecent,/.test(html), '「最近汇报」卡不得出现在主屏渲染顺序里')
+  assert.ok(/history\.reports\.title/.test(html), '汇报记录应改在历史看板呈现')
+  assert.ok(/history\.trash\.title/.test(html), '回收站清单应改在历史看板呈现')
+  // ⑧ GC 卡片只在「有建议需要拍板」时出现，且路径要可读（不被 taskText 剥成乱码）
+  assert.ok(/if\(!n\)return null;/.test(html), '没有建议清理项时 GC 卡不得占主屏')
+  assert.ok(/function gcPathText/.test(html), '建议清单路径应保留完整可读形式')
+  assert.ok(!/rows:\(g\.recent\|\|\[\]\)\.map\(x=>\(\{main:taskText\(x/.test(html), '回收站路径不得用 taskText（会剥掉标识符变乱码）')
+  // ⑨ 卡片生命周期：主屏只留 5 分钟，过期滚进历史；待拍板卡常驻
+  assert.ok(/const CARD_TTL_MS = 5 \* 60 \* 1000/.test(html), '卡片保留期应为 5 分钟')
+  assert.ok(/function pruneCards\(all\)/.test(html), '应有卡片生命周期筛选')
+  assert.ok(/const alive=pruneCards\(all\)/.test(html), '主屏渲染必须经过生命周期筛选')
+  assert.ok(/const sticky = !!\(c\.action \|\| c\.kind === 'decision' \|\| c\.kind === 'blocked'\)/.test(html), '待拍板/协调卡应常驻不消失')
+  assert.ok(/function archiveCard/.test(html), '过期卡片应归档进历史')
+  assert.ok(/history\.cards\.title/.test(html), '历史看板应有卡片历史区')
+  // 卡片计时表要清理，避免无限增长
+  assert.ok(/for \(const id of \[\.\.\.LIVE\.cardBorn\.keys\(\)\]\)/.test(html), '已消失卡片的计时必须清理')
+})
+
+test('T9i 语音回显收在历史面板；需求澄清问题可显示并语音作答', () => {
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
+  const html = fs.readFileSync(path.join(repo, '../webui/jarvis-v2-wings.html'), 'utf8')
+
+  // ① 语音记录：主屏不放，收在历史面板
+  assert.ok(/window\.__JARVIS_VOICE_LOG__/.test(html), '语音记录应存在可跨块共享的位置')
+  assert.ok(/function logVoice/.test(html), '应有记录函数')
+  assert.ok(/function showHistory/.test(html) && /vlog-row/.test(html), '历史面板应渲染语音对话记录')
+  assert.ok(/history\.vlog\.title/.test(html) && /history\.vlog\.empty/.test(html), '语音记录区应有标题与空状态')
+  // 记录要写进「你」和 Jarvis 两侧
+  assert.ok(/logVoice\('me',text\)/.test(html), '用户原话必须被记录')
+  assert.ok(/logVoice\('jarvis'/.test(html), 'Jarvis 的回应也要记录')
+  // 去重：同一句话 2 秒内不重复记
+  assert.ok(/now-log\[i\]\.at<2000/.test(html), '同一句话应在 2 秒内去重')
+  assert.ok(/VOICE_LOG_MAX/.test(html), '记录应有上限，避免无限增长')
+
+  // ② 需求澄清问题：读题 + 口头作答
+  assert.ok(/window\.__JARVIS_ASK__/.test(html), '应有问题同步桥')
+  assert.ok(/function maybeAskQuestion/.test(html), '应能语音读题')
+  assert.ok(/function answerQuestion/.test(html), '应能提交口头答复')
+  assert.ok(/function pickPendingQuestion/.test(html), '应能取出待答问题')
+  // 读题只读一次，不反复打扰
+  assert.ok(/if\(q\.askedAt\)return/.test(html), '同一问题不得反复播报')
+  // 答复走真实通道写回 board
+  assert.ok(/tool:'jarvis_board'/.test(html) && /userAnswer/.test(html), '口头答复应写回团队待办记录')
+  // 语音分支：有待答问题时，用户说的就是答复
+  assert.ok(/pendingQuestion&&!reqState&&!NAV\.test\(command\)[\s\S]{0,600}answerQuestion\(q,text\)/.test(html), '有待答问题时语音应作为答复提交')
+  // 「再读一遍」可重播问题
+  assert.ok(/没听清|再读|重复/.test(html) && /askedAt=0/.test(html), '应支持「再说一遍」重读问题')
+
+  // ③ 决策卡要展示真实问题与待决清单，不再是固定两个假选项
+  assert.ok(/function cardDecision/.test(html), '应有决策卡')
+  assert.ok(/decision\.card\.copy/.test(html) && /decision\.card\.detail/.test(html), '决策卡文案应走 i18n')
+  assert.ok(/\(first\.options\|\|first\.choices\|\|\[\]\)/.test(html), '问题自带的建议选项应被采用')
+  // 快照里的 board.needsUser 是数据源
+  assert.ok(/snap\.board&&snap\.board\.needsUser/.test(html), '决策卡数据源应为 board.needsUser')
+})
+
+test('T9j 主屏字幕电影式逐句推进（与语音同步，关语音也逐句）', () => {
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
+  const html = fs.readFileSync(path.join(repo, '../webui/jarvis-v2-wings.html'), 'utf8')
+  // ① 有统一的逐句字幕播放器
+  assert.ok(/function say\(text,opts\)/.test(html), '应有统一的字幕播放器 say()')
+  assert.ok(/function capHoldMs/.test(html), '无语音时应按句长估算停留时长')
+  assert.ok(/function stopCaption/.test(html), '新字幕进来时应能停掉正在播的旧字幕')
+  assert.ok(/capToken\+\+/.test(html), '应有用代次标记作废旧循环，避免多条字幕互相打架')
+  // ② 逐句替换：每句写进 captionText，而不是整段一次贴
+  assert.ok(/cap\.textContent=s;/.test(html), '应逐句把当前句写进字幕')
+  assert.ok(/const queue=splitSentences\(clean\)/.test(html), '应按句切分')
+  // ③ 语音开时与播报同步（播完这句才换下一句）；语音关时按停留时长换句
+  assert.ok(/speakOn&&voiceEnabled/.test(html), '语音开启时应与播报同步')
+  assert.ok(/capTimer=setTimeout\(step,capHoldMs\(s\)\)/.test(html), '语音关闭时应按句长停顿后换下一句')
+  // ④ 关键节点走 say()，不再直接 setText 整段（文案先赋给 ask/msg 变量，再由 say 逐句播放）
+  for (const v of ['say(ask', 'say(msg']) {
+    assert.ok(html.includes(v), `关键节点应逐句播放：${v}`)
+  }
+  assert.ok(/say\(t\('confirm\.accepted'\)/.test(html), '确认成功应逐句播放')
+  assert.ok(!/setText\('#captionText'/.test(html), '不得再有整段直接贴字幕的写法')
+  // ⑤ 状态驱动字幕只在内容变化时重播，避免 5 秒轮询反复打断
+  assert.ok(/capText!==LIVE\.lastCapText/.test(html), '状态字幕应仅在内容变化时重播')
+  assert.ok(/window\.say&&window\.say\(capText/.test(html), '数据层应通过 window.say 调用字幕播放器')
+  // ⑥ 收集/确认/待答问题期间不覆盖字幕
+  assert.ok(/!window\.__JARVIS_REQ_ACTIVE__&&!window\.__JARVIS_ASKING__/.test(html), '这些流程期间状态轮询不得覆盖字幕')
+})
+
+test('T9f 动态页面归档：任务结束空满 5 分钟 → 卡片下线、页面进回收站（保留 30 天）', async () => {
+  const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
+  const { collect, listTrash } = await import('../src/host/adapters/trash.js')
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-arch-'))
+  fs.mkdirSync(path.join(tmp, '.jarvis', 'pages'), { recursive: true })
+  fs.writeFileSync(path.join(tmp, '.jarvis', 'pages', 'alpha.html'), '<title>Alpha</title>')
+  fs.writeFileSync(path.join(tmp, '.jarvis', 'pages', 'manifest.json'), JSON.stringify({ alpha: { title: 'Alpha' } }))
+  // 归档 = 进回收站（不是物理删除），保留期内可查
+  const r = collect(tmp, ['.jarvis/pages/alpha.html'], '任务已结束，动态页面自动归档')
+  assert.strictEqual(r.collected.length, 1, '应成功归档')
+  assert.ok(!fs.existsSync(path.join(tmp, '.jarvis', 'pages', 'alpha.html')), '原位置应已被移走（卡片下线）')
+  assert.ok(fs.existsSync(path.join(tmp, '.jarvis', 'trash', 'items', r.collected[0].id)), '文件应存在于回收站（历史可看）')
+  const t = listTrash(tmp)
+  const item = t.items.find((x) => x.state === 'in-trash' && x.orig.replace(/\\/g, '/').startsWith('.jarvis/pages/'))
+  assert.ok(item, '回收站里应能按 .jarvis/pages/ 找到归档页')
+  assert.strictEqual(item.daysLeft, 30, '保留期 30 天（到期才物理删除）')
+
+  // host 侧：5 分钟常量与「有无活」判定存在
+  const pluginSrc = fs.readFileSync(path.join(repo, '../src/host/plugin.js'), 'utf8')
+  assert.ok(/JARVIS_PAGE_IDLE_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/.test(pluginSrc), '空闲宽限期应为 5 分钟')
+  assert.ok(/function jarvisWorkOpen|const jarvisWorkOpen/.test(pluginSrc), '应能判定工作区是否还有活')
+  assert.ok(/jarvisPagesSweep\(dir, cwd\)/.test(pluginSrc), '清扫需带上工作区以判定是否有活')
+  assert.ok(/'\/jarvis-wings\/archive'/.test(pluginSrc), '应有归档页只读路由')
+  assert.ok(pluginSrc.includes('archived'), '页面接口应返回 archived 列表')
+  fs.rmSync(tmp, { recursive: true, force: true })
+})
+
 test('T9c 设置面板：Config schema 导出且 apply(ctx, config) 真实生效（ui/defaultWorkspace/voice）', async () => {
   const mod = await import('../src/host/plugin.js')
   assert.ok(mod.Config, '应导出 Config（DSH 设置面板 schema）')
@@ -4714,7 +4940,7 @@ test('UI 契约 v1：/api/jarvis/summary 轻量摘要 + /api/jarvis/capabilities
   const r2 = mk()
   await caps.handler({ url: '/api/jarvis/capabilities?workspace=' + encodeURIComponent(proj), method: 'GET', headers: {} }, r2)
   const b2 = JSON.parse(r2.body)
-  assert.strictEqual(b2.tools.length, 35, '能力清单要列全 35 个工具（34 + jarvis_gc）')
+  assert.strictEqual(b2.tools.length, 37, '能力清单要列全 37 个工具（35 + 知识库 recall/mind）')
   assert.ok(b2.panels.includes('meetings'), '面板 id 固定（UI 契约）')
   assert.ok(b2.plugin.version, '要报插件版本')
 })
@@ -4919,12 +5145,12 @@ test('v2 会话输入接真投递但仍不伪造执行（不能说"我会按流�
 })
 
 // ── 能力台：全部工具接入（清单/校验/执行/闸拒绝/界面覆盖）──────────────
-test('能力台：toolSpecs 覆盖全部 35 个工具，且每个工具都在界面的分组里（无遗漏）', async () => {
+test('能力台：toolSpecs 覆盖全部 37 个工具，且每个工具都在界面的分组里（无遗漏）', async () => {
   const { TOOL_GROUPS, toolSpecs } = await import('../src/host/state/command.js')
   const { TOOLS } = await import('../src/host/tools/index.js')
   const specs = toolSpecs()
   assert.strictEqual(specs.length, TOOLS.length, 'spec 数必须等于真实工具数')
-  assert.strictEqual(TOOLS.length, 35)
+  assert.strictEqual(TOOLS.length, 37)
   const names = new Set(TOOLS.map((t) => t.name))
   const grouped = new Set()
   for (const [g, list] of Object.entries(TOOL_GROUPS)) {
@@ -5052,7 +5278,7 @@ test('能力台路由：/api/jarvis/tools 返回 35 条；/api/jarvis/command �
   await toolsRoute.handler({ url: '/api/jarvis/tools', method: 'GET', headers: {} }, r1)
   const b1 = JSON.parse(r1.body)
   assert.strictEqual(b1.ok, true)
-  assert.strictEqual(b1.tools.length, 35, `能力台必须暴露 35 个工具，实际 ${b1.tools.length}`)
+  assert.strictEqual(b1.tools.length, 37, `能力台必须暴露 37 个工具，实际 ${b1.tools.length}`)
 
   const cmdRoute = routes.find((r) => r.path === '/api/jarvis/command')
   assert.ok(cmdRoute, '应注册 /api/jarvis/command')
