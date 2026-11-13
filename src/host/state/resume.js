@@ -82,6 +82,40 @@ function passedGatesOf(projectDir, path) {
  * 渲染「续接事实」块：全部来自磁盘，无任何"你必须先…"的指令。
  * @returns {string} 空字符串 = 没有任何可报事实（干净工作区）
  */
+/** 最新进度流水的时间戳（第 ① 层写入的 .jarvis/progress/*.jsonl）。
+ *  用于第 ② 层「新鲜度门」：project.md 是派生产物，流水才是动作真相源。 */
+function latestProgressAt(projectDir, fs, path) {
+  try {
+    const dir = path.join(projectDir, '.jarvis', 'progress')
+    let newest = 0
+    for (const n of fs.readdirSync(dir)) {
+      if (!n.endsWith('.jsonl')) continue
+      try {
+        const st = fs.statSync(path.join(dir, n))
+        if (st.mtimeMs > newest) newest = st.mtimeMs
+      } catch { /* 单文件跳过 */ }
+    }
+    return newest
+  } catch { return 0 }
+}
+
+/** 第 ② 层新鲜度门：project.md 是否落后于机器流水。
+ *  判据是单调性（时间戳比较），不依赖模型、不依赖上下文——压缩后依然可靠。
+ *  @returns {string} 过期告警文本；空字符串 = 新鲜或无法判定（不误报）
+ */
+function stalenessNote(projectDir, fs, path) {
+  const latest = latestProgressAt(projectDir, fs, path)
+  if (!latest) return ''                       // 没有流水 = 无法比较，不误报
+  try {
+    const st = fs.statSync(path.join(projectDir, '.jarvis/project.md'))
+    if (st.mtimeMs >= latest) return ''        // project.md 不落后
+    const lagMin = Math.round((latest - st.mtimeMs) / 60000)
+    if (lagMin < 5) return ''                  // 5 分钟内差异算同步（避免每轮误报）
+    const lagH = lagMin >= 60 ? `约 ${Math.round(lagMin / 60)} 小时` : `${lagMin} 分钟`
+    return `⚠️ 以下进度可能已过期（.jarvis/project.md 落后机器流水${lagH}）——动手前先用 jarvis_store(check) 复核磁盘现状，不要直接按上面写的续做。`
+  } catch { return '' }                        // project.md 不存在时另由缺口提示覆盖
+}
+
 export function renderResumeFacts(projectDir, path = _require('node:path')) {
   const fs = _require('node:fs')
   const base = String(projectDir || '')
@@ -100,6 +134,11 @@ export function renderResumeFacts(projectDir, path = _require('node:path')) {
   for (const k of ['进度', '下一步', '未决', '团队', '决策']) {
     if (picked[k]) lines.push(`${k}：${picked[k]}`)
   }
+  // 第 ③ 层：抽取失效告警——project.md 有内容但一条都没抽到，必须显性提示，
+  // 不能让续接块静默变空（那样模型和客户都不知道保护失效了）。
+  if (projectText && !Object.keys(picked).length) {
+    lines.push('⚠️ .jarvis/project.md 有内容但未识别出标准段落（进度/下一步/未决项/团队/决策）——进度格式可能已变，动手前先完整读一遍 .jarvis/project.md。')
+  }
   if (!projectText && (gates.length || openTasks.length || board.length)) {
     lines.push('进度：.jarvis/project.md 还没有内容（进度未落盘）')
   }
@@ -109,6 +148,11 @@ export function renderResumeFacts(projectDir, path = _require('node:path')) {
     const show = board.slice(0, 3).map((i) => `${i.id || '?'}${i.type ? '(' + i.type + ')' : ''}`)
     lines.push(`黑板未决：${board.length} 项（${show.join('、')}${board.length > 3 ? '…' : ''}）`)
   }
-  if (!lines.length) return ''
-  return ['【续接事实 · 插件每轮从磁盘重算（与对话记忆无关，压缩/换会话/重启后同样）】', ...lines.map((l) => '- ' + l)].join('\n')
+  // 第 ② 层：过期告警放在最前面（先看到风险，再看内容）
+  const stale = stalenessNote(base, fs, path)
+  if (!lines.length && !stale) return ''
+  const head = '【续接事实 · 插件每轮从磁盘重算（与对话记忆无关，压缩/换会话/重启后同样）】'
+  const body = lines.map((l) => '- ' + l)
+  if (stale) body.unshift('- ' + stale)
+  return [head, ...body].join('\n')
 }

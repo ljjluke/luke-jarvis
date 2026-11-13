@@ -88,6 +88,9 @@ function memberBrief(ticket, assignment, employee, projectDir) {
       ? [`4. 角色卡与协同须知（蒸馏卡全文，必须遵守）：`, ...String(ticket.meta.brief).split('\n').map((l) => `   ${l}`)]
       : []),
     `5. 独立完成本任务单；产出文件写进工作区（建议 .jarvis/outputs/ 下按 ticketId 建目录），关键结论写清楚。`,
+    `5b. 【进度自保 · 重要】随时把当前进度写进 .jarvis/outputs/${ticket.id}/STATUS.md（一行「现在做到哪 / 下一步 / 卡在哪」即可）。`,
+    `    为什么：你的对话上下文可能被压缩，压缩后那份 brief 会消失；STATUS.md 是你唯一的恢复锚点——`,
+    `    中断后先读它，就知道自己做到哪了。这也让主会话能随时查看你的真实进度。`,
     `6. 完成或阶段性进展必须汇报——调用工具 jarvis_ticket：`,
     `   action=report, ticketId=${ticket.id}, assignmentId=${assignment.id},`,
     `   state=ready（已交付）/ progress（进行中，说明做到哪）/ blocked（缺依赖或等确认）/ failed（失败及原因），`,
@@ -136,6 +139,20 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     throw new Error('无可用 prompt 投递通道')
   }
 
+  /** 成员会话续接线索：上下文压缩后成员会忘掉 brief，提醒时重新给最小可抓线索。
+   *  （长会话保活第 ④ 层：成员是独立会话，压缩同样致命，而它没有主会话那套续接注入） */
+  function memberResumeHint(ticket, assignment, projectDir) {
+    const statusPath = `.jarvis/outputs/${ticket && ticket.id ? ticket.id : assignment && assignment.id || 'unknown'}/STATUS.md`
+    return [
+      '【续接线索 · 上下文若已被压缩，以下是你该记住的最小事实】',
+      `- 任务单：${ticket && ticket.id || '?'}（${ticket && ticket.stage || '?'} 阶段）：${ticket && ticket.title || '?'}`,
+      `- 你的角色：${assignment && assignment.role || '?'}；assignmentId=${assignment && assignment.id || '?'}`,
+      `- 工作区：${projectDir}`,
+      `- 你的进度应写在：${statusPath}（若中断过，先读这个文件恢复上下文）`,
+      `- 交付物目录：.jarvis/outputs/${ticket && ticket.id || '?'}/`,
+    ].join('\n')
+  }
+
   /** 成员空闲未汇报 → 提醒（限次）；票结束即停。 */
   function watchChild(ticketId, assignmentId, childId, parent) {
     void (async () => {
@@ -157,7 +174,8 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
             runtime,
             parent,
             childId,
-            `提醒：任务单 ${ticketId} 尚未收到你的汇报。请立即调用工具 jarvis_ticket（action=report, ticketId=${ticketId}, assignmentId=${assignmentId}, state=ready|progress|blocked|failed, summary=结果摘要）。`,
+            // 提醒里带上续接线索：成员上下文可能已被压缩，brief 已丢失，这里重新给最小事实
+            `${memberResumeHint(view.ticket, asg, root)}\n\n提醒：任务单 ${ticketId} 尚未收到你的汇报。请立即调用工具 jarvis_ticket（action=report, ticketId=${ticketId}, assignmentId=${assignmentId}, state=ready|progress|blocked|failed, summary=结果摘要）。`,
           )
           appendEvent(root, 'assignment.remind', { ticketId, assignmentId, childId, round: i + 1 })
         } catch { /* 提醒失败不影响主流程 */ }
