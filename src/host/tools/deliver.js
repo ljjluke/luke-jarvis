@@ -921,16 +921,17 @@ export const DELIVER_TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'adjudicate / open / list / get / report / retry / stop / retire（换人：终止某角色的子会话，下次派发新建）/ propose（成员自主找活提案）/ dismiss（驳回提案）（默认 list）' },
+        action: { type: 'string', description: 'adjudicate / open / list / get / report / retry / stop / retire（换人：终止某角色的子会话，下次派发新建）/ orphans（列出孤儿子会话）/ clean-orphans（清理孤儿，CEO 批准即可）/ propose（成员自主找活提案）/ dismiss（驳回提案）（默认 list）' },
+        childIds: { type: 'string', description: 'clean-orphans 用：要清理的 childId，逗号分隔（不传=全部孤儿）' },
         proposalId: { type: 'string', description: '提案 id（open 引用提案开单；dismiss 驳回指定提案；propose 不用）' },
         why: { type: 'string', description: '提案的业务理由：从哪发现的活（黑板未决项 id/教训 id/待办路径）、解决了什么业务问题（propose 用）' },
         deliberation: { type: 'string', description: '提案的推演摘要：方案对比+择优理由（为什么值得干、为什么这么干最好）——没推演的提案不收（propose 用）' },
         basis: { type: 'string', description: '提案的授权依据：引用黑板项/教训/待办的具体出处（propose 用）' },
-        reason: { type: 'string', description: '驳回提案的理由（dismiss 用）' },
+        reason: { type: 'string', description: '驳回提案/换人/清理孤儿的理由（dismiss/retire/clean-orphans 用）' },
         projectDir: { type: 'string', description: '项目工作区（默认当前会话 cwd）' },
         title: { type: 'string', description: '任务单标题（open/adjudicate）' },
         stage: { type: 'string', description: '所属阶段 clarify/decompose/design/build/verify/close（默认 build）' },
-        role: { type: 'string', description: '承接角色（默认 captain）' },
+        role: { type: 'string', description: '承接角色（默认 captain）；retire 时=要换掉的角色名（如「前端」）' },
         ticketId: { type: 'string', description: '任务单 id（get/report/retry/stop）' },
         assignmentId: { type: 'string', description: '派单 id（report 默认取最近派单）' },
         state: { type: 'string', description: '汇报状态 progress/waiting/ready/blocked/failed/dropped' },
@@ -968,7 +969,7 @@ export const DELIVER_TOOLS = [
       const executor = dshExecutorFor(projectDir, () => _ticketEngines.get(projectDir) || null)
       // 成员越权守卫：本执行器派出的成员禁止 open/adjudicate/retry/stop/dismiss（captain 专属，防递归开单）
       const callerId = exec && exec.agent && exec.agent.id
-      if (callerId && executor.isChild(callerId) && ['open', 'adjudicate', 'retry', 'stop', 'retire', 'dismiss'].includes(action)) {
+      if (callerId && executor.isChild(callerId) && ['open', 'adjudicate', 'retry', 'stop', 'retire', 'orphans', 'clean-orphans', 'dismiss'].includes(action)) {
         return { ok: false, action, verdict: `⛔ 成员只可汇报（jarvis_ticket action=report, ticketId=..., assignmentId=..., state=...）与提案找活（action=propose）；open/adjudicate/retry/stop/dismiss 是 captain 专属` }
       }
       // 流程闸（与 agent-teams 派活闸同款，软启用：仅 jarvis 模式工作区生效）：开单即派单，跳步=缺陷
@@ -1168,7 +1169,29 @@ export const DELIVER_TOOLS = [
               : `没有找到角色「${role}」的子会话记录——它可能是新建的或已自然结束，下次派发会直接新建。`,
           }
         }
-        return { ok: false, action, verdict: `⛔ 未知 action：${action}（adjudicate/open/list/get/report/retry/stop/retire/propose/dismiss）` }
+        // 孤儿子会话体检（CEO 专用，客户不需介入）
+        if (action === 'orphans') {
+          const list = executor.findOrphans(callerId)
+          if (!list.length) return { ok: true, action, verdict: '✅ 没有孤儿子会话：所有派出去的成员会话都对应着活跃任务。' }
+          const lines = list.map((o, i) => `${i + 1}. [${o.role || '?'}] 任务 ${o.ticketId} → 会话 ${o.childId.slice(0, 8)}（${o.reason}）`)
+          return {
+            ok: true, action,
+            verdict: `发现 ${list.length} 个孤儿子会话：\n${lines.join('\n')}\n\n` +
+              '确认可清后调 jarvis_ticket(action=clean-orphans) 清理（CEO 批准即可，无需客户确认）。',
+          }
+        }
+        // 清理孤儿（CEO 批准即可；终止会话 + 清 exec-map 记录）
+        if (action === 'clean-orphans') {
+          const ids = String(args?.childIds ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+          const r = executor.cleanupOrphans(ids, String(args?.reason ?? 'CEO 批准清理孤儿会话'))
+          return {
+            ok: true, action,
+            verdict: r.total
+              ? `✅ 已清理 ${r.total} 个孤儿：终止会话 ${r.stopped} 个，清除记录 ${r.recordsCleaned} 条。`
+              : '没有需要清理的孤儿会话。',
+          }
+        }
+        return { ok: false, action, verdict: `⛔ 未知 action：${action}（adjudicate/open/list/get/report/retry/stop/retire/orphans/clean-orphans/propose/dismiss）` }
       } catch (error) {
         const code = error && error.code ? String(error.code) : ''
         return { ok: false, action, verdict: `⛔ ${String((error && error.message) || error)}${code ? `（${code}）` : ''}` }

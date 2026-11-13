@@ -432,6 +432,89 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
       try { appendEvent(root, 'assignment.role.retired', { role: wanted, retired, reason: String(reason || '') }) } catch { /* 审计失败忽略 */ }
       return { retired }
     },
+
+    /** 列出孤儿子会话（CEO 批准后可清理；不需要客户介入）。
+     *  孤儿判据（全部机器可判，不靠模型猜）：
+     *   ① 在 exec-map 里登记过 childId（说明是 jarvis 派出的）
+     *   ② 会话仍活着
+     *   ③ 该任务单已结束（ended）—— 任务做完会话还挂着，就是孤儿
+     *   ④ 或：被标记 retired 但会话还没真正终止
+     *   ⑤ 排掉：当前 CEO/captain 会话本身、正在跑活跃任务单的会话、以及当前会话
+     */
+    findOrphans(callerSessionId) {
+      const orphans = []
+      const ctx = (() => { try { return getRuntimeContext() } catch { return null } })()
+      const liveIds = (() => {
+        try { return new Set((ctx && ctx.agents && ctx.agents.list ? ctx.agents.list() : []).map((a) => String((a && a.session && a.session.id) || '')).filter(Boolean)) } catch { return new Set() }
+      })()
+      const engine = (() => { try { return getEngine && getEngine() } catch { return null } })()
+      const captainIds = (() => { try { const m = _require('./gates/stage.js'); return m._captainIds(String(root)) } catch { return new Set() } })()
+      const selfId = String(callerSessionId || '')
+      // 收集所有登记过的 childId（取每个角色最新一条，避免同角色多条重复列出）
+      const seen = new Map()
+      for (const [tid, slot] of Object.entries(execMap)) {
+        for (const [aid, info] of Object.entries(slot || {})) {
+          const childId = String(info && info.childId || '')
+          if (!childId) continue
+          const at = String(info.startedAt || '')
+          if (!seen.has(childId) || at > (seen.get(childId).at || '')) {
+            seen.set(childId, { ticketId: tid, assignmentId: aid, role: String(info.role || ''), at, retired: !!info.retired, reused: !!info.reused })
+          }
+        }
+      }
+      for (const [childId, meta] of seen) {
+        if (childId === selfId) continue                    // 不列当前会话
+        if (captainIds.has(childId)) continue               // 不列 CEO 自己
+        if (liveIds.has(childId) === false) {
+          // 会话已经不在了：只在 exec-map 里留了记录，也要清理记录
+          if (meta.retired) continue                        // 已换人的旧记录，无需再处理
+          orphans.push({ childId, ...meta, reason: '会话已不存在（记录未清理）', action: 'clean_record' })
+          continue
+        }
+        // 会话还活着：判断它对应的任务单是否已结束
+        let ended = false
+        try {
+          const view = engine && typeof engine.view === 'function' ? engine.view(meta.ticketId) : null
+          ended = !!(view && view.ticket && view.ticket.ended)
+        } catch { ended = false }
+        if (meta.retired) { orphans.push({ childId, ...meta, reason: '已换人但会话未终止', action: 'stop' }); continue }
+        if (ended) { orphans.push({ childId, ...meta, reason: '任务已结束但会话仍挂着', action: 'stop' }); continue }
+      }
+      return orphans
+    },
+
+    /** 清理孤儿子会话（⚠️ 只应由 CEO/captain 调用；客户不需要介入）。
+     *  @param {string[]} childIds 要清理的 childId（从 findOrphans 取；不传=全部）
+     *  @param {string} reason 清理原因（写入审计）
+     */
+    cleanupOrphans(childIds, reason) {
+      const ctx = (() => { try { return getRuntimeContext() } catch { return null } })()
+      const want = Array.isArray(childIds) && childIds.length ? new Set(childIds.map(String)) : null
+      const list = this.findOrphans('')
+      const targets = list.filter((o) => !want || want.has(o.childId))
+      let stopped = 0, recordsCleaned = 0
+      for (const o of targets) {
+        if (o.action === 'stop') {
+          try {
+            const agent = ctx && ctx.agents && ctx.agents.get(o.childId)
+            if (agent && typeof agent.cancel === 'function') agent.cancel({ kind: 'user' }, {})
+            stopped++
+          } catch { /* 取消失败继续清记录 */ }
+        }
+        // 清 exec-map 里的记录（无论会话在不在，记录都该清，否则复用索引会一直翻旧账）
+        for (const [tid, slot] of Object.entries(execMap)) {
+          for (const [aid, info] of Object.entries(slot || {})) {
+            if (String(info && info.childId || '') !== o.childId) continue
+            delete slot[aid]
+            recordsCleaned++
+          }
+          if (!Object.keys(slot || {}).length) delete execMap[tid]
+        }
+      }
+      if (recordsCleaned) saveExecMap(root, execMap)
+      try { appendEvent(root, 'assignment.orphans.cleaned', { stopped, recordsCleaned, reason: String(reason || '') }) } catch { /* 审计失败忽略 */ }
+      return { stopped, recordsCleaned, total: targets.length }
+    },
   }
 }
 
