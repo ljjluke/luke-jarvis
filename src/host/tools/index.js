@@ -12,6 +12,8 @@ import { assertObjectJsonSchema, assertSupportedJsonSchema } from './schema.js'
 import { getRuntimeContext, setRuntimeContext, rememberExec, markJarvisSession } from '../runtime.js'
 import { renderStage } from '../gates/stage.js'
 import { renderResumeFacts } from '../state/resume.js'
+import { recordProgress } from '../state/progress.js'
+import { MIND_TOOLS, mindDigestFor } from './mindtools.js'
 import { INTAKE_TOOLS } from './intake.js'
 import { MEMORY_TOOLS } from './memory.js'
 import { DISTILL_TOOLS } from './distill.js'
@@ -62,7 +64,23 @@ export function ensureAgentStageSection(agent) {
           } catch {
             facts = ''
           }
-          return (facts ? stage + '\n\n' + facts : stage) + DYNAMIC_PAGES_HINT
+          // 知识库摘要（第 ⑤ 层读取端）：极短版常驻，详细条目由 jarvis_recall 按需拉取。
+          // 为什么短：常驻内容每轮都进上下文，条目多了会爆；只放「最相关的 3 条」。
+          let mind = ''
+          try {
+            const domains = []
+            try {
+              const fsMod = _require('node:fs')
+              const proj = cwd ? fsMod.readFileSync(cwd + '/.jarvis/project.md', 'utf8') : ''
+              const m = String(proj).match(/领域[：:]\s*([^\n]{1,40})/)
+              if (m) domains.push(...m[1].split(/[、,，\/]/).map((s) => s.trim()).filter(Boolean))
+            } catch { /* 无领域标注：按强度检索 */ }
+            mind = mindDigestFor(cwd, domains)
+          } catch { mind = '' }
+          const mindBlock = mind
+            ? '\n\n【知识库摘要 · 项目积累的经验（详细条目用 jarvis_recall 拉取）】\n' + mind
+            : ''
+          return (facts ? stage + '\n\n' + facts : stage) + mindBlock + DYNAMIC_PAGES_HINT
         } catch {
           return ''
         }
@@ -87,7 +105,29 @@ function trackExecution(tool, args, exec) {
   } catch {
     /* 记账失败不影响工具本身执行 */
   }
-  return tool.execute(args, exec)
+  const isJarvis = String(tool.name).startsWith('jarvis_')
+  const cwdOf = () => {
+    try { return (exec && exec.agent && exec.agent.session && exec.agent.session.header && exec.agent.session.header.cwd) || '' } catch { return '' }
+  }
+  const note = (ok, msg) => {
+    if (!isJarvis) return
+    try { const cwd = cwdOf(); if (cwd) recordProgress(cwd, tool.name, args, { ok, note: msg || '' }) } catch { /* 落盘失败不扩散 */ }
+  }
+  let result
+  try {
+    result = tool.execute(args, exec)
+  } catch (e) {
+    // 同步抛错：失败动作也是「已发生的事实」，压缩后需要知道
+    note(false, String((e && e.message) || e))
+    throw e
+  }
+  // 异步结果：成功/失败都要记一条（不 await，不拖慢返回）
+  if (result && typeof result.then === 'function') {
+    result.then(() => note(true), (e) => note(false, String((e && e.message) || e)))
+    return result
+  }
+  note(true)
+  return result
 }
 
 /** 工具渲染结果 → 模型可见文本块（render 契约要求 ContentBlock[]，必须纯、不抛）。 */
@@ -133,4 +173,5 @@ export const TOOLS = [
   ...DELIVER_TOOLS,
   ...EVOLUTION_TOOLS,
   ...GC_TOOLS,
+  ...MIND_TOOLS,
 ].map(toToolDefinition)

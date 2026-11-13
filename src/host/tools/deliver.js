@@ -16,6 +16,8 @@ import { MEMORY_MAX_AGE_MS, checkMemoryFresh, _readGates, _memoryState, recordGa
 import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from '../gates/stage.js'
 import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
 import { meetingGaps } from '../state/meetings.js'
+import { appendEvent } from '../state/events.js'
+import { harvestFromReport } from '../state/mind.js'
 import { auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
@@ -1105,7 +1107,36 @@ export const DELIVER_TOOLS = [
             summary: String(args?.summary ?? ''),
           })
           const view = engine.view(ticket.id)
-          return { ok: true, action, ticket, text: view ? view.text : '', verdict: `汇报已记录（${args?.state}）→ ${view ? view.text : ''}` }
+          // ── 记忆流水线 ② 巩固门 ───────────────────────────────────────────
+          // 任务交回 captain（ready/blocked/failed）时，是本单「值得沉淀」的时刻。
+          // 这里不阻塞主流程：只在返回文本里加一条强制提醒 + 记录一次待巩固事件。
+          // （真正的入库由 captain 调 jarvis_mind(action=consolidate) 完成——
+          //   因为只有 captain 知道这单对后续项目意味着什么。）
+          const st = String(args?.state ?? 'progress').trim()
+          let gate = ''
+          if (['ready', 'blocked', 'failed'].includes(st)) {
+            try {
+              appendEvent(projectDir, 'mind.consolidate_due', { ticketId: ticket.id, state: st, role: String(args?.assignmentId || '') })
+            } catch { /* 事件写失败不影响汇报 */ }
+            // ① 机器候选池：无论 captain 是否记得调 consolidate，先把「像经验」的内容收进候选池。
+            //    不入主库（避免噪音污染），信号够的后续自动转正。
+            try {
+              harvestFromReport(projectDir, {
+                ticketId: ticket.id, title: ticket.title,
+                summary: String(args?.summary ?? ''), role: String(args?.assignmentId || ''),
+              })
+            } catch { /* 抽取失败不影响汇报 */ }
+            gate = [
+              '',
+              '━━ 巩固门（记忆流水线②）━━',
+              '本单已交回。**收口前必须沉淀经验**（调 jarvis_mind action=consolidate）：',
+              '· 这单踩了什么坑 / 什么做法有效？→ kind=lesson，写成「当X时，要Y，因为Z」',
+              '· 客户表现出什么偏好？→ kind=preference',
+              '· 有可复用的领域规律？→ kind=domain，domains 填领域（可多个）',
+              '同一内容重复写不会新增条目，只会变强——所以别怕写，怕的是不写。',
+            ].join('\n')
+          }
+          return { ok: true, action, ticket, text: view ? view.text : '', verdict: `汇报已记录（${st}）→ ${view ? view.text : ''}${gate}` }
         }
         if (action === 'retry') {
           const ticket = engine.retry(String(args?.ticketId ?? ''))

@@ -15,7 +15,7 @@ import { createJarvisEngine } from '../engine.js'
 export const TOOL_GROUPS = {
   '需求与规划': ['jarvis_project', 'jarvis_clarify', 'jarvis_taskgraph', 'jarvis_process', 'jarvis_collab'],
   '人才与角色': ['jarvis_distill_guide', 'jarvis_distill', 'jarvis_fidelity', 'jarvis_member_brief', 'jarvis_perf', 'jarvis_capability'],
-  '记忆与知识': ['jarvis_store', 'jarvis_lesson', 'jarvis_snapshot', 'jarvis_board', 'jarvis_essence'],
+  '记忆与知识': ['jarvis_store', 'jarvis_lesson', 'jarvis_snapshot', 'jarvis_board', 'jarvis_essence', 'jarvis_recall', 'jarvis_mind'],
   '流程与闸': ['jarvis_flowguard', 'jarvis_ticket', 'jarvis_escalate', 'jarvis_review'],
   '交付与验收': ['jarvis_baseline', 'jarvis_coverage', 'jarvis_fingerprint', 'jarvis_release', 'jarvis_dispatch_task'],
   '运行与协作': ['jarvis_meeting', 'jarvis_company', 'jarvis_update', 'jarvis_gc'],
