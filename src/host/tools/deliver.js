@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
-import { dshExecutorFor } from '../adapters/dsh-executor.js'
+import { dshExecutorFor, checkStatusFreshness } from '../adapters/dsh-executor.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from '../distill/index.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from '../protocol/index.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams, looksLikePluginRepo, stateRootConflict, writeActiveTeamMarker } from '../gates/ownership.js'
@@ -1115,6 +1115,13 @@ export const DELIVER_TOOLS = [
           const st = String(args?.state ?? 'progress').trim()
           let gate = ''
           if (['ready', 'blocked', 'failed'].includes(st)) {
+            // 第 ④ 层校验：交接时检查 STATUS.md（成员压缩后的唯一恢复锚点）。
+            // ⛔ 只告知不阻塞——交活本身不能因为没写 STATUS 而被拒。
+            let statusHint = ''
+            try {
+              const asg = (ticket.assignments || []).find((a) => a.id === String(args?.assignmentId || '')) || (ticket.assignments || []).slice(-1)[0]
+              statusHint = checkStatusFreshness(projectDir, ticket, asg)
+            } catch { statusHint = '' }
             try {
               appendEvent(projectDir, 'mind.consolidate_due', { ticketId: ticket.id, state: st, role: String(args?.assignmentId || '') })
             } catch { /* 事件写失败不影响汇报 */ }
@@ -1134,6 +1141,7 @@ export const DELIVER_TOOLS = [
               '· 客户表现出什么偏好？→ kind=preference',
               '· 有可复用的领域规律？→ kind=domain，domains 填领域（可多个）',
               '同一内容重复写不会新增条目，只会变强——所以别怕写，怕的是不写。',
+              ...(statusHint ? ['', '━━ 进度锚点（压缩保活第④层）━━', statusHint] : []),
             ].join('\n')
           }
           return { ok: true, action, ticket, text: view ? view.text : '', verdict: `汇报已记录（${st}）→ ${view ? view.text : ''}${gate}` }

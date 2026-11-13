@@ -26,6 +26,42 @@ const _require = createRequire(import.meta.url)
 function nodeFs() { return _require('node:fs') }
 function nodePath() { return _require('node:path') }
 
+/** STATUS.md 相对路径（工作区内的固定锚点）。模块级：deliver.js 汇报校验也要用。 */
+export function statusRelPath(ticket, assignment) {
+  const tid = (ticket && ticket.id) || (assignment && assignment.id) || 'unknown'
+  return `.jarvis/outputs/${tid}/STATUS.md`
+}
+
+/** 交接时校验 STATUS.md 是否新鲜（成员自己有没有维护）。
+ *  返回提示文本；空 = 正常。⛔ 不阻塞汇报，只做「如实告知」。
+ */
+export function checkStatusFreshness(projectDir, ticket, assignment, maxAgeMin = 30) {
+  try {
+    const fsM = nodeFs()
+    const pathM = nodePath()
+    const abs = pathM.join(String(projectDir || ''), statusRelPath(ticket, assignment))
+    let text = ''
+    try { text = fsM.readFileSync(abs, 'utf8') } catch { text = '' }
+    if (!text) {
+      return '⚠️ 这个任务单没有 STATUS.md——上下文压缩后你将无法恢复进度。请在收尾前补写 ' +
+        `${statusRelPath(ticket, assignment)}（现在做到哪 / 下一步 / 卡在哪）。`
+    }
+    const st = fsM.statSync(abs)
+    const ageMin = Math.round((Date.now() - st.mtimeMs) / 60000)
+    // 只有插件自动段 = 成员没自己维护过（自动段以 STATUS_MARK 开头）
+    const afterMark = text.split('<!-- jarvis:auto-status -->')[1] || ''
+    const ownLines = afterMark.split('\n').map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('<!--') && !l.startsWith('- ') && !l.startsWith('# '))
+    if (!ownLines.length) {
+      return '⚠️ STATUS.md 目前只有插件自动段，没有你自己的进度记录——请补上「现在做到哪 / 下一步 / 卡在哪」。'
+    }
+    if (ageMin > maxAgeMin) {
+      return `⚠️ STATUS.md 已有 ${ageMin} 分钟没更新（超过 ${maxAgeMin} 分钟）——如果真的完成/卡住了，请更新它再汇报。`
+    }
+    return ''
+  } catch { return '' }
+}
+
 const QUEUE_PROMPT = Symbol.for('dsh.subagent.queuePrompt')
 const DELIVER_PROMPT = Symbol.for('dsh.subagent.deliverPrompt')
 
@@ -142,7 +178,7 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
   /** 成员会话续接线索：上下文压缩后成员会忘掉 brief，提醒时重新给最小可抓线索。
    *  （长会话保活第 ④ 层：成员是独立会话，压缩同样致命，而它没有主会话那套续接注入） */
   function memberResumeHint(ticket, assignment, projectDir) {
-    const statusPath = `.jarvis/outputs/${ticket && ticket.id ? ticket.id : assignment && assignment.id || 'unknown'}/STATUS.md`
+    const statusPath = statusRelPath(ticket, assignment)
     return [
       '【续接线索 · 上下文若已被压缩，以下是你该记住的最小事实】',
       `- 任务单：${ticket && ticket.id || '?'}（${ticket && ticket.stage || '?'} 阶段）：${ticket && ticket.title || '?'}`,
@@ -151,6 +187,49 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
       `- 你的进度应写在：${statusPath}（若中断过，先读这个文件恢复上下文）`,
       `- 交付物目录：.jarvis/outputs/${ticket && ticket.id || '?'}/`,
     ].join('\n')
+  }
+
+  /** 插件自动写 STATUS.md —— 不依赖模型自觉。
+   *  为什么需要这一层：brief 里只是"要求"成员自己写，而压缩后它可能连这个要求都忘了。
+   *  插件用 ticket 的真实状态（谁、哪单、什么阶段、什么状态）落盘一份，
+   *  即使成员完全失忆，STATUS.md 里也有可恢复的事实骨架。
+   *  成员自己写的详细内容不会被覆盖（只在文件不存在或插件标记段缺失时补写）。
+   */
+  const STATUS_MARK = '<!-- jarvis:auto-status -->'
+  function autoWriteStatus(projectDir, ticket, assignment) {
+    try {
+      const fsM = _require('node:fs')
+      const pathM = _require('node:path')
+      const rel = statusRelPath(ticket, assignment)
+      const abs = pathM.join(String(projectDir || ''), rel)
+      const stage = String((ticket && ticket.stage) || '?')
+      const title = String((ticket && ticket.title) || '')
+      const role = String((assignment && assignment.role) || '')
+      const aid = String((assignment && assignment.id) || '')
+      const block = [
+        STATUS_MARK,
+        `# 任务进度（插件自动维护，请不要删除本段）`,
+        `- 任务单：${(ticket && ticket.id) || '?'}（${stage} 阶段）：${title}`,
+        `- 我的角色：${role}；assignmentId=${aid}`,
+        `- 更新时间：${new Date().toISOString()}`,
+        `- 交付物目录：.jarvis/outputs/${(ticket && ticket.id) || '?'}/`,
+        '',
+        '<!-- 以下由你（成员）自己维护：现在做到哪 / 下一步 / 卡在哪 -->',
+      ].join('\n')
+      let existing = ''
+      try { existing = fsM.readFileSync(abs, 'utf8') } catch { existing = '' }
+      if (!existing) {
+        fsM.mkdirSync(pathM.dirname(abs), { recursive: true })
+        fsM.writeFileSync(abs, block + '\n')
+        return { written: true, created: true }
+      }
+      // 已有文件：只在缺少插件标记段时补在最前（不覆盖成员写的内容）
+      if (!existing.includes(STATUS_MARK)) {
+        fsM.writeFileSync(abs, block + '\n\n' + existing)
+        return { written: true, created: false }
+      }
+      return { written: false, created: false }
+    } catch { return { written: false, created: false } }
   }
 
   /** 成员空闲未汇报 → 提醒（限次）；票结束即停。 */
@@ -170,6 +249,8 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
           let agent = null
           try { agent = ctx.agents && ctx.agents.get(childId) } catch { }
           if (agent && agent.status && agent.status !== 'idle') continue
+          // 提醒前先刷新插件自动段（成员若一直没写，至少骨架是最新的）
+          try { autoWriteStatus(root, view.ticket, asg) } catch { /* 写失败不影响提醒 */ }
           await deliverPrompt(
             runtime,
             parent,
@@ -192,6 +273,8 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     const parent = captainAgent()
     const employee = await readEmployee(root, assignment.role)
     const brief = memberBrief(ticket, assignment, employee, root)
+    // 第 ④ 层：派发时插件自动落一份 STATUS.md 事实骨架（成员失忆也能从这里恢复）
+    try { autoWriteStatus(root, ticket, assignment) } catch { /* 写失败不影响派发 */ }
     const label = `${labelPrefix}:${ticket.id}:${assignment.role}`
     const spec = {
       provider,
