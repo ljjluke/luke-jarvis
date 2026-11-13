@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { toPixOfficeSnapshot } from './office-bridge.js'
 import { Engine, reasonText } from './core/index.js'
 import { JsonTicketRepositories } from './adapters/json-tickets.js'
+import { collect, listTrash } from './adapters/trash.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from './distill/index.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from './protocol/index.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams, looksLikePluginRepo, stateRootConflict, writeActiveTeamMarker } from './gates/ownership.js'
@@ -1101,31 +1102,72 @@ export function apply(ctx, config) {
           })
         )
 
-        // 0.995) Wings 动态页面：Jarvis 现写现用、用完即回收。
+        // 0.995) Wings 动态页面：Jarvis 现写现用、任务结束即归档。
         //   写入：Jarvis 用文件写工具把完整 HTML 写到 <workspace>/.jarvis/pages/<id>.html；
         //   读取：GET /jarvis-wings/dyn/<id>（touch lastAccess）；列表：GET /api/luke-jarvis/pages；
-        //   回收：闲置( now-max(lastAccess,created) )>24h 的页面在每次访问时清扫；
-        //         dsh-gc 再以 48h 阈值对 .jarvis/pages 整目录兜底入墓园。
-        const JARVIS_PAGE_TTL_MS = 24 * 3600 * 1000
+        //   归档：任务结束后空闲满 5 分钟 → 卡片下线，页面文件 collect() 进回收站（保留 30 天，可恢复）；
+        //         回收站到期由 trash.purgeExpired 兜底彻底删除（同一套 30 天语义，不再物理直删）。
+        const JARVIS_PAGE_IDLE_MS = 5 * 60 * 1000   // 任务结束后，页面再保留 5 分钟才归档
         const jarvisPagesDirOf = (cwd) => path.join(String(cwd || ''), '.jarvis', 'pages')
         const jarvisPageIdOk = (id) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(String(id || ''))
         const jarvisPagesReadJson = (file) => { try { return JSON.parse(fsm.readFileSync(file, 'utf8')) } catch { return {} } }
         const jarvisPagesWriteJson = (file, obj) => { try { fsm.mkdirSync(path.dirname(file), { recursive: true }); fsm.writeFileSync(file, JSON.stringify(obj, null, 1)) } catch {} }
-        const jarvisPagesSweep = (dir) => {
+        /** 工作区是否还有活：团队有未完成任务，或存在未结束的工作单。判定不出来时按「有活」处理（宁可不归档）。 */
+        const jarvisWorkOpen = (cwd) => {
+          try {
+            const st = computeStage(cwd)
+            if (st && st.artifacts && Number(st.artifacts.openTasks) > 0) return true
+          } catch { /* 阶段算不出来：继续看工作单 */ }
+          try {
+            const tdir = path.join(String(cwd), '.jarvis', 'tickets')
+            const names = fsm.readdirSync(tdir).filter((n) => /^ticket-.*\.json$/.test(n))
+            for (const n of names) {
+              try {
+                const t = JSON.parse(fsm.readFileSync(path.join(tdir, n), 'utf8'))
+                if (t && !t.ended) return true
+              } catch { /* 单个坏文件跳过 */ }
+            }
+          } catch { /* 没有 tickets 目录 = 没有工作单 */ }
+          return false
+        }
+        const jarvisPagesSweep = (dir, cwd) => {
           try {
             if (!fsm.existsSync(dir)) return
             const manFile = path.join(dir, 'manifest.json')
             const man = jarvisPagesReadJson(manFile)
             const now = Date.now()
+            const openWork = jarvisWorkOpen(cwd)
             let changed = false
             for (const [id, meta] of Object.entries(man)) {
               const f = path.join(dir, id + '.html')
               if (!fsm.existsSync(f)) { delete man[id]; changed = true; continue }
-              const last = Math.max(Number(meta && meta.lastAccess) || 0, Number(meta && meta.created) || 0)
-              if (now - last > JARVIS_PAGE_TTL_MS) {
-                try { fsm.unlinkSync(f) } catch {}
-                delete man[id]; changed = true
-                console.log('[luke-jarvis] 动态页面回收（闲置>24h）:', id)
+              const m = meta || {}
+              const createdNow = Number(fsm.statSync(f).mtimeMs) || 0
+              const seen = Number(m.seenCreated) || 0
+              // 工作区还有活：随时待用，清掉空闲计时（中途恢复任务必须清，否则会误归档在用页面）
+              if (openWork) {
+                if (seen !== createdNow || m.idleSince) {
+                  man[id] = Object.assign({}, m, { seenCreated: createdNow })
+                  delete man[id].idleSince
+                  changed = true
+                }
+                continue
+              }
+              // 新写入/覆盖写 = 新内容：从这一刻重新计时，本轮不归档
+              if (createdNow !== seen) {
+                man[id] = Object.assign({}, m, { seenCreated: createdNow, idleSince: now })
+                changed = true
+                continue
+              }
+              // 工作区已空闲：首次记起点，满 5 分钟才归档
+              if (!m.idleSince) { man[id] = Object.assign({}, m, { idleSince: now }); changed = true; continue }
+              if (now - Number(m.idleSince) >= JARVIS_PAGE_IDLE_MS) {
+                const rel = path.relative(String(cwd), f).replace(/\\/g, '/')
+                const r = collect(String(cwd), [rel], '任务已结束，动态页面自动归档')
+                if (r && r.collected && r.collected.length) {
+                  delete man[id]; changed = true
+                  console.log('[luke-jarvis] 动态页面归档（任务结束满 5 分钟）:', id)
+                }
               }
             }
             if (changed) jarvisPagesWriteJson(manFile, man)
@@ -1144,9 +1186,13 @@ export function apply(ctx, config) {
                 const file = path.join(dir, raw + '.html')
                 if (!cwd || !file.startsWith(dir) || !fsm.existsSync(file)) {
                   res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-                  return res.end('页面不存在或已被回收（闲置 24 小时自动清理）')
+                  return res.end('页面不存在或已归档（任务结束后自动归档，可在历史里查看）')
                 }
-                jarvisPagesSweep(dir)
+                jarvisPagesSweep(dir, cwd)
+                if (!fsm.existsSync(file)) {
+                  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+                  return res.end('页面刚刚归档，可在历史里查看')
+                }
                 const manFile = path.join(dir, 'manifest.json')
                 const man = jarvisPagesReadJson(manFile)
                 man[raw] = Object.assign({}, man[raw] || { title: raw, created: Date.now() }, { lastAccess: Date.now() })
@@ -1170,17 +1216,82 @@ export function apply(ctx, config) {
               }
               try {
                 const cwd = requestWorkspace(ctx, req)
-                if (!cwd) return send(200, { ok: true, active: false, pages: [] })
+                if (!cwd) return send(200, { ok: true, active: false, pages: [], archived: [] })
                 const dir = jarvisPagesDirOf(cwd)
-                jarvisPagesSweep(dir)
+                jarvisPagesSweep(dir, cwd)
                 const man = jarvisPagesReadJson(path.join(dir, 'manifest.json'))
                 const pages = Object.entries(man)
                   .map(([id, m]) => ({ id, title: String((m && m.title) || id), created: Number((m && m.created) || 0), lastAccess: Number((m && m.lastAccess) || 0) }))
                   .sort((a, b) => b.created - a.created)
                   .slice(0, 12)
-                return send(200, { ok: true, active: true, pages })
+                // 已归档页面：从回收站里筛出 .jarvis/pages/ 下的条目（保留期内可查看）
+                let archived = []
+                try {
+                  const t = listTrash(String(cwd))
+                  // 回收站只记文件名，标题要从归档的 HTML 里读 <title>，读不到再退回文件名
+                  const titleOf = (x) => {
+                    try {
+                      const dir = path.join(String(cwd), '.jarvis', 'trash', 'items', String(x.id))
+                      const names = fsm.readdirSync(dir).filter((n) => n.endsWith('.html'))
+                      if (!names.length) return ''
+                      const html = fsm.readFileSync(path.join(dir, names[0]), 'utf8')
+                      const m = html.match(/<title[^>]*>([^<]{1,80})</i)
+                      return m ? String(m[1]).trim() : ''
+                    } catch { return '' }
+                  }
+                  archived = (t.items || [])
+                    .filter((x) => x.state === 'in-trash' && String(x.orig || '').replace(/\\/g, '/').startsWith('.jarvis/pages/'))
+                    .map((x) => {
+                      const fileId = String(x.orig).replace(/\\/g, '/').replace('.jarvis/pages/', '').replace(/\.html$/i, '')
+                      const t2 = titleOf(x)
+                      return {
+                        trashId: String(x.id),
+                        id: fileId,
+                        title: t2 || fileId,
+                        reason: String(x.reason || ''),
+                        archivedAt: String(x.movedAt || ''),
+                        daysLeft: Number(x.daysLeft || 0),
+                      }
+                    })
+                    .sort((a, b) => b.archivedAt.localeCompare(a.archivedAt))
+                    .slice(0, 60)
+                } catch { archived = [] }
+                return send(200, { ok: true, active: true, pages, archived })
               } catch (e) {
-                return send(200, { ok: false, pages: [], error: String((e && e.message) || e) })
+                return send(200, { ok: false, pages: [], archived: [], error: String((e && e.message) || e) })
+              }
+            },
+          })
+        )
+        // 0.996) 已归档页面只读查看：GET /jarvis-wings/archive/<trashId>
+        //   归档页在回收站 .jarvis/trash/items/<trashId>/<原文件名>；只读返回，不改动保留期。
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/jarvis-wings/archive',
+            handler: async (req, res) => {
+              try {
+                const raw = decodeURIComponent(String((req && req.url) || '').split('?')[0].replace(/^\/jarvis-wings\/archive\//, ''))
+                if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(raw) || raw.includes('..')) {
+                  res.writeHead(403); return res.end('forbidden')
+                }
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('没有工作区') }
+                const itemDir = path.join(String(cwd), '.jarvis', 'trash', 'items', raw)
+                if (!itemDir.startsWith(path.join(String(cwd), '.jarvis', 'trash', 'items'))) {
+                  res.writeHead(403); return res.end('forbidden')
+                }
+                let names = []
+                try { names = fsm.readdirSync(itemDir).filter((n) => n.endsWith('.html')) } catch { names = [] }
+                if (!names.length) {
+                  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+                  return res.end('归档页不存在或已超过保留期被彻底删除')
+                }
+                const data = fsm.readFileSync(path.join(itemDir, names[0]))
+                res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+                return res.end(data)
+              } catch (e) {
+                try { res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }); res.end('error') } catch {}
               }
             },
           })
@@ -1393,4 +1504,33 @@ export function apply(ctx, config) {
         }, 1500)
       } catch { /* 定时器不可用时静默（黑板 RPC 为可选能力） */ }
     }
+
+    // ── 每日自动 GC（服务内定时器，不依赖界面轮询）────────────────────────────
+    // 背景：原实现把 maybeAutoGc 挂在 /api/jarvis/state 上——客户不开界面就永远不跑。
+    // 现在改为独立时钟：每小时醒一次，逐工作区检查「距上次 GC 是否满 24h」，
+    // 满 24h 且工作区不忙才真正回收。真正的节流由 gc.js 的 gc.auto.json 负责。
+    try {
+      const gcTick = () => {
+        const workspaces = []
+        // 1) 有活动会话的工作区
+        try {
+          const agents = ctx.get('agents')
+          const list = agents && typeof agents.list === 'function' ? agents.list() : []
+          for (const a of Array.isArray(list) ? list : []) {
+            const w = a && a.session && a.session.header && a.session.header.cwd
+            if (typeof w === 'string' && w) workspaces.push(w)
+          }
+        } catch { /* 无 agents 服务 */ }
+        // 2) 插件 apply 期解析到的工作区（服务重启后仍能覆盖）
+        try { const w = getResolvedWorkspace(); if (w) workspaces.push(w) } catch { /* 无可解析工作区 */ }
+        const uniq = [...new Set(workspaces)]
+        for (const w of uniq) {
+          try { maybeAutoGc(w) } catch { /* 单个工作区失败不影响其他 */ }
+        }
+      }
+      const gcTimer = ctx.setInterval(gcTick, 60 * 60 * 1000)   // 每小时醒一次
+      try { gcTimer.unref?.() } catch { /* unref 不可用不影响 */ }
+      // 启动后 3 分钟先跑一次（避免和启动期其他初始化抢资源）
+      try { const bootTimer = ctx.setTimeout?.(gcTick, 3 * 60 * 1000); bootTimer?.unref?.() } catch { /* setTimeout 不可用则等下一轮 */ }
+    } catch { /* 定时器不可用时 GC 退化为按需调用（不影响插件主功能） */ }
 }

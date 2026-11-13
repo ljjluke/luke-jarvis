@@ -19,8 +19,10 @@ const pathMod = () => _require('node:path')
 export const RETENTION_DAYS = 30
 
 /** 保护名单（相对路径或文件名前缀）：命中即拒收——GC 不碰 jarvis 的记忆与基线。 */
-const PROTECT_NAMES = ['project.md', 'lessons.md', 'board.json', 'gates.json', 'company-state.json', 'README.md', 'trash', 'events.jsonl']
+const PROTECT_NAMES = ['project.md', 'lessons.md', 'board.json', 'gates.json', 'company-state.json', 'README.md', 'trash', 'events.jsonl', 'generated.json', 'gc.auto.json', 'active-team.json']
 const PROTECT_PREFIX = ['基线清单', '.git/', 'node_modules/']
+/** 受保护的 .jarvis 内部路径（系统状态，不是垃圾） */
+const PROTECT_JARVIS = ['.jarvis/trash/', '.jarvis/tickets/', '.jarvis/decisions/', '.jarvis/project.md', '.jarvis/lessons.md', '.jarvis/board.json', '.jarvis/gates.json', '.jarvis/company-state.json', '.jarvis/events.jsonl', '.jarvis/generated.json', '.jarvis/gc.auto.json', '.jarvis/meetings/', '.jarvis/cards/', '.jarvis/ponder-verify/']
 
 function trashRoot(projectDir) {
   return pathMod().join(String(projectDir || ''), '.jarvis', 'trash')
@@ -32,6 +34,7 @@ function isProtected(rel) {
   const r = String(rel || '').replace(/\\/g, '/')
   const base = r.split('/').pop()
   if (PROTECT_NAMES.includes(base)) return true
+  if (PROTECT_JARVIS.some((p) => r.startsWith(p) || (p.endsWith('/') && r === p.slice(0, -1)))) return true
   if (r.startsWith('.jarvis/trash')) return true
   return PROTECT_PREFIX.some((p) => r.startsWith(p) || r.includes('/' + p))
 }
@@ -63,7 +66,28 @@ function appendManifest(projectDir, entry) {
   fs().appendFileSync(pathMod().join(dir, 'manifest.jsonl'), JSON.stringify(entry) + '\n')
 }
 
-/** 收纳：把相对路径（相对工作区根）移入回收站。返回 {collected:[], skipped:[{rel, why}]} */
+/** 安全移动：优先 rename；跨文件系统（EXDEV）失败时回退「复制+删除」。
+ *  这是真实部署的必需项——工作区可能在 NFS/不同挂载点，rename 会直接失败。 */
+function movePath(src, dest) {
+  try {
+    fs().renameSync(src, dest)
+    return { ok: true, method: 'rename' }
+  } catch (e) {
+    const code = String((e && e.code) || '')
+    if (code !== 'EXDEV' && code !== 'EPERM' && code !== 'EACCES') return { ok: false, error: String((e && e.message) || e) }
+    try {
+      // 回退：复制（文件或目录）后删除源
+      fs().cpSync(src, dest, { recursive: true, force: true, errorOnExist: false })
+      fs().rmSync(src, { recursive: true, force: true })
+      return { ok: true, method: 'copy+remove' }
+    } catch (e2) {
+      try { fs().rmSync(dest, { recursive: true, force: true }) } catch { /* 清理半成品 */ }
+      return { ok: false, error: String((e2 && e2.message) || e2) }
+    }
+  }
+}
+
+/** 收纳：把相对路径（相对工作区根，可含目录）移入回收站。返回 {collected:[], skipped:[{rel, why}]} */
 export function collect(projectDir, relPaths, reason = '') {
   const collected = []
   const skipped = []
@@ -81,17 +105,24 @@ export function collect(projectDir, relPaths, reason = '') {
     const destDir = pathMod().join(trashRoot(projectDir), 'items', id)
     fs().mkdirSync(destDir, { recursive: true })
     const dest = pathMod().join(destDir, pathMod().basename(abs))
-    try {
-      fs().renameSync(abs, dest)
-      const entry = { id, orig: rel, reason: String(reason || ''), movedAt: nowIso() }
-      appendManifest(projectDir, entry)
-      appendEvent(projectDir, 'gc.collected', { id, orig: rel, reason: entry.reason })
-      collected.push(entry)
-    } catch (e) {
-      skipped.push({ rel, why: `移入失败：${(e && e.message) || e}` })
+    const mv = movePath(abs, dest)
+    if (!mv.ok) {
+      skipped.push({ rel, why: `移入失败：${mv.error}` })
+      // 失败如实上报，不静默吞掉（客户要能知道哪些没清成功）
+      try { appendEvent(projectDir, 'gc.collect_failed', { rel, error: mv.error }) } catch { /* 事件写失败不影响主流程 */ }
+      continue
     }
+    const entry = { id, orig: rel, reason: String(reason || ''), movedAt: nowIso(), isDir: isDirOf(abs) }
+    appendManifest(projectDir, entry)
+    appendEvent(projectDir, 'gc.collected', { id, orig: rel, reason: entry.reason, method: mv.method })
+    collected.push(entry)
   }
   return { collected, skipped }
+}
+
+/** 判断路径是否为目录（移动前调用）。 */
+function isDirOf(abs) {
+  try { return fs().statSync(abs).isDirectory() } catch { return false }
 }
 
 /** 回收站清单：附保留期剩余天数。 */
@@ -121,14 +152,52 @@ export function restore(projectDir, id) {
   if (fs().existsSync(dest)) return { ok: false, error: `原位置已存在同名文件：${e.orig}（先处理原位置再恢复）` }
   try {
     fs().mkdirSync(pathMod().dirname(dest), { recursive: true })
-    fs().renameSync(src, dest)
+    const mv = movePath(src, dest)
+    if (!mv.ok) return { ok: false, error: `恢复失败：${mv.error}` }
     try { fs().rmdirSync(itemDir) } catch { /* 非空/已删忽略 */ }
     appendManifest(projectDir, { id: e.id, restoredAt: nowIso() })
-    appendEvent(projectDir, 'gc.restored', { id: e.id, orig: e.orig })
+    appendEvent(projectDir, 'gc.restored', { id: e.id, orig: e.orig, method: mv.method })
     return { ok: true, restored: e.orig }
   } catch (err) {
     return { ok: false, error: `恢复失败：${(err && err.message) || err}` }
   }
+}
+
+/** 批量恢复：客户一次收了一批文件，恢复不该点 N 次。
+ *  ids 可为 id 数组，或 'all'（恢复全部在站条目）。
+ */
+export function restoreMany(projectDir, ids) {
+  const all = ids === 'all' || ids === true
+  const want = all ? null : new Set((Array.isArray(ids) ? ids : [ids]).map((x) => String(x || '').trim()).filter(Boolean))
+  const { entries } = readManifest(projectDir)
+  const targets = entries.filter((e) => !e.restoredAt && !e.purgedAt && (want === null || want.has(e.id)))
+  const restored = []
+  const failed = []
+  for (const e of targets) {
+    const r = restore(projectDir, e.id)
+    if (r.ok) restored.push(r.restored)
+    else failed.push({ id: e.id, orig: e.orig, error: r.error })
+  }
+  return { restored, failed }
+}
+
+/** manifest 压缩：append-only 长期会无限增长（每次读全量解析）。
+ *  做法：保留每条 id 的最终状态，重写成紧凑文件（先写临时文件再原子替换）。
+ *  在 purge/list 时低频调用即可；坏行丢弃。
+ */
+export function compactManifest(projectDir) {
+  const { entries, bad } = readManifest(projectDir)
+  const file = pathMod().join(trashRoot(projectDir), 'manifest.jsonl')
+  try {
+    if (!fs().existsSync(file)) return { compacted: 0, kept: 0, bad }
+    // 超过 2000 条才压缩，避免小规模反复写
+    if (entries.length < 2000 && bad < 50) return { compacted: 0, kept: entries.length, bad }
+    const lines = entries.map((e) => JSON.stringify(e)).join('\n') + '\n'
+    const tmp = `${file}.tmp-${process.pid}`
+    fs().writeFileSync(tmp, lines)
+    fs().renameSync(tmp, file)
+    return { compacted: 1, kept: entries.length, bad: 0 }
+  } catch { return { compacted: 0, kept: entries.length, bad } }
 }
 
 /** 彻底删除：超过保留期（默认 30 天）仍未恢复的条目 rm -rf。force=true 时无视期限全删。 */
@@ -148,5 +217,7 @@ export function purgeExpired(projectDir, { retentionDays = RETENTION_DAYS, force
       purged.push({ id: e.id, orig: e.orig })
     } catch { /* 单条失败不阻断 */ }
   }
+  // 回收站压缩（低频）：manifest 长期 append 会无限增长，每次读都全量解析
+  try { compactManifest(projectDir) } catch { /* 压缩失败不影响 purge 结果 */ }
   return { purged }
 }

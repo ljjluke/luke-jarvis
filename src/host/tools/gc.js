@@ -9,9 +9,10 @@
  *   R3 临时目录：.tmp 及根目录 chk/fc 探针目录，mtime 超 7 天
  *  保护名单见 adapters/trash.js isProtected（jarvis 记忆/基线/board 永不收）。
  */
-import { collect, listTrash, restore, purgeExpired, RETENTION_DAYS } from '../adapters/trash.js'
+import { collect, listTrash, restore, restoreMany, purgeExpired, RETENTION_DAYS } from '../adapters/trash.js'
 import { appendEvent } from '../state/events.js'
 import { getRuntimeContext } from '../runtime.js'
+import { findGeneratedGarbage, pruneRegistry } from './generated.js'
 
 const fs = () => _require('node:fs')
 const pathMod = () => _require('node:path')
@@ -24,17 +25,27 @@ const VERSIONED_ROOT_DOC = /^(.+?)[-_]?v(\d+(?:\.\d+)*)[-_].*\.(md|json)$/
 const DATED_ITER = /^(.+?)-(\d{8})([a-z])?(?:[-_.].*)?\.(md|json|xlsx|docx|pdf|png)$/
 const TEMP_DIR = /^(chk[0-9a-f]{2,}|fc[0-9a-f]{4,}|f8_probe)$/
 const LOG_FILE = /^[^/\\]+\.log$/i
+/** R0 改动前备份：`任意文件. bak_标签_日期` 或 `任意文件.bak`(纯后缀)。
+ *  形态：plugin.js.bak_gc_20261110 / jarvis.html.bak / notes.md.bak-20261110
+ *  为什么安全：同目录必然存在同名正式文件时才算备份（下面 findGarbage 里校验），否则可能是唯一副本，不收。 */
+const BAK_FILE = /^(.+?)(?:\.bak[-_.]?([A-Za-z0-9_-]*))$/
 const TMP_AGE_DAYS = 7
 const LOG_AGE_DAYS = 7
+/** 本地时间戳（gc.js 自己用，不依赖 trash 的私有函数） */
+const nowIso = () => new Date().toISOString()
+/** 扫描时永不进入的目录（版本库/依赖/回收站自身） */
+const SKIP_DIRS = ['.git', 'node_modules', '.jarvis/trash']
 
 function walkTop(projectDir, depth = 1) {
   const out = []
   const root = String(projectDir)
+  const skip = (relPath) => SKIP_DIRS.some((s) => relPath === s || relPath.startsWith(s + '/'))
   const visit = (dir, rel, d) => {
     let names = []
     try { names = fs().readdirSync(dir, { withFileTypes: true }) } catch { return }
     for (const n of names) {
       const relPath = rel ? `${rel}/${n.name}` : n.name
+      if (skip(relPath)) continue
       out.push({ rel: relPath, name: n.name, dir: n.isDirectory(), abs: pathMod().join(dir, n.name) })
       if (n.isDirectory() && d < depth) visit(pathMod().join(dir, n.name), relPath, d + 1)
     }
@@ -47,11 +58,31 @@ function mtimeDays(abs) {
   try { return (Date.now() - fs().statSync(abs).mtimeMs) / 86400000 } catch { return 0 }
 }
 
-/** 规则引擎：返回候选垃圾相对路径清单（含规则标注）。keep=R1 每组保留最近 N 个版本。 */
-export function findGarbage(projectDir, scopes = ['packages', 'docs', 'tmp'], keep = 1) {
+/** 规则引擎：返回候选垃圾相对路径清单（含规则标注）。keep=R1 每组保留最近 N 个版本。
+ *  scopes: packages(版本文件) / docs(多版本文档+日志) / tmp(临时目录) / backups(.bak 备份) / all(整工作区清扫)
+ */
+export function findGarbage(projectDir, scopes = ['packages', 'docs', 'tmp', 'backups'], keep = 1) {
   const found = []
-  const want = (s) => scopes.includes(s)
-  const nodes = walkTop(projectDir, 2)
+  const want = (s) => scopes.includes(s) || scopes.includes('all')
+  // all 模式扫描 4 层深（覆盖 webui/src 等子目录）；默认模式 2 层
+  const nodes = walkTop(projectDir, scopes.includes('all') ? 4 : 2)
+  if (want('backups')) {
+    // R0：改动前备份（`xxx.bak_标签_日期`）。
+    // 安全前提：同目录必须存在同名正式文件（去掉 .bak 部分后的名字存在），
+        // 否则可能是唯一副本，不收——这是「宁漏勿错」的具体落实。
+    for (const n of nodes) {
+      if (n.dir) continue
+      const m = BAK_FILE.exec(n.name)
+      if (!m) continue
+      const base = m[1]
+      const dirRel = pathMod().dirname(n.rel).replace(/\\/g, '/')
+      const siblingRel = dirRel === '.' ? base : `${dirRel}/${base}`
+      let siblingExists = false
+      try { siblingExists = fs().existsSync(pathMod().join(String(projectDir), siblingRel)) } catch { siblingExists = false }
+      if (!siblingExists) continue   // 无正式版对照 = 可能是唯一副本，跳过
+      found.push({ rel: n.rel, rule: `R0 改动前备份（正式版已在：${siblingRel}）` })
+    }
+  }
   if (want('packages')) {
     // R1：迭代版本文件（任意扩展名：压缩包/脚本/配置），按词干分组只留最近 N 个版本
     const groups = new Map()
@@ -139,7 +170,7 @@ export const GC_TOOLS = [
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', description: 'sweep 认定并移入回收站 / list 回收站清单 / restore 恢复原位 / purge 彻底删除到期条目（默认 sweep）' },
+        action: { type: 'string', description: 'sweep 认定并移入回收站 / list 回收站清单 / restore 恢复原位 / purge 彻底删除到期条目 / suggest 建议清理清单（只报不动）/ collect 客户确认后收指定文件 /（默认 sweep）' },
         projectDir: { type: 'string', description: '工作区根目录（默认当前会话 cwd）' },
         dryRun: { type: 'string', description: 'sweep 只报不收（true/false，默认 true——先看清单再真收）' },
         scopes: { type: 'string', description: 'sweep 规则范围，逗号分隔：packages/docs/tmp（默认全开）' },
@@ -176,7 +207,26 @@ export const GC_TOOLS = [
       const action = String(args?.action ?? 'sweep').trim()
       if (!projectDir) return { action, verdict: '⛔ 未定位到工作区（传 projectDir 或在有活动会话时调用）' }
       const absRoot = path.resolve(projectDir)
-      if (/(^|[\\/])\.jarvis$|luke-jarvis/.test(absRoot)) return { action, verdict: '⛔ 插件仓库/.jarvis 目录不是工作区，拒绝 GC（STATE_ROOT_CONFLICT）' }
+      if (/(^|[\\/])\.jarvis$/.test(absRoot)) return { action, verdict: '⛔ .jarvis 目录不是工作区，拒绝 GC（STATE_ROOT_CONFLICT）' }
+      // 第 3 层：建议清单（只报不动）
+      if (action === 'suggest') {
+        const sugs = findSuggestions(absRoot)
+        const lines = sugs.slice(0, 40).map((x) => `- ${x.rel}（${x.why}，${(x.bytes / 1024).toFixed(1)} KB）`)
+        return {
+          action, dryRun: true, found: sugs.length, collected: 0, purged: 0, skipped: 0,
+          verdict: `建议清理 ${sugs.length} 个文件（**不会自动删除**，客户确认后才收）\n${lines.join('\n') || '（无）'}${sugs.length > 40 ? `\n… 共 ${sugs.length} 条` : ''}\n\n确认清理：jarvis_gc(action=collect, id=<相对路径>)；或忽略即可。`,
+        }
+      }
+      // 第 3 层落实：客户显式确认后收指定文件（id = 相对路径）
+      if (action === 'collect') {
+        const rel = String(args?.id ?? '').trim()
+        if (!rel) return { action, verdict: '⛔ collect 需要 id（要收的相对路径，从 suggest 清单里取）', found: 0, collected: 0, skipped: 0, purged: 0, dryRun: false }
+        const r = collect(absRoot, [rel], '客户确认清理')
+        return {
+          action, dryRun: false, found: 1, collected: r.collected.length, purged: 0, skipped: r.skipped.length,
+          verdict: r.collected.length ? `✅ 已收进回收站：${rel}（${RETENTION_DAYS} 天内可用 restore 恢复）` : `⛔ 未收：${(r.skipped[0] && r.skipped[0].why) || '未知原因'}`,
+        }
+      }
       // 到期清理每次先跑（保留期语义的自动执行点）
       const { purged } = purgeExpired(absRoot)
       if (action === 'list') {
@@ -188,6 +238,15 @@ export const GC_TOOLS = [
         }
       }
       if (action === 'restore') {
+        const idArg = String(args?.id ?? '').trim()
+        // 批量恢复：id=all 恢复全部在站条目；id=a,b,c 恢复指定几个
+        if (idArg === 'all' || idArg.includes(',')) {
+          const r = restoreMany(absRoot, idArg === 'all' ? 'all' : idArg.split(',').map((s) => s.trim()).filter(Boolean))
+          return {
+            action, dryRun: false, found: 0, collected: 0, purged: purged.length, skipped: r.failed.length,
+            verdict: `✅ 已恢复 ${r.restored.length} 件${r.failed.length ? `，失败 ${r.failed.length} 件：${r.failed.slice(0, 5).map((f) => `${f.orig}（${f.error}）`).join('、')}` : ''}`,
+          }
+        }
         const r = restore(absRoot, args?.id)
         return { action, verdict: r.ok ? `✅ 已恢复到原位置：${r.restored}（后续 sweep 仍可能再次回收）` : `⛔ ${r.error}`, dryRun: false, found: 0, collected: 0, purged: purged.length, skipped: 0 }
       }
@@ -198,7 +257,7 @@ export const GC_TOOLS = [
       }
       // sweep
       const dryRun = String(args?.dryRun ?? 'true') !== 'false'
-      const scopes = String(args?.scopes ?? 'packages,docs,tmp').split(',').map((s) => s.trim()).filter(Boolean)
+      const scopes = String(args?.scopes ?? 'backups,packages,docs,tmp').split(',').map((s) => s.trim()).filter(Boolean)
       const keep = Math.max(1, Number(args?.keep ?? 1))
       const found = findGarbage(absRoot, scopes, keep)
       if (dryRun) {
@@ -219,38 +278,130 @@ export const GC_TOOLS = [
   },
 ]
 
-const AUTO_GC_INTERVAL_MS = 6 * 3600 * 1000
+const AUTO_GC_INTERVAL_MS = 24 * 3600 * 1000   // 每日一次主动回收（Java 式定时 GC）
 const GC_FLAG = () => pathMod().join('.jarvis', 'gc.auto.json')
+/** 自动 GC 的扫描范围：整工作区（含子目录），但只收「确定性规则」能证明的垃圾。
+ *  ⛔ 第 2/3 层（AI 登记 / 客户文件建议）不在自动路径里自动删——见 generated.js 与 gcSummary。
+ */
+const AUTO_SCOPES = ['all', 'backups', 'packages', 'docs', 'tmp']
 
-/** 自动 GC：每个工作区至多每 6h 跑一次（节流标记 .jarvis/gc.auto.json 的 mtime）。只做保守 sweep（execute 收入回收站，30 天保留）+ 到期 purge。无 .jarvis 的工作区直接跳过。 */
-export function maybeAutoGc(projectDir) {
-  let absRoot = ''
-  try { absRoot = pathMod().resolve(String(projectDir || '')) } catch { return null }
-  if (!absRoot || /(^|[\\/])\.jarvis$|luke-jarvis/.test(absRoot)) return null
-  try { if (!fs().statSync(pathMod().join(absRoot, '.jarvis')).isDirectory()) return null } catch { return null }
-  const flag = pathMod().join(absRoot, GC_FLAG())
-  try { if (Date.now() - fs().statSync(flag).mtimeMs < AUTO_GC_INTERVAL_MS) return null } catch { /* 首次运行 */ }
+/** 磁盘水位守卫：剩余空间低于阈值时暂停回收（回收站文件仍占盘，越收越满）。 */
+function diskTooFull(projectDir) {
   try {
-    const found = findGarbage(absRoot, ['packages', 'docs', 'tmp'], 1)
-    let collected = 0, skipped = 0
-    if (found.length) {
-      const r = collect(absRoot, found.map((f) => f.rel), '自动 GC（6h 节流）')
-      collected = r.collected.length; skipped = r.skipped.length
-      appendEvent(absRoot, 'gc.swept', { auto: true, found: found.length, collected, skipped })
-    }
-    const { purged } = purgeExpired(absRoot)
-    const summary = { at: new Date().toISOString(), found: found.length, collected, skipped, purged: purged.length }
-    try { fs().mkdirSync(pathMod().dirname(flag), { recursive: true }); fs().writeFileSync(flag, JSON.stringify(summary, null, 2)) } catch { /* 标记写失败只是下次再跑 */ }
-    return summary
-  } catch { return null }
+    const st = fs().statfsSync ? fs().statfsSync(projectDir) : null
+    if (!st || !st.bsize || !st.blocks) return false
+    const freeRatio = Number(st.bavail || 0) / Number(st.blocks || 1)
+    return freeRatio < 0.10   // 剩余不足 10% → 暂停
+  } catch { return false }
 }
 
-/** GC 摘要（进快照）：回收站在站件数 + 上次自动 GC 结果 + 最近入站明细（轻量，只读小文件）。 */
+/** 工作区是否有活（有任务在跑就别动文件，避免和写入打架）。判定不出来按「有活」处理。 */
+function projectBusy(projectDir) {
+  try {
+    const tdir = pathMod().join(String(projectDir), '.jarvis', 'tickets')
+    for (const n of fs().readdirSync(tdir)) {
+      if (!/^ticket-.*\.json$/.test(n)) continue
+      try {
+        const t = JSON.parse(fs().readFileSync(pathMod().join(tdir, n), 'utf8'))
+        if (t && !t.ended) return true
+      } catch { /* 单个坏文件跳过 */ }
+    }
+  } catch { /* 无 tickets 目录 = 无任务 */ }
+  return false
+}
+
+/** 自动 GC（每日一次，服务内定时器调用，不依赖界面轮询）。
+ *  @param {object} [opts] {force:boolean} force=true 忽略节流立即跑（人工触发用）
+ */
+export function maybeAutoGc(projectDir, opts = {}) {
+  let absRoot = ''
+  try { absRoot = pathMod().resolve(String(projectDir || '')) } catch { return null }
+  if (!absRoot) return null
+  // ⛔ 只排除 .jarvis 自身（状态目录不是工作区），不再排除插件仓库——插件仓库的备份同样需要清理
+  if (/(^|[\\/])\.jarvis$/.test(absRoot)) return null
+  // 工作区状态目录存在才 GC（非 jarvis 项目不碰）
+  try { if (!fs().statSync(pathMod().join(absRoot, '.jarvis')).isDirectory()) return null } catch { return null }
+  const flag = pathMod().join(absRoot, GC_FLAG())
+  if (!opts.force) {
+    try { if (Date.now() - fs().statSync(flag).mtimeMs < AUTO_GC_INTERVAL_MS) return null } catch { /* 首次运行：立即跑一次 */ }
+  }
+  if (diskTooFull(absRoot)) {
+    // 磁盘紧张：只做到期清理，不收新文件（免得回收站把盘撑爆）
+    const { purged } = purgeExpired(absRoot)
+    return { skippedReason: '磁盘空间不足 10%，暂停回收', found: 0, collected: 0, purged: purged.length, at: nowIso() }
+  }
+  if (projectBusy(absRoot)) {
+    // 有任务在跑：跳过本轮，避免和写入打架
+    return { skippedReason: '有任务进行中，跳过本轮', found: 0, collected: 0, purged: 0, at: nowIso() }
+  }
+  try {
+    const found = findGarbage(absRoot, AUTO_SCOPES, 1)
+    // 第 2 层：AI 登记为临时产出且超期的文件（有登记记录 = 有事实依据，可自动收）
+    const gen = findGeneratedGarbage(absRoot, RETENTION_DAYS)
+    const all = found.concat(gen.map((g) => ({ rel: g.rel, rule: `R5 AI 临时产出（登记于 ${g.at.slice(0, 10)}，任务 ${g.task || '—'}）` })))
+    let collected = 0, skipped = 0
+    if (all.length) {
+      const r = collect(absRoot, all.map((f) => f.rel), '自动 GC（每日一次）')
+      collected = r.collected.length; skipped = r.skipped.length
+      appendEvent(absRoot, 'gc.swept', { auto: true, found: all.length, collected, skipped })
+    }
+    try { pruneRegistry(absRoot) } catch { /* 登记表清理失败不影响回收 */ }
+    const { purged } = purgeExpired(absRoot)
+    const summary = { at: nowIso(), found: all.length, collected, skipped, purged: purged.length }
+    try { fs().mkdirSync(pathMod().dirname(flag), { recursive: true }); fs().writeFileSync(flag, JSON.stringify(summary, null, 2)) } catch { /* 标记写失败只是下次再跑 */ }
+    return summary
+  } catch (e) {
+    // 不静默吞错：把原因写进事件流，客户与排查都能看到
+    try { appendEvent(absRoot, 'gc.auto_failed', { error: String((e && e.message) || e) }) } catch { /* 事件写失败忽略 */ }
+    return { error: String((e && e.message) || e), found: 0, collected: 0, purged: 0, at: nowIso() }
+  }
+}
+
+/** 第 3 层：建议清理清单 —— 只提示、绝不自动删。
+ *  范围：客户自己创建的文件 / 未登记的 AI 产出 / 灰色地带。
+ *  判据（保守，全部可解释）：
+ *    · 超过 90 天没被修改（mtime），且不在保护名单；
+ *    · 或文件名带明显的「临时/草稿/副本」语义（copy/副本/草稿/temp/draft/untitled）。
+ *  ⛔ 即使命中，也只是「建议」，客户点一下才收（走 jarvis_gc action=collect）。
+ */
+const DRAFT_HINT = /(?:^|[._\-\s])(copy|副本|草稿|temp|tmp|draft|untitled|未命名)(?:[._\-\s]|$)/i
+const SUGGEST_IDLE_DAYS = 90
+
+function mtimeDaysOf(abs) {
+  try { return (Date.now() - fs().statSync(abs).mtimeMs) / 86400000 } catch { return 0 }
+}
+
+export function findSuggestions(projectDir, opts = {}) {
+  const skip = new Set(opts.skipRels || [])
+  const nodes = walkTop(projectDir, 4)
+  const out = []
+  for (const n of nodes) {
+    if (n.dir) continue
+    // 保护名单与已判定垃圾不重复建议
+    if (skip.has(n.rel)) continue
+    // .jarvis 内部的记忆/状态一律不建议（那是系统文件）
+    if (/^\.jarvis\/(?!pages\/|docs\/)/.test(n.rel)) continue
+    const base = n.name
+    const draft = DRAFT_HINT.test(base)
+    const idle = mtimeDaysOf(n.abs) > SUGGEST_IDLE_DAYS
+    if (!draft && !idle) continue
+    out.push({
+      rel: n.rel,
+      why: draft ? '文件名像临时稿/副本' : `${SUGGEST_IDLE_DAYS} 天没改动过`,
+      idleDays: Math.floor(mtimeDaysOf(n.abs)),
+      bytes: (() => { try { return Number(fs().statSync(n.abs).size) || 0 } catch { return 0 } })(),
+    })
+  }
+  out.sort((a, b) => b.idleDays - a.idleDays)
+  return out
+}
+
+/** GC 摘要（进快照）：回收站在站件数 + 上次自动 GC 结果 + 最近入站明细 + 建议清理清单。 */
 export function gcSummary(projectDir) {
   let absRoot = ''
   try { absRoot = pathMod().resolve(String(projectDir || '')) } catch { return null }
   if (!absRoot) return null
-  const out = { inTrash: 0, retentionDays: RETENTION_DAYS, oldestDaysLeft: null, lastSweep: null, recent: [] }
+  const out = { inTrash: 0, retentionDays: RETENTION_DAYS, oldestDaysLeft: null, lastSweep: null, recent: [], suggestions: [], suggestionsTotal: 0 }
   try {
     const t = listTrash(absRoot)
     const inTrash = t.items.filter((x) => x.state === 'in-trash')
@@ -260,5 +411,11 @@ export function gcSummary(projectDir) {
     out.recent = inTrash.slice(-8).map((x) => x.orig)
   } catch { /* 无回收站 */ }
   try { out.lastSweep = JSON.parse(fs().readFileSync(pathMod().join(absRoot, GC_FLAG()), 'utf8')) } catch { /* 尚未跑过 */ }
+  // 第 3 层：建议清理（只提示，不自动删）。清单本身有成本，只在摘要里带前 12 条，总数单独给。
+  try {
+    const sugs = findSuggestions(absRoot)
+    out.suggestionsTotal = sugs.length
+    out.suggestions = sugs.slice(0, 12).map((s) => ({ rel: s.rel, why: s.why, idleDays: s.idleDays, bytes: s.bytes }))
+  } catch { /* 建议清单失败不影响摘要 */ }
   return out
 }

@@ -10,8 +10,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { collect, listTrash, restore, purgeExpired, RETENTION_DAYS } from '../src/host/adapters/trash.js'
-import { findGarbage, maybeAutoGc, gcSummary, GC_TOOLS } from '../src/host/tools/gc.js'
+import { collect, listTrash, restore, restoreMany, compactManifest, purgeExpired, RETENTION_DAYS } from '../src/host/adapters/trash.js'
+import { findGarbage, findSuggestions, maybeAutoGc, gcSummary, GC_TOOLS } from '../src/host/tools/gc.js'
 
 // ── 夹具 ────────────────────────────────────────────────────────────────
 function mkWs() {
@@ -194,7 +194,7 @@ test('findGarbage R2c/R4/R3：日期迭代、过期日志、过期临时目录',
 })
 
 // ── gc.js：自动兜底与快照摘要 ───────────────────────────────────────────
-test('maybeAutoGc：无状态根跳过 / 首跑自动收纳 / 6h 节流 / 插件仓库拒跑', () => {
+test('maybeAutoGc：无状态根跳过 / 首跑自动收纳 / 24h 节流 / 插件仓库同样清理', () => {
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'gc-bare-'))
   const ws = mkWs()
   const fake = path.join(os.tmpdir(), 'luke-jarvis-gcselftest-' + Date.now())
@@ -205,10 +205,15 @@ test('maybeAutoGc：无状态根跳过 / 首跑自动收纳 / 6h 节流 / 插件
     assert.ok(s1 && s1.found >= 2 && s1.collected >= 2)
     assert.ok(fs.existsSync(path.join(ws, '.jarvis/gc.auto.json')))
     assert.ok(eventsText(ws).includes('gc.swept'))
-    assert.equal(maybeAutoGc(ws), null) // 6h 节流：刚跑过不再跑
-    // 插件仓库形态拒跑（路径含 luke-jarvis）
+    assert.equal(maybeAutoGc(ws), null) // 24h 节流：刚跑过不再跑
+    // 插件仓库形态也要清理（原实现写死排除 luke-jarvis，导致备份文件永不被收）
     fs.mkdirSync(path.join(fake, '.jarvis'), { recursive: true })
-    assert.equal(maybeAutoGc(fake), null)
+    wf(fake, 'plugin.js')
+    wf(fake, 'plugin.js.bak_gc_20261110')   // 有正式版对照 → 可收
+    const sf = maybeAutoGc(fake)
+    assert.ok(sf && sf.collected >= 1, '插件仓库的改动前备份应能被自动回收')
+    assert.ok(!fs.existsSync(path.join(fake, 'plugin.js.bak_gc_20261110')))
+    assert.ok(fs.existsSync(path.join(fake, 'plugin.js')), '正式文件不能被误收')
   } finally { rmWs(ws); fs.rmSync(bare, { recursive: true, force: true }); fs.rmSync(fake, { recursive: true, force: true }) }
 })
 
@@ -250,4 +255,150 @@ test('jarvis_gc 工具：dryRun 默认不收 / 真收 / list / .jarvis 目录守
     const guarded = await tool.execute({ action: 'sweep', projectDir: path.join(ws, '.jarvis') }, null)
     assert.match(guarded.verdict, /拒绝|STATE_ROOT_CONFLICT/)
   } finally { rmWs(ws) }
+})
+
+// ── 第 1 层：R0 改动前备份（.bak）───────────────────────────────────────
+test('第1层 R0：.bak 备份仅在正式版存在时收；无正式版=唯一副本 不收', () => {
+  const ws = mkWs()
+  try {
+    // 有正式版对照 → 是备份，可收
+    wf(ws, 'webui/app.html', '<html>正式版</html>')
+    wf(ws, 'webui/app.html.bak_board_rich_20261109', '旧备份')
+    wf(ws, 'src/x.js', '正式')
+    wf(ws, 'src/x.js.bak_gc_20261110', '旧备份')
+    // 无正式版 → 可能是唯一副本，必须跳过
+    wf(ws, 'lonely.md.bak', '唯一内容')
+    const found = findGarbage(ws, ['all', 'backups'], 1)
+    const rels = found.map((f) => f.rel)
+    assert.ok(rels.includes('webui/app.html.bak_board_rich_20261109'), '子目录里的备份应被识别（原实现不扫 webui/）')
+    assert.ok(rels.includes('src/x.js.bak_gc_20261110'))
+    assert.ok(!rels.includes('lonely.md.bak'), '没有正式版对照的 .bak 不能收（宁漏勿错）')
+    assert.ok(!rels.includes('webui/app.html'), '正式文件不能被当成备份')
+    // 真收：正式文件必须还在
+    const r = collect(ws, found.map((f) => f.rel), 'test')
+    assert.equal(r.collected.length, 2)
+    assert.ok(fs.existsSync(path.join(ws, 'webui/app.html')))
+    assert.ok(fs.existsSync(path.join(ws, 'src/x.js')))
+    assert.ok(fs.existsSync(path.join(ws, 'lonely.md.bak')), '唯一副本仍在')
+  } finally { rmWs(ws) }
+})
+
+test('扫描边界：.git / node_modules / 回收站自身 永不进入', () => {
+  const ws = mkWs()
+  try {
+    const rels = ['a', 'a.bak_x_20260101', 'b', 'b.bak_y_20260101', 'c', 'c.bak_z_20260101']
+    wf(ws, '.git/HEAD', 'ref')
+    wf(ws, '.git/HEAD.bak_x_20260101', 'x')
+    wf(ws, 'node_modules/pkg/index.js', 'x')
+    wf(ws, 'node_modules/pkg/index.js.bak_y_20260101', 'x')
+    const found = findGarbage(ws, ['all', 'backups'], 1).map((f) => f.rel)
+    assert.ok(!found.some((r) => r.startsWith('.git/')), '.git 内不得扫描')
+    assert.ok(!found.some((r) => r.startsWith('node_modules/')), 'node_modules 内不得扫描')
+  } finally { rmWs(ws) }
+})
+
+// ── 第 2 层：AI 产出登记表 ───────────────────────────────────────────────
+test('第2层：AI 登记的临时产出超期才收；permanent 与未登记一律不动', async () => {
+  const { markGenerated, findGeneratedGarbage, isGeneratedTemporary, unmarkGenerated } = await import('../src/host/tools/generated.js')
+  const ws = mkWs()
+  try {
+    wf(ws, '.jarvis/pages/draft-report.html', 'ai 产出')
+    wf(ws, '.jarvis/pages/keep-forever.html', 'ai 产出但客户要留')
+    wf(ws, '.jarvis/pages/unknown.html', '未登记')
+    markGenerated(ws, '.jarvis/pages/draft-report.html', { task: 'T1', keep: 'temporary' })
+    markGenerated(ws, '.jarvis/pages/keep-forever.html', { task: 'T1', keep: 'permanent' })
+    assert.ok(fs.existsSync(path.join(ws, '.jarvis/generated.json')), '登记表应落盘')
+    // 未超期：不算垃圾
+    assert.equal(findGeneratedGarbage(ws, 30).length, 0)
+    assert.equal(isGeneratedTemporary(ws, '.jarvis/pages/draft-report.html', 30), false)
+    // 把登记时间改成 40 天前 → 超期
+    const regFile = path.join(ws, '.jarvis/generated.json')
+    const reg = JSON.parse(fs.readFileSync(regFile, 'utf8'))
+    reg['.jarvis/pages/draft-report.html'].at = new Date(Date.now() - 40 * 86400000).toISOString()
+    fs.writeFileSync(regFile, JSON.stringify(reg))
+    const gen = findGeneratedGarbage(ws, 30)
+    assert.equal(gen.length, 1)
+    assert.equal(gen[0].rel, '.jarvis/pages/draft-report.html')
+    assert.equal(gen[0].task, 'T1')
+    // permanent 即使超期也不收
+    reg['.jarvis/pages/keep-forever.html'].at = new Date(Date.now() - 400 * 86400000).toISOString()
+    fs.writeFileSync(regFile, JSON.stringify(reg))
+    assert.equal(findGeneratedGarbage(ws, 30).length, 1, 'permanent 永不自动收')
+    // 未登记文件永远不进候选
+    assert.ok(!findGeneratedGarbage(ws, 30).some((x) => x.rel.includes('unknown')))
+    // 取消登记后不再是候选
+    unmarkGenerated(ws, '.jarvis/pages/draft-report.html')
+    assert.equal(findGeneratedGarbage(ws, 30).length, 0)
+  } finally { rmWs(ws) }
+})
+
+// ── 第 3 层：建议清理（只提示不自动删）──────────────────────────────────
+test('第3层：建议清单只提示；即使命中也不会被自动 GC 收走', () => {
+  const ws = mkWs()
+  try {
+    wf(ws, 'draft-稿子.md', '草稿')
+    wf(ws, 'report copy.md', '副本')
+    const old = Date.now() - 200 * 86400000
+    wf(ws, 'notes.md', '老文件')
+    fs.utimesSync(path.join(ws, 'notes.md'), old / 1000, old / 1000)
+    const sugs = findSuggestions(ws)
+    const rels = sugs.map((s) => s.rel)
+    assert.ok(rels.includes('draft-稿子.md'), '草稿语义应进建议')
+    assert.ok(rels.includes('report copy.md'), '副本语义应进建议')
+    assert.ok(rels.includes('notes.md'), '90 天未改动应进建议')
+    // 关键：自动 GC 不得动它们（建议 ≠ 自动删除）
+    const before = fs.readdirSync(ws).length
+    maybeAutoGc(ws)
+    const still = ['draft-稿子.md', 'report copy.md', 'notes.md'].every((f) => fs.existsSync(path.join(ws, f)))
+    assert.ok(still, '建议清单里的文件不能被自动 GC 收走')
+    assert.equal(fs.readdirSync(ws).length, before, '自动 GC 不应改变建议文件')
+    // 客户确认后才收
+    const r = collect(ws, ['draft-稿子.md'], '客户确认清理')
+    assert.equal(r.collected.length, 1)
+    assert.ok(!fs.existsSync(path.join(ws, 'draft-稿子.md')))
+  } finally { rmWs(ws) }
+})
+
+// ── 回收站缺陷修复 ──────────────────────────────────────────────────────
+test('目录整体回收与批量恢复（收 20 个文件不必点 20 次）', () => {
+  const ws = mkWs()
+  try {
+    fs.mkdirSync(path.join(ws, 'old-dir/sub'), { recursive: true })
+    for (let i = 0; i < 5; i++) wf(ws, `old-dir/f${i}.txt`, String(i))
+    wf(ws, 'old-dir/sub/nested.txt', 'n')
+    const r = collect(ws, ['old-dir'], '整目录')
+    assert.equal(r.collected.length, 1)
+    assert.ok(!fs.existsSync(path.join(ws, 'old-dir')), '目录应整体移走')
+    // 目录内容完整进了回收站
+    const items = fs.readdirSync(path.join(ws, '.jarvis/trash/items', r.collected[0].id))
+    assert.ok(items.length >= 1)
+    // 批量恢复
+    const rr = restoreMany(ws, 'all')
+    assert.equal(rr.restored.length, 1)
+    assert.ok(fs.existsSync(path.join(ws, 'old-dir/f0.txt')), '整目录应恢复回来')
+    assert.ok(fs.existsSync(path.join(ws, 'old-dir/sub/nested.txt')), '嵌套内容也要回来')
+  } finally { rmWs(ws) }
+})
+
+test('manifest 压缩：大量条目后仍能正确读回状态', () => {
+  const ws = mkWs()
+  try {
+    for (let i = 0; i < 30; i++) {
+      wf(ws, `f${i}.txt`, String(i))
+      collect(ws, [`f${i}.txt`], `r${i}`)
+    }
+    const before = listTrash(ws).items.filter((x) => x.state === 'in-trash')
+    assert.equal(before.length, 30)
+    compactManifest(ws)
+    const after = listTrash(ws).items.filter((x) => x.state === 'in-trash')
+    assert.equal(after.length, 30, '压缩后状态不能丢')
+    assert.equal(after[0].orig, before[0].orig)
+  } finally { rmWs(ws) }
+})
+
+test('GC 定时器：不依赖 HTTP 轮询（插件注册独立时钟）', () => {
+  const src = fs.readFileSync(new URL('../src/host/plugin.js', import.meta.url), 'utf8')
+  assert.ok(/gcTick/.test(src), '应有独立 GC 时钟')
+  assert.ok(/setInterval\(gcTick, 60 \* 60 \* 1000\)/.test(src), '每小时醒一次检查是否满 24h')
+  assert.ok(!/\|luke-jarvis\/\.test\(absRoot\)/.test(src), '不得再写死排除 luke-jarvis')
 })
