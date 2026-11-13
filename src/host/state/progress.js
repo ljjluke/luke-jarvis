@@ -80,14 +80,14 @@ export function recordProgress(projectDir, tool, args, opts = {}) {
       tool: t,
       action,
       target,
-      ok: opts.ok === false ? false : true,
+      // ok 三态：true=已执行成功 / false=执行失败 / null=仅记录意图（结果未知）
+      ok: opts.ok === null ? null : (opts.ok === false ? false : true),
     }
     if (opts.note) rec.note = String(opts.note).slice(0, KEEP_CHARS)
-    // 异步写：不让磁盘拖慢主循环（NFS/慢盘场景的关键约束）
     const line = JSON.stringify(rec) + '\n'
-    const doWrite = () => { try { fs().appendFileSync(file, line) } catch { /* 写失败静默：少一条记录不影响主流程 */ } }
-    if (typeof setImmediate === 'function') setImmediate(doWrite)
-    else doWrite()
+    // 同步写：体积很小（一行 JSON），异步反而在某些调用路径下丢失。
+    // 失败时返回 false 而不是静默 true——调用方可以据此发现「记录没生效」。
+    try { fs().appendFileSync(file, line) } catch { return false }
     return true
   } catch { return false }
 }

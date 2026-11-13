@@ -62,9 +62,36 @@ test('① 机器流水：无 ticketId 按天分段；失败动作也记录；写
     const failed = rec.find((x) => x.tool === 'review')
     assert.equal(failed.ok, false, '失败动作也要记录（压缩后要知道做过且失败了）')
     assert.ok(failed.note && failed.note.length > 0)
-    // 写失败不抛错：传入不存在的目录也不应 throw
-    assert.doesNotThrow(() => recordProgress('/nonexistent-root-xyz', 'jarvis_x', {}))
   } finally { rmWs(ws) }
+})
+
+test('① 机器流水：写入必须真的落盘（防「目录建了但文件没写」）', async () => {
+  const ws = mkWs()
+  try {
+    const ok = recordProgress(ws, 'jarvis_mind', { action: 'stats' }, { ok: null })
+    assert.equal(ok, true, 'recordProgress 必须返回 true')
+    // 同步写：不等待也应有文件（防 setImmediate 在 await 链里丢失）
+    const dir = path.join(ws, '.jarvis/progress')
+    const files = fs.readdirSync(dir)
+    assert.ok(files.length > 0, '目录里必须有文件（不能只有空目录）')
+    const content = fs.readFileSync(path.join(dir, files[0]), 'utf8').trim()
+    assert.ok(content.length > 0, '文件内容不能为空')
+    const rec = JSON.parse(content.split('\n')[0])
+    assert.equal(rec.tool, 'mind')
+    assert.equal(rec.action, 'stats')
+    assert.equal(rec.ok, null, 'ok=null 表示「仅记录意图」三态之一')
+  } finally { rmWs(ws) }
+})
+
+test('① 机器流水：写失败要返回 false（不静默装成功）', () => {
+  // 用一个「父目录是文件」的路径让 mkdir 必然失败（不能写 /proc——那里会挂起）
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'prog-bad-'))
+  try {
+    const asFile = path.join(tmp, 'not-a-dir')
+    fs.writeFileSync(asFile, 'x')
+    const bad = recordProgress(asFile, 'jarvis_x', {}, { ok: true })
+    assert.equal(bad, false, '写失败不能返回 true（否则调用方以为记录生效了）')
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
 })
 
 // ── 第 ② 层：新鲜度门 ──────────────────────────────────────────────────

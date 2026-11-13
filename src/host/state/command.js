@@ -10,6 +10,7 @@
  */
 import { TOOLS } from '../tools/index.js'
 import { createJarvisEngine } from '../engine.js'
+import { recordProgress } from './progress.js'
 
 /** 工具分组（纯展示用，方便界面归类；未知工具落到 other）。 */
 export const TOOL_GROUPS = {
@@ -114,11 +115,15 @@ export async function runCommand({ ctx, projectDir, tool, args, agent, signal })
   const name = String(tool)
   if (!INVOKABLE.test(name)) return { ok: false, tool: name, error: `只允许调用 jarvis_* 工具（收到：${name}）` }
   const spec = TOOLS.find((t) => t.name === name)
-  if (!spec) return { ok: false, tool: name, error: `未知工具：${name}（能力台只暴露 35 个 jarvis 工具）` }
+  if (!spec) return { ok: false, tool: name, error: `未知工具：${name}（能力台只暴露 37 个 jarvis 工具）` }
   const specMeta = toolSpecs().find((t) => t.name === spec.name)
   const { args: norm, errors } = normalizeArgs(specMeta, args)
   if (errors.length) return { ok: false, tool: spec.name, error: errors.join('；') }
   if (norm.projectDir === undefined && (spec.parameters?.properties || {}).projectDir) norm.projectDir = projectDir
+  // 层① 机器进度流水：界面/能力台调用同样要记（含被校验拒绝的情况）。
+  // 否则「客户在界面上重试/验收」这类关键动作，压缩后无迹可查。
+  // 放在校验与执行之间：无论后续成功/失败/被拒，都先留一条意图记录。
+  try { recordProgress(projectDir, spec.name, norm, { ok: null }) } catch { /* 落盘失败不扩散 */ }
   const toolsSvc = ctx && typeof ctx.get === 'function' ? ctx.get('tools') : undefined
   if (!toolsSvc || typeof toolsSvc.execute !== 'function') {
     return { ok: false, tool: spec.name, error: '宿主没有 tools 服务，能力台不可用' }
@@ -129,11 +134,16 @@ export async function runCommand({ ctx, projectDir, tool, args, agent, signal })
   // 架构变更（对齐 dsh-superagent）：执行与 command 事件审计统一走 core Engine
   // （Engine 是 command 事件的唯一写者；本函数只保留 glue 职责：校验/规整/找会话）。
   const engine = createJarvisEngine({ projectDir })
-  return engine.runCommand({
+  const note = (ok, msg) => {
+    try { recordProgress(projectDir, spec.name, norm, { ok, note: msg || '' }) } catch { /* 落盘失败不扩散 */ }
+  }
+  const out = await engine.runCommand({
     projectDir,
     tool: spec.name,
     args: norm,
     startedAt,
     execute: () => toolsSvc.execute({ callId, name: spec.name, arguments: norm, agent, signal: signal || AbortSignal.timeout(120000) }),
   })
+  note(!out || out.ok !== false, out && out.ok === false ? String(out.error || '') : '')
+  return out
 }
