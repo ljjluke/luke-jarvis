@@ -23,32 +23,74 @@ export function _dropMissing(missing, pred) {
 //   ② DSH FileSystem（真实生产）：无 list，只有 resolve(path) + listDir(target) → FsDirEntry[]（entry.name 才是文件名）。
 // 旧实现只认 list → 真实环境恒返回 true（flowguard 的产物前置检查形同虚设，gates.json 里人工补写 note 即其痕迹）。
 // 语义不变：服务能力缺失或任何异常 → true（fail-open，不把"查不了"变成"拦截"）。
-export async function hasGlob(fsSvc, dir, keyword) {
+export async function hasGlob(fsSvc, dir, keyword, opts = {}) {
   // 语义（F4b，T7 复验要求可区分）：
   //   • 无 fs 服务 / 服务不提供列举能力 → true（"查不了"放行，与历史 fail-open 一致，不能把环境缺失变成拦截）
   //   • 目录不存在（ENOENT/ENOTDIR/NOT_FOUND）→ false（明确"没有这个目录" = 没产物 → 流程闸必须拦）
   //   • 列举成功但无关键字命中 → false
   //   • 其他异常（权限/超时/后端错误）→ true（不确定=放行，避免误拦）
+  //
+  // 缺陷 a 修复（2026-11-14 实证）：原实现只列**一层**文件名。
+  //   标准团队结构是 `.agent-teams/<team>/team.json`——team.json 在子目录里，
+  //   一层 list 永远找不到 → 插件仓库判定 hasGlob=false → STATE_ROOT_CONFLICT → 流程自锁。
+  //   现场只能靠伪造根级空 team.json（tasks:[]）绕过，导致快照读不到任何任务。
+  // 修法：depth 参数（默认 0 = 只列当前层，保持原有调用语义不变）；
+  //       depth>0 时递归向下，深度用尽即停。递归失败按 fail-open。
+  const depth = Math.max(0, Number(opts.depth) || 0)
+  const MAX_ENTRIES = 5000
   const isMissing = (e) => {
     const code = String((e && (e.code || e.errno)) || '')
     if (/ENOENT|ENOTDIR|NOT_FOUND|absent/i.test(code)) return true
     return /no such file|not exist|not found|不存在/i.test(String((e && e.message) || ''))
   }
   if (!fsSvc) return true
+  let seen = 0
+
+  /** 列一层，返回 [{name, isDir}]（适配两种 fs 形态）。查不了返回 null。 */
+  const listOnce = async (d) => {
+    try {
+      if (typeof fsSvc.listDir === 'function' && typeof fsSvc.resolve === 'function') {
+        let target
+        try { target = await fsSvc.resolve(d) } catch (e) { return isMissing(e) ? [] : null }
+        if (!target) return []
+        const entries = await fsSvc.listDir(target)
+        return (Array.isArray(entries) ? entries : []).map((e) => {
+          const n = String(e && e.name !== undefined ? e.name : e)
+          const isDir = Boolean(e && (e.isDirectory || e.kind === 'directory' || e.type === 'dir'))
+          return { name: n, isDir }
+        })
+      }
+      if (typeof fsSvc.list === 'function') {
+        const names = await fsSvc.list(d)
+        return (Array.isArray(names) ? names : []).map((n) => ({ name: String(n), isDir: false }))
+      }
+      return null   // 无列举能力
+    } catch (e) { return isMissing(e) ? [] : null }
+  }
+
+  const search = async (d, left) => {
+    const entries = await listOnce(d)
+    if (entries === null) return null           // 查不了 → 交给上层 fail-open
+    for (const en of entries) {
+      if (++seen > MAX_ENTRIES) return false     // 防失控
+      if (en.name.includes(keyword)) return true
+    }
+    if (left <= 0) return false
+    // 递归进子目录（只进目录项；旧形态 list 无法区分，按「不知道就试一层」处理）
+    for (const en of entries) {
+      if (!en.isDir && typeof fsSvc.listDir !== 'function') continue
+      const child = d.replace(/[\\/]+$/, '') + '/' + en.name
+      const r = await search(child, left - 1)
+      if (r === true) return true
+      // 子目录不存在是正常的（文件被当目录试），继续
+    }
+    return false
+  }
+
   try {
-    if (typeof fsSvc.list === 'function') {
-      const names = await fsSvc.list(dir)
-      return (Array.isArray(names) ? names : []).some((n) => String(n).includes(keyword))
-    }
-    if (typeof fsSvc.resolve === 'function' && typeof fsSvc.listDir === 'function') {
-      let target
-      try { target = await fsSvc.resolve(dir) } catch (e) { return isMissing(e) ? false : true }
-      if (!target) return false // resolve 明确返回空 = 该目录不存在 → 没产物
-      const entries = await fsSvc.listDir(target)
-      return (Array.isArray(entries) ? entries : []).some((e) => String(e && e.name !== undefined ? e.name : e).includes(keyword))
-    }
+    const r = await search(dir, depth)
+    return r === null ? true : r               // 查不了 = fail-open
   } catch (e) { return isMissing(e) ? false : true }
-  return true
 }
 // 审计团队任务是否每个都附了开工须知（含 ponder 指引）
 // 统计群聊会议进度：已有几轮发言、还剩几轮（供成员/CEO 看会议进行到哪）

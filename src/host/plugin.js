@@ -60,9 +60,11 @@ import { bindJarvisPermission } from './adapters/permission.js'
 import { buildSnapshot, snapshotSummary, SNAPSHOT_SCHEMA } from './state/snapshot.js'
 import { maybeAutoGc } from './tools/gc.js'
 import { appendEvent, readEvents } from './state/events.js'
-import { VOICE_PRESETS, normalizeVoiceState, publicVoiceState, publicVoiceConfig, readVoiceConfig, readVoiceConfigRaw, resolveActiveVoice, saveVoiceConfig, speechEndpoint } from './state/voice.js'
+import { VOICE_PRESETS, normalizeVoiceState, publicVoiceState, publicVoiceConfig, readVoiceConfig, readVoiceConfigRaw, resolveActiveVoice, saveVoiceConfig, speechEndpoint, personaLine } from './state/voice.js'
 import { pickAgent, runCommand, sessionFacts, toolSpecs } from './state/command.js'
 import { deliverChat } from './state/chat.js'
+// 管家人格台词（P0-3）：前端/后端播报共用；测试直接 import 自 plugin.js（导入面稳定）
+export { personaLine } from './state/voice.js'
 
 // 对外导入面不变：30 个工具汇总在 tools/index.js，这里 re-export（test/plugin.test.js 直接 import TOOLS）
 export { TOOLS }
@@ -148,6 +150,10 @@ export const Config = z.object({
   lang: z.union([z.const('zh'), z.const('en')]).default('zh').volatile(),
   /** 语音沟通模式：开启后可与小云语音对话并接收语音汇报（关闭仅停播报，不影响其他功能）。 */
   voiceEnabled: z.boolean().default(true).volatile(),
+  /** 可选 API token（默认关闭 = 空串放行，不破坏 curl/本机体验）。
+   *  非空时所有 /api/jarvis|/api/luke-jarvis|/api/pixoffice 数据接口都要求
+   *  `x-jarvis-token` 头或 `authorization: Bearer <token>`，否则 401；静态页面路由不拦。 */
+  apiToken: z.string().default('').volatile(),
   /** 语音（TTS）默认值：voice.json 已保存的值优先，缺省字段用这里兜底。apiKey 只写 voice.json，不进设置面板。 */
   voice: z.object({
     active: z.string().default(''),
@@ -174,7 +180,7 @@ export const Config = z.object({
 }).default({})
 
 /** apply 期落定的运行配置（模块级，供路由/接口读取）。 */
-const PLUGIN_CONFIG = { ui: 'wings', defaultWorkspace: '', name: 'Jarvis', lang: 'zh', voiceEnabled: true, voice: null }
+const PLUGIN_CONFIG = { ui: 'wings', defaultWorkspace: '', name: 'Jarvis', lang: 'zh', voiceEnabled: true, voice: null, apiToken: '' }
 
 // PixOffice 快照 seq 兜底：以进程启动时间为基线（秒），重启后仍单调递增，
 // 避免依赖无人写入的 state.__seq 导致 SSE 序号回退。
@@ -193,12 +199,77 @@ function firstSessionCwd(ctx) {
   try {
     const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
     const list = agents && typeof agents.list === 'function' ? agents.list() : []
+    // 缺陷 b 修复（2026-11-14 实证）：原实现只看 session.header.cwd——那是**会话创建时**的目录，
+    // 固定不变。当会话执行 working-directory/change 切到别的项目（如 luke-jarvis → jarvis-audit-ws），
+    // header.cwd 仍是旧值 → 快照读到旧工作区（0 任务），而真任务在新工作区里跑着。
+    // 修法：收集所有候选（header.cwd ∪ session.cwd ∪ agent 上可能暴露的当前目录），
+    //      再按「有没有活跃任务（未结束 ticket / 非空 .agent-teams）」排序，
+    //      优先返回有活的那个——这样页面能看到真正在干的事。
+    const cands = []
+    const push = (w) => { if (typeof w === 'string' && w.length > 0 && !cands.includes(w)) cands.push(w) }
     for (const a of Array.isArray(list) ? list : []) {
-      const w = a && a.session && a.session.header && a.session.header.cwd
-      if (typeof w === 'string' && w.length > 0) return w
+      try {
+        const s = a && a.session
+        push(s && s.header && s.header.cwd)          // 创建时目录（兼容）
+        push(s && s.cwd)                             // 某些实现会把当前目录放这里
+        push(a && a.cwd)                             // agent 级当前目录
+        // 部分宿主暴露 workingDirectory 的取值器
+        try { if (typeof a.workingDirectory === 'function') push(a.workingDirectory()) } catch { /* 无此能力 */ }
+        try { if (typeof s.workingDirectory === 'function') push(s.workingDirectory()) } catch { /* 无此能力 */ }
+      } catch { /* 单个 agent 异常跳过 */ }
     }
+    if (!cands.length) return ''
+    if (cands.length === 1) return cands[0]
+    // 多候选：选「有活」的（缓存 3 秒，避免每次请求都扫盘）
+    const ranked = rankByActivity(cands)
+    return ranked[0] || cands[0]
   } catch { /* 无 agents 服务：继续降级 */ }
   return ''
+}
+
+/** 候选工作区排序：有未结束 ticket 的优先，其次 .agent-teams 非空的，再次 .jarvis 目录非空的。
+ *  「有活」的判据全部是磁盘事实（不依赖模型/不依赖会话内存）。
+ *  3 秒缓存：请求量高时可省掉重复扫盘，但足够新鲜。 */
+const _wsRankCache = { key: '', at: 0, ranked: [] }
+function rankByActivity(cands) {
+  const key = cands.join('|')
+  const now = Date.now()
+  if (_wsRankCache.key === key && now - _wsRankCache.at < 3000) return _wsRankCache.ranked
+  // 模块级作用域：自己取 fs/path（apply 内那两个在同名变量上，此处不可见）
+  let fsMod = null, pathMod = null
+  try { fsMod = _require('node:fs'); pathMod = _require('node:path') } catch { /* 取不到就按原序 */ }
+  const score = (dir) => {
+    if (!fsMod || !pathMod) return 0
+    let s = 0
+    try {
+      // ① 未结束 ticket 数（最强信号：说明真在派活）
+      const tdir = pathMod.join(dir, '.jarvis', 'tickets')
+      for (const n of fsMod.readdirSync(tdir)) {
+        if (!/^ticket-.*\.json$/.test(n)) continue
+        try {
+          const t = JSON.parse(fsMod.readFileSync(pathMod.join(tdir, n), 'utf8'))
+          if (t && !t.ended) s += 100
+        } catch { /* 坏文件跳过 */ }
+      }
+    } catch { /* 无 tickets */ }
+    try {
+      // ② .agent-teams 条目数（有团队说明建队了）
+      s += fsMod.readdirSync(pathMod.join(dir, '.agent-teams')).length * 10
+    } catch { /* 无 .agent-teams */ }
+    try {
+      // ③ .jarvis 内容（有状态根说明用过）
+      s += fsMod.readdirSync(pathMod.join(dir, '.jarvis')).length
+    } catch { /* 无 .jarvis */ }
+    return s
+  }
+  const ranked = cands
+    .map((d, i) => ({ d, i, s: score(d) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)   // 同分保持原序（header.cwd 在前）
+    .map((x) => x.d)
+  _wsRankCache.key = key
+  _wsRankCache.at = now
+  _wsRankCache.ranked = ranked
+  return ranked
 }
 
 /** 读请求体（限 256KB，超时 10s）：语音配置/TTS 都走它，统一错误。 */
@@ -236,12 +307,87 @@ export function sameOriginOk(req) {
   } catch { return false }
 }
 
+/** `?workspace=` 白名单（P0 安全修复）：只接受「存在、是目录、且含 .jarvis/ 或 .agent-teams/」的路径。
+ *  为什么不能只判绝对路径：任意网页/任意 curl 传 `?workspace=/etc` 就能让读接口把任意目录内容吐出来
+ *  （越权读取）。白名单外的值一律忽略（回退到 live 会话 cwd），绝不返回任意绝对路径目录的内容。 */
+export function safeWorkspaceArg(raw) {
+  const v = String(raw || '').trim()
+  if (!v) return ''
+  if (!(v.startsWith('/') || /^[A-Za-z]:[\\/]/.test(v))) return ''
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    if (!fs.statSync(v).isDirectory()) return ''
+    const hasJarvis = fs.existsSync(path.join(v, '.jarvis'))
+    const hasTeams = fs.existsSync(path.join(v, '.agent-teams'))
+    return hasJarvis || hasTeams ? v : ''
+  } catch { return '' }
+}
+
+/** 常量时间字符串比较（防 token 逐字节时序侧信道；长度不同直接 false）。 */
+function tokenEquals(got, expected) {
+  const a = String(got || '')
+  const b = String(expected || '')
+  if (a.length !== b.length || a.length === 0) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+/** 注册 /api/* 数据接口：统一挂可选 token 闸（P0 安全）。
+ *  静态页面路由（/jarvis-ui、/jarvis-wings、页面 HTML）不走这里——否则用户打不开页面。 */
+export function registerApiRoute(webSvc, ctx, def) {
+  const path = String((def && def.path) || '')
+  const handler = def && def.handler
+  return ctx.effect(() =>
+    webSvc.register({
+      ...def,
+      handler: (req, res) => {
+        if (isApiPath(path) && apiTokenDenied(req, res)) return undefined
+        return handler(req, res)
+      },
+    }),
+  )
+}
+
+/** 可选 API token 闸（P0 安全）：token 为空 → 放行（默认关闭，不破坏 curl）；非空 → 校验
+ *  `x-jarvis-token` 头或 `authorization: Bearer <token>`，不匹配直接 401 + JSON。
+ *  只作用于 /api/* 数据接口；静态页面路由（/jarvis-ui、/jarvis-wings、页面 HTML）不拦，
+ *  否则用户打不开页面。返回 true 表示已拒绝（响应已写出）。 */
+export function apiTokenDenied(req, res, cfg = PLUGIN_CONFIG) {
+  const expected = String(readConfigValue(cfg && cfg.apiToken) || '').trim()
+  if (!expected) return false
+  const headers = (req && req.headers) || {}
+  const direct = String(headers['x-jarvis-token'] || '').trim()
+  const m = /^Bearer\s+(.+)$/i.exec(String(headers.authorization || ''))
+  const got = direct || (m ? String(m[1]).trim() : '')
+  if (got && tokenEquals(got, expected)) return false
+  try {
+    res.writeHead(401, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    })
+    res.end(JSON.stringify({ ok: false, error: 'unauthorized', hint: '请求头需带 x-jarvis-token（或 authorization: Bearer <token>）' }))
+  } catch { /* 响应写不出：仍按拒绝处理 */ }
+  return true
+}
+
+/** 数据接口路径判定：这三个前缀的接口受 token 闸管控（读+写）；静态页面/资源不受管控。 */
+export const API_ROUTE_PREFIXES = Object.freeze(['/api/jarvis/', '/api/luke-jarvis/', '/api/pixoffice/'])
+
+export function isApiPath(p) {
+  const s = String(p || '')
+  return API_ROUTE_PREFIXES.some((x) => s.startsWith(x))
+}
+
 function requestWorkspace(ctx, req) {
   try {
     const m = String((req && req.url) || '').match(/[?&]workspace=([^&]+)/)
     if (m) {
       const v = decodeURIComponent(m[1])
-      if (v.startsWith('/') || /^[A-Za-z]:[\\/]/.test(v)) return v
+      // 白名单：只认真实存在且含 .jarvis/ 或 .agent-teams/ 的目录；其它值忽略（回退 live 会话）
+      const safe = safeWorkspaceArg(v)
+      if (safe) return safe
     }
   } catch { /* 非法 query：忽略 */ }
   // HTTP 路由的工作区：只信本服务的 live 会话（或显式 ?workspace=）。
@@ -262,6 +408,28 @@ export function apply(ctx, config) {
     try {
       const c = config || {}
       bindPluginConfig(PLUGIN_CONFIG, c)
+      // apiToken（P0 安全）：liveconfig 的 DEFAULTS/VALIDATORS 没收录本字段（不在本次改动范围），
+      // 这里就地桥接：volatile ref → 实时 getter（面板保存即生效）；裸值 → 直接落值（测试/旧运行时）。
+      try {
+        const tok = c.apiToken
+        if (tok && typeof tok === 'object' && typeof tok.get === 'function') {
+          Object.defineProperty(PLUGIN_CONFIG, 'apiToken', {
+            configurable: true,
+            enumerable: true,
+            get() {
+              const v = readConfigValue(tok)
+              return typeof v === 'string' ? v.trim() : ''
+            },
+          })
+        } else {
+          Object.defineProperty(PLUGIN_CONFIG, 'apiToken', {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: typeof tok === 'string' ? tok.trim() : '',
+          })
+        }
+      } catch { /* 绑定失败：token 闸按默认关闭（与旧行为一致） */ }
       setSelfEvolutionConfig({ ...(readConfigValue(c.selfEvolution) || {}), workspaceMode: readConfigValue(c.workspaceMode) })
       bindSelfEvolutionLive(c)
     } catch { /* 配置异常不阻断启动 */ }
@@ -280,9 +448,10 @@ export function apply(ctx, config) {
             const m = q.match(/[?&]workspace=([^&]+)/)
             if (m) {
               const v = decodeURIComponent(m[1])
-              // 上游页面把 workspace 当**布尔开关**发（?workspace=1）；只有「看起来像路径」的值才当目录，
-              // 否则会把 workspace.id 派生成 jarvis-1 且读到空员工表（实测：employees=0）。
-              if (v && (v.startsWith('/') || v.includes('/'))) return v
+              // 上游页面把 workspace 当**布尔开关**发（?workspace=1）；只有「存在且含 .jarvis/ 或 .agent-teams/」
+              // 的目录才当工作区（否则会把 workspace.id 派生成 jarvis-1，更严重的是能借它读到任意目录）。
+              const safe = safeWorkspaceArg(v)
+              if (safe) return safe
             }
           } catch { /* 忽略 */ }
           if (PLUGIN_CONFIG.defaultWorkspace) {
@@ -297,9 +466,18 @@ export function apply(ctx, config) {
           const state = await readCompanyState(fsSvc, cwd)
           return { cwd, state: state || {}, seq0: Number((state && state.__seq) || 0) }
         }
-        // ① SSE：/api/pixoffice/events
-        ctx.effect(() =>
+        // relay 的 4 个接口一律过可选 token 闸（P0 安全）：默认关闭（token 为空放行），开启后无 token 401。
+        const relayApi = (def) => ctx.effect(() =>
           webSvcRelay.register({
+            ...def,
+            handler: (req, res) => {
+              if (apiTokenDenied(req, res)) return undefined
+              return def.handler(req, res)
+            },
+          })
+        )
+        // ① SSE：/api/pixoffice/events
+        relayApi({
             kind: 'exact',
             path: '/api/pixoffice/events',
             handler: async (req, res) => {
@@ -307,7 +485,6 @@ export function apply(ctx, config) {
                 'content-type': 'text/event-stream; charset=utf-8',
                 'cache-control': 'no-store',
                 connection: 'keep-alive',
-                'access-control-allow-origin': '*',
               }
               try {
                 res.writeHead(200, headers)
@@ -371,15 +548,13 @@ export function apply(ctx, config) {
               if (typeof res.on === 'function') res.on('close', close)
             },
           })
-        )
         // ② 页面 → relay 的命令：/api/pixoffice/messages（白名单校验）
-        ctx.effect(() =>
-          webSvcRelay.register({
+        relayApi({
             kind: 'exact',
             path: '/api/pixoffice/messages',
             handler: async (req, res) => {
               const send = (status, body) => {
-                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) } catch {}
               }
               if (!sameOriginOk(req)) return send(403, { ok: false, error: 'cross-origin-denied' })
               if (!req || req.method !== 'POST') return send(405, { ok: false, error: 'method-not-allowed' })
@@ -403,15 +578,13 @@ export function apply(ctx, config) {
               return send(200, { ok: true, accepted: verdict.command, at: new Date().toISOString() })
             },
           })
-        )
         // ③ UI 状态：/api/pixoffice/ui
-        ctx.effect(() =>
-          webSvcRelay.register({
+        relayApi({
             kind: 'exact',
             path: '/api/pixoffice/ui',
             handler: async (req, res) => {
               const send = (status, body) => {
-                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) } catch {}
               }
               try {
                 const { cwd, state } = await relayReadState(req)
@@ -421,22 +594,19 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
         // ④ 回执：/api/pixoffice/reply（上游发送后等回执，缺了会重试）
-        ctx.effect(() =>
-          webSvcRelay.register({
+        relayApi({
             kind: 'exact',
             path: '/api/pixoffice/reply',
             handler: async (req, res) => {
               const send = (status, body) => {
-                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) } catch {}
               }
               if (!sameOriginOk(req)) return send(403, { ok: false, error: 'cross-origin-denied' })
               if (!req || req.method !== 'POST') return send(405, { ok: false, error: 'method-not-allowed' })
               return send(200, { ok: true, at: new Date().toISOString() })
             },
           })
-        )
       }
     } catch { /* webServer 不可用：relay 降级（页面会显示连接失败） */ }
 
@@ -444,8 +614,7 @@ export function apply(ctx, config) {
     try {
       const webSvc = (ctx && ctx.webServer) || (typeof ctx.get === 'function' ? ctx.get('webServer') : undefined)
       if (webSvc && typeof webSvc.register === 'function') {
-        ctx.effect(() =>
-          webSvc.register({
+        registerApiRoute(webSvc, ctx, {
             kind: 'exact',
             path: '/api/luke-jarvis/board',
             handler: async (req, res) => {
@@ -483,7 +652,6 @@ export function apply(ctx, config) {
               }
             }
           })
-        )
       }
     } catch {}
 
@@ -544,11 +712,12 @@ export function apply(ctx, config) {
             res.writeHead(status, {
               'content-type': 'application/json; charset=utf-8',
               'cache-control': 'no-store',
-              'access-control-allow-origin': '*',
             })
             res.end(JSON.stringify(body))
           } catch {}
         }
+        // 所有 /api/* 数据接口统一走 token 闸（默认关闭）；静态页面路由不受影响。
+        const apiRoute = (def) => registerApiRoute(webSvc2, ctx, def)
         // jarvis 数据接口（任务/黑板/记忆/卡片/事件）不回通配 CORS：
         // 本页与接口同源，不需要；放任 `*` = 任意站点能读走你的项目内容（0.15 审计修复）。
         const sendJsonLocal = (res, status, body) => {
@@ -560,8 +729,7 @@ export function apply(ctx, config) {
             res.end(JSON.stringify(body))
           } catch {}
         }
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/state',
             handler: async (req, res) => {
@@ -575,9 +743,7 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/summary',
             handler: async (req, res) => {
@@ -591,9 +757,7 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/capabilities',
             handler: async (req, res) => {
@@ -606,14 +770,12 @@ export function apply(ctx, config) {
               })
             },
           })
-        )
 
         // 0.94) 能力台：UI → 35 个 jarvis 工具的真实执行通道（走宿主 tools.execute，闸照常生效）
         //   GET  /api/jarvis/tools     → 工具清单 + 参数 schema（界面据此渲染表单）
         //   GET  /api/jarvis/sessions  → 可绑定的活动会话
         //   POST /api/jarvis/command   → {tool, args} 执行；拒绝时如实返回原因
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/tools',
             handler: async (req, res) => {
@@ -624,9 +786,7 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/sessions',
             handler: async (req, res) => {
@@ -638,9 +798,7 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/command',
             handler: async (req, res) => {
@@ -680,12 +838,10 @@ export function apply(ctx, config) {
               return sendJsonLocal(res, 200, { ...out, workspace: projectDir })
             },
           })
-        )
 
         // 0.95) 事件流（轮询式，SSE 留到 P1）：GET /api/jarvis/events?since=<seq>&limit=<n>
         //       源 = .jarvis/events.jsonl（append-only）；UI 用它画时间轴/做增量刷新。
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/events',
             handler: async (req, res) => {
@@ -715,11 +871,74 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
+
+        // 0.955) 实时事件流 SSE：GET /api/jarvis/stream?since=<seq>
+        //   P0-2：秒级推送——连接先发一帧 event: snapshot（与 /api/jarvis/state 同源快照），
+        //   之后每隔 ≤3s 推 event: events（自 since 起的增量，用 readEvents 的 nextSeq 推进）；
+        //   无新事件推 `: keepalive` 注释行（不刷屏、不被中间层误判为断线）。
+        //   ?interval=<ms> 仅供测试加速（夹在 200..3000，仍满足 ≤3s 承诺）。
+        //   断线清理：req/res 的 close 事件清定时器（否则每条断连接漏一个 interval）。
+        apiRoute({
+          kind: 'exact',
+          path: '/api/jarvis/stream',
+          handler: async (req, res) => {
+            const url = String((req && req.url) || '')
+            const since0 = Math.max(0, Number((url.match(/[?&]since=(\d+)/) || [])[1] || 0))
+            const intervalMs = Math.max(200, Math.min(3000, Number((url.match(/[?&]interval=(\d+)/) || [])[1] || 2000)))
+            const headers = {
+              'content-type': 'text/event-stream; charset=utf-8',
+              'cache-control': 'no-store',
+              connection: 'keep-alive',
+            }
+            try {
+              res.writeHead(200, headers)
+              if (typeof res.flushHeaders === 'function') res.flushHeaders()
+            } catch { return undefined }
+            let closed = false
+            let since = since0
+            const write = (chunk) => {
+              if (closed) return
+              try { res.write(chunk) } catch { closed = true }
+            }
+            // 首帧：全量快照（UI 先渲染，再接增量事件；与 /api/jarvis/state 同一 buildSnapshot 口径）
+            try {
+              const cwd = requestWorkspace(ctx, req)
+              if (!cwd) {
+                write('event: snapshot\ndata: ' + JSON.stringify({ ok: true, active: false, schema: SNAPSHOT_SCHEMA, reason: 'no workspace' }) + '\n\n')
+              } else {
+                try { maybeAutoGc(cwd) } catch { /* 自动 GC 失败不影响快照 */ }
+                write('event: snapshot\ndata: ' + JSON.stringify({ ok: true, schema: SNAPSHOT_SCHEMA, demo: false, snapshot: buildSnapshot(cwd, pluginMeta) }) + '\n\n')
+              }
+            } catch (e) {
+              write('event: snapshot\ndata: ' + JSON.stringify({ ok: false, schema: SNAPSHOT_SCHEMA, error: String((e && e.message) || e) }) + '\n\n')
+            }
+            const tick = () => {
+              if (closed) return
+              try {
+                const cwd = requestWorkspace(ctx, req)
+                if (!cwd) { write(': keepalive\n\n'); return }
+                const r = readEvents(cwd, { since, limit: 200 })
+                if (r && Array.isArray(r.events) && r.events.length) {
+                  if (Number(r.nextSeq) > since) since = Number(r.nextSeq)
+                  write('event: events\ndata: ' + JSON.stringify({ ok: true, schema: SNAPSHOT_SCHEMA, events: r.events, lastSeq: r.lastSeq, nextSeq: r.nextSeq, hasMore: Boolean(r.hasMore), total: r.total }) + '\n\n')
+                } else {
+                  write(': keepalive\n\n')
+                }
+              } catch {
+                write(': keepalive\n\n')
+              }
+            }
+            const timer = setInterval(tick, intervalMs)
+            try { timer.unref?.() } catch { /* unref 不可用不影响 */ }
+            const close = () => { closed = true; clearInterval(timer); try { res.end() } catch {} }
+            if (req && typeof req.on === 'function') req.on('close', close)
+            if (typeof res.on === 'function') res.on('close', close)
+            return undefined
+          },
+        })
 
         // 0.945) 指令面：把界面上的一句话真投递进 DSH 会话（不是前端假回复）
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/chat',
             handler: async (req, res) => {
@@ -748,26 +967,24 @@ export function apply(ctx, config) {
               return sendJsonLocal(res, 200, out)
             },
           })
-        )
 
         // 0.96) 语音设置（全局）+ TTS 代理：
         //   GET /api/jarvis/greeting → 大模型动态问候（工作区感知；失败回落真实数据模板，绝不返回固定的"早上好"）
         let __greetCache = { key: '', at: 0, text: '', workspace: null }
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/greeting',
             handler: async (req, res) => {
               try {
                 const cwd = requestWorkspace(ctx, req)
-                if (!cwd) return sendJsonLocal(res, 200, { ok: true, text: '', workspace: null, reason: 'no workspace' })
+                if (!cwd) return sendJsonLocal(res, 200, { ok: true, text: '', persona: personaLine('idle'), workspace: null, reason: 'no workspace' })
                 const snap = buildSnapshot(cwd, pluginMeta)
                 const ws = (snap && snap.workspace) || { cwd }
                 const hour = new Date().getHours()
                 const stage = (snap && snap.stage) || {}
                 const cacheKey = cwd + '|' + String(stage.stage || '') + '|' + hour
                 if (__greetCache.key === cacheKey && Date.now() - __greetCache.at < 5 * 60 * 1000) {
-                  return sendJsonLocal(res, 200, { ok: true, text: __greetCache.text, workspace: ws, cached: true })
+                  return sendJsonLocal(res, 200, { ok: true, text: __greetCache.text, persona: personaLine('greeting'), workspace: ws, cached: true })
                 }
                 const daytime = hour < 11 ? '上午' : hour < 14 ? '中午' : hour < 18 ? '下午' : '晚上'
                 const openTasks = (snap && snap.tasks && snap.tasks.open) || 0
@@ -802,16 +1019,14 @@ export function apply(ctx, config) {
                 } catch (e) { text = '' }
                 const finalText = String(text || '').trim() || fallback
                 __greetCache = { key: cacheKey, at: Date.now(), text: finalText, workspace: ws }
-                return sendJsonLocal(res, 200, { ok: true, text: finalText, workspace: ws })
+                return sendJsonLocal(res, 200, { ok: true, text: finalText, persona: personaLine('greeting'), workspace: ws })
               } catch (e) {
                 return sendJsonLocal(res, 200, { ok: false, error: String((e && e.message) || e) })
               }
             },
           })
-        )
         //   GET /api/jarvis/persona → 助手名字（设置里可配置，默认 Jarvis；wings 页称呼与唤醒词共用）
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/persona',
             handler: async (req, res) => {
@@ -819,18 +1034,16 @@ export function apply(ctx, config) {
                 const name = String((PLUGIN_CONFIG && PLUGIN_CONFIG.name) || 'Jarvis').trim() || 'Jarvis'
                 const lang = (PLUGIN_CONFIG && PLUGIN_CONFIG.lang) === 'en' ? 'en' : 'zh'
                 const voiceEnabled = !(PLUGIN_CONFIG && PLUGIN_CONFIG.voiceEnabled === false)
-                return sendJsonLocal(res, 200, { ok: true, name, lang, voiceEnabled })
+                return sendJsonLocal(res, 200, { ok: true, name, lang, voiceEnabled, line: personaLine('greeting') })
               } catch (e) {
                 return sendJsonLocal(res, 200, { ok: true, name: 'Jarvis', lang: 'zh', voiceEnabled: true })
               }
             },
           })
-        )
         //   GET  /api/jarvis/voice  → 配置（apiKey 掩码）+ 音色/模型预设
         //   PUT  /api/jarvis/voice  → 保存（apiKey 空字符串 = 保留原值）
         //   POST /api/jarvis/tts    → 代理到 OpenAI 兼容 /audio/speech（key 不出本机）
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/voice',
             handler: async (req, res) => {
@@ -848,9 +1061,7 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/tts',
             handler: async (req, res) => {
@@ -878,7 +1089,7 @@ export function apply(ctx, config) {
                   const b64 = j && j.output && j.output.audio && j.output.audio.data
                   if (b64) {
                     const buf = Buffer.from(String(b64), 'base64')
-                    res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': String(buf.length), 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
+                    res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': String(buf.length), 'cache-control': 'no-store' })
                     res.end(buf)
                     return undefined
                   }
@@ -886,7 +1097,7 @@ export function apply(ctx, config) {
                   const audio = await fetch(audioUrl, { signal: AbortSignal.timeout(45000) })
                   if (!audio.ok) return sendJsonLocal(res, 502, { ok: false, error: `音频下载失败 ${audio.status}` })
                   const buf = Buffer.from(await audio.arrayBuffer())
-                  res.writeHead(200, { 'content-type': audio.headers.get('content-type') || 'audio/wav', 'content-length': String(buf.length), 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
+                  res.writeHead(200, { 'content-type': audio.headers.get('content-type') || 'audio/wav', 'content-length': String(buf.length), 'cache-control': 'no-store' })
                   res.end(buf)
                   return undefined
                 } catch (e) {
@@ -902,6 +1113,16 @@ export function apply(ctx, config) {
                   hint: '在界面的「语音设置」里配置 OpenAI 兼容 TTS 服务，或直接用浏览器语音',
                 })
               }
+              // P0-3 人格/情绪透传：只给**支持这些参数**的 OpenAI 兼容上游发（instructions 是 OpenAI 官方参数；
+              // emotion/style 是部分兼容网关的扩展）。没有值就**不下发**（空字段不污染上游请求体）。
+              // 阿里云 DashScope 分支不支持这些参数 → 直接忽略（上面已回落），不硬塞。
+              const voiceExtras = {}
+              const instructions = String((body && body.instructions) || cfg.instructions || '').trim()
+              const emotion = String((body && body.emotion) || cfg.emotion || '').trim()
+              const style = String((body && body.style) || cfg.style || '').trim()
+              if (instructions) voiceExtras.instructions = instructions
+              if (emotion) voiceExtras.emotion = emotion
+              if (style) voiceExtras.style = style
               try {
                 const upstream = await fetch(endpoint, {
                   method: 'POST',
@@ -912,6 +1133,7 @@ export function apply(ctx, config) {
                     input: text,
                     speed: Number((body && body.speed) || cfg.speed || 0.95),
                     response_format: 'mp3',
+                    ...voiceExtras,
                   }),
                   signal: AbortSignal.timeout(45000),
                 })
@@ -924,7 +1146,6 @@ export function apply(ctx, config) {
                   'content-type': upstream.headers.get('content-type') || 'audio/mpeg',
                   'content-length': String(buf.length),
                   'cache-control': 'no-store',
-                  'access-control-allow-origin': '*',
                 })
                 res.end(buf)
                 return undefined
@@ -933,7 +1154,6 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
 
         // 0) 官方 UI 入口（T8/T9）：GET /jarvis-ui → 302 跳 /jarvis-office/jarvis.html。
         //    T9 起指向「本公司数据适配页」（左侧实时数据面板 + PixOffice 场景 iframe）；
@@ -979,8 +1199,7 @@ export function apply(ctx, config) {
         )
         // 0.984) 当前会话近期汇报：读 DSH 会话转录（zstd 压缩 JSONL）最后若干条 assistant 文本
         //   为什么：主页面卡片要跟得上「DSH 会话里已经汇报的进度」，而不是只看 team.json 任务
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/session-recent',
             handler: async (req, res) => {
@@ -1018,11 +1237,9 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
         // 0.985) 动态结果页：<项目>/.jarvis/pages/*.html（Jarvis 按用户问题现写的展示页；GC 24h 回收）
         //   GET /api/jarvis/pages → 卡片元数据（id/title/updatedAt/ageHours/url/summary）
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/jarvis/pages',
             handler: async (req, res) => {
@@ -1051,7 +1268,6 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
         // 静态托管动态结果页（注入统一主题，保证「页面风格不会变化太大」）
         ctx.effect(() =>
           webSvc2.register({
@@ -1206,13 +1422,12 @@ export function apply(ctx, config) {
             },
           })
         )
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/luke-jarvis/pages',
             handler: async (req, res) => {
               const send = (status, body) => {
-                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) } catch {}
               }
               try {
                 const cwd = requestWorkspace(ctx, req)
@@ -1262,7 +1477,6 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
         // 0.996) 已归档页面只读查看：GET /jarvis-wings/archive/<trashId>
         //   归档页在回收站 .jarvis/trash/items/<trashId>/<原文件名>；只读返回，不改动保留期。
         ctx.effect(() =>
@@ -1297,13 +1511,12 @@ export function apply(ctx, config) {
           })
         )
         // 1) 快照接口：把 company-state.json 投影成 PixOffice 业务快照
-        ctx.effect(() =>
-          webSvc2.register({
+        apiRoute({
             kind: 'exact',
             path: '/api/luke-jarvis/company',
             handler: async (req, res) => {
               const send = (status, body) => {
-                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(body)) } catch {}
+                try { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)) } catch {}
               }
               try {
                 const cwd = requestWorkspace(ctx, req)
@@ -1320,7 +1533,6 @@ export function apply(ctx, config) {
               }
             },
           })
-        )
         // 2) 静态托管 /jarvis-office/*
         ctx.effect(() =>
           webSvc2.register({
