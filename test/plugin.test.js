@@ -3850,6 +3850,27 @@ test('T9j 主屏字幕电影式逐句推进（与语音同步，关语音也逐�
   assert.ok(/!window\.__JARVIS_REQ_ACTIVE__&&!window\.__JARVIS_ASKING__/.test(html), '这些流程期间状态轮询不得覆盖字幕')
 })
 
+test('T9k 派活参数体积守卫：超长 description 必须拒绝并给出替代方案', async () => {
+  const { TOOLS } = await import('../src/host/tools/index.js')
+  const tool = TOOLS.find((t) => t.name === 'jarvis_dispatch_task')
+  assert.ok(tool, 'jarvis_dispatch_task 必须存在')
+  // 实证故障：约 2100 字的 description 导致模型输出 JSON 在 position 2198 被截断
+  const huge = '很长的任务描述'.repeat(200)   // ≈ 1400 字
+  const r = await tool.execute({ assignee: 'CEO', subject: 'T1', description: huge }, null)
+  assert.equal(r.ok, false, '超长描述应被拒绝，而不是让调用崩坏')
+  assert.ok(r.summary.includes('过长'), '错误信息要说明原因')
+  assert.ok(r.summary.includes('写进项目内文件') || r.summary.includes('.jarvis/docs/'), '必须给出可执行的替代方案')
+  assert.ok(r.summary.includes('拆成多个任务单'), '或给出拆分建议')
+  // 正常长度必须放行（不能误伤）
+  const okDesc = '按 .jarvis/docs/任务说明-T1T2.md 执行 T1 与 T2。'
+  const r2 = await tool.execute({ assignee: 'CEO', subject: 'T1', description: okDesc, projectDir: '/tmp/nonexistent-probe' }, null)
+  assert.ok(!r2.summary.includes('过长'), '正常长度不该触发体积守卫')
+  // schema 描述里要提前告知上限（让模型生成前就知道）
+  const descSchema = tool.parameters?.properties?.description?.description || ''
+  assert.ok(descSchema.includes('900'), 'schema 应写明 900 字上限')
+  assert.ok(descSchema.includes('文件'), 'schema 应提示改为写文件')
+})
+
 test('T9f 动态页面归档：任务结束空满 5 分钟 → 卡片下线、页面进回收站（保留 30 天）', async () => {
   const repo = path.dirname(fileURLToPath(new URL(import.meta.url)))
   const { collect, listTrash } = await import('../src/host/adapters/trash.js')

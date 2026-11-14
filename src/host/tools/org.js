@@ -828,7 +828,7 @@ export const ORG_TOOLS = [
     properties: {
       assignee: { type: 'string', description: '成员名（公司员工 role，与蒸馏角色卡同名；也是找角色卡的键）' },
       subject: { type: 'string', description: '任务标题（写清交付物与验收口径）' },
-      description: { type: 'string', description: '任务正文：要做什么、输入在哪、验收标准（成员须知会经 meta.brief 直达成员简报）' },
+      description: { type: 'string', description: '任务正文：要做什么、输入在哪、验收标准（≤900 字）。详细要求请写进项目内文件（如 .jarvis/docs/任务说明-<主题>.md），这里只写「做什么 + 读哪个文件」——超长会让工具调用被截断失败' },
       acceptance: { type: 'string', description: '验收标准（可判定；会一并进入须知与授权依据）' },
       team: { type: 'string', description: '归属标注（可选；仅写入授权依据，执行统一走工作区任务单内核）' },
       taskId: { type: 'string', description: '沿用旧任务编号（可选，仅记录进授权依据）' },
@@ -865,6 +865,27 @@ export const ORG_TOOLS = [
     const assignee = String(args.assignee ?? '').trim()
     const subject = String(args.subject ?? '').trim()
     if (!assignee || !subject) return { ok: false, summary: '⛔ 派活需要 assignee（成员名）与 subject（任务标题）' }
+    // ── 参数体积守卫（实证故障：超长 description 导致模型输出 JSON 被截断）──
+    // 现象：description 约 2100 字时，模型在长字符串里"迷路"，把 </acceptance>、
+    //       <parameter name=...> 这类结构标记当成正文吐出，最终 JSON 在 position 2198
+    //       报「Unterminated string」，整次工具调用失败。
+    // 对策：超阈值直接拒绝并给出可执行的替代方案（写进文件、只传路径），
+    //       而不是让模型继续生成到崩坏。
+    const DESC_LIMIT = 900
+    const descLen = String(args.description ?? '').length
+    if (descLen > DESC_LIMIT) {
+      return {
+        ok: false,
+        dispatched: false,
+        summary:
+          `⛔ 任务描述过长（${descLen} 字 > 上限 ${DESC_LIMIT} 字）。\n` +
+          '超长参数会让模型输出在长字符串里失稳（实证：JSON 在 position 2198 被截断，整次调用失败）。\n' +
+          '**正确做法（任选其一）**：\n' +
+          '① 把详细要求写进项目内文件（如 `.jarvis/docs/任务说明-<主题>.md`），description 只写「做什么 + 读哪个文件」；\n' +
+          '② 拆成多个任务单，每单只写一件事。\n' +
+          '示例：description="按 .jarvis/docs/任务说明-T1T2.md 执行 T1 与 T2，约束见该文件。acceptance 见同文件。"',
+      }
+    }
     const projectDir = String(args.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || ''
     const rt = getRuntimeContext()
     const toolsSvc = rt && typeof rt.get === 'function' ? rt.get('tools') : undefined
