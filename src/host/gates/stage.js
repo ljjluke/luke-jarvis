@@ -203,6 +203,50 @@ function _stageGateText(st, name, extra) {
     '这是插件按 .jarvis 产物+闸门算出来的阶段，不是提示词建议——先补当前阶段再往下一阶段走（不要试图绕过）。',
   ].join('\n')
 }
+// ── 阶段判据基址（D1：闸的判据源必须与工具的落点同向）────────────────────────
+// 缺陷机理：闸只读会话 cwd，而工具按 args.projectDir 落状态 → 两者指向不同目录时，
+// 闸永远按「另一个目录的阶段」放行/拒绝（flowguard 在 A 目录落闸、闸按 B 目录判 → 永远过不完第一阶段）。
+// 修法：优先用**本次调用**里声明的 projectDir（与 flowguard/coverage 等写状态用的是同一个值），
+// 无/不合法才回退会话 cwd。
+// 边界（为什么只认白名单）：只有「工具 schema 真声明了 projectDir」的工具才可能把 projectDir 写进状态；
+// 其他工具即使收到同名字段也不该改变判据（否则随便传参就能把闸判到别处）。
+export const PROJECTDIR_TOOLS = new Set([
+  'jarvis_baseline', 'jarvis_coverage', 'jarvis_flowguard', 'jarvis_ticket', 'jarvis_gc',
+  'jarvis_store', 'jarvis_snapshot', 'jarvis_recall', 'jarvis_mind', 'jarvis_company',
+  'jarvis_dispatch_task', 'jarvis_member_brief', 'jarvis_ponder_check',
+  'jarvis_taskgraph', // 批次1b（D1 覆盖补全）：taskgraph 现在声明 projectDir 且产物写在该目录 → 判据跟它走
+])
+/** 绝对路径且是已存在目录才认（相对路径/不存在目录会让判据落到别处或凭空判阶段）。 */
+function _absExistingDir(p) {
+  try {
+    const fs = _require('node:fs')
+    const path = _require('node:path')
+    const s = String(p || '').trim()
+    if (!s || !path.isAbsolute(s)) return ''
+    return fs.statSync(s).isDirectory() ? s : ''
+  } catch { return '' }
+}
+/**
+ * 本次工具调用的状态根（阶段判据基址）：
+ *   ① 工具声明了 projectDir 且传了「绝对路径+存在的目录」→ 用它（= 工具落状态的地方）；
+ *   ② 否则 → 会话 header.cwd；
+ *   ③ 都没有 → 空串（判不出工作区，调用方按「放行」处理，不误拦 headless 会话）。
+ */
+export function stageBase(exec) {
+  let cwd = ''
+  try {
+    cwd = String((exec && exec.agent && exec.agent.session && exec.agent.session.header && exec.agent.session.header.cwd) || '')
+  } catch { cwd = '' }
+  try {
+    const name = String((exec && exec.name) || '')
+    const args = exec && exec.arguments
+    if (PROJECTDIR_TOOLS.has(name) && args && typeof args === 'object') {
+      const pd = _absExistingDir(args.projectDir)
+      if (pd) return pd
+    }
+  } catch { /* 参数形态异常 → 回退 cwd */ }
+  return cwd
+}
 /**
  * guard：按阶段机械放行/拒绝流程类工具调用。
  * 返回字符串 = 拒绝该次调用；返回 undefined = 放行。
@@ -211,8 +255,7 @@ export function jarvisStageGate(exec) {
   try {
     const name = String((exec && exec.name) || '')
     if (!/^(jarvis_|agent_teams_)/.test(name)) return undefined // 只管流程类；read/glob/bash 等不受影响
-    const session = exec && exec.agent && exec.agent.session
-    const cwd = session && session.header && session.header.cwd
+    const cwd = stageBase(exec) // D1：优先本次调用的 projectDir，回退会话 cwd（唯一入口）
     if (!cwd) return undefined // 判不出工作区 → 放行（不误拦 headless/无 cwd 会话）
     if (!_flowState(String(cwd)).jarvis) return undefined // 非 jarvis 工作区不拦（纯 agent-teams 用户不受影响）
     const st = computeStage(String(cwd))
@@ -249,7 +292,26 @@ export function captainExecutionGuard(exec) {
       )
     } catch {}
     if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
-    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① jarvis_ticket（action=list）先看现有任务单与成员在办情况；② 派活：jarvis_dispatch_task(assignee=成员, subject, description, acceptance) 一步开单（自动带角色卡+须知，开单即由原生 subagents 派成员子会话执行）；卡住的单 → jarvis_ticket（action=retry, ticketId=...）重派；③ 只读查看用 read/glob/grep；④ **不要重试本工具**——开单后成员子会话即开始干活（页面可见子任务）；⑤ **保持本回合活跃**直至成员经 jarvis_ticket report 回报并验收完成（A2A 闭环），期间不做任何 dsh 重启；⑥ **成员数量没有上限**：队伍大就让 CEO 成员用原生子代理辅助（深度限 1 层），正式扩编/加人提 jarvis_ticket（action=propose）由你裁决后开单；**绝不要用 subagent 绕过派活**（那是顶层自己干，属于违规）。`
+    // 缺陷 d 修复（2026-11-14 实证）：拒绝文案必须带「当前阶段 + 卡在哪 + 该走哪一步」。
+    // 原因：原文案只说「改走派活」，但若流程还停在 clarify（前置产物没齐），
+    // captain 派活也会被阶段网关拦 → 模型反复试 → 现象上像死锁。
+    // 真正的问题不是「守卫拦得太多」（jarvis_* 从不拦，出路一直存在），
+    // 而是「被拦的人不知道该先去过哪个闸」。
+    let stageHint = ''
+    try {
+      const st = computeStage(String(cwd))
+      if (st) {
+        const label = STAGE_LABELS[st.stage] || st.stage
+        const gaps = (st.missing || []).slice(0, 3).join('；')
+        stageHint =
+          `\n\n【当前进度】阶段 ${st.index}/${st.total}「${label}」` +
+          (gaps ? `｜还差：${gaps}` : '｜本阶段产物已齐') +
+          `\n【走出困境的正确顺序】① 本阶段产物没齐 → 先补齐再 jarvis_flowguard(step="${st.stage}")；` +
+          `② 闸过了 → jarvis_ticket(action=list) 看现有单，或 jarvis_dispatch_task 派给成员；` +
+          `③ 不要反复重试 ${name}（守卫不会因此放行，只会浪费回合）。`
+      }
+    } catch { /* 算不出阶段：退回原文案 */ }
+    return `【jarvis 严格闸·插件级】顶层 captain 不得用 ${name} 亲自执行。**立刻改走派活**：① jarvis_ticket（action=list）先看现有任务单与成员在办情况；② 派活：jarvis_dispatch_task(assignee=成员, subject, description, acceptance) 一步开单（自动带角色卡+须知，开单即由原生 subagents 派成员子会话执行）；卡住的单 → jarvis_ticket（action=retry, ticketId=...）重派；③ 只读查看用 read/glob/grep；④ **不要重试本工具**——开单后成员子会话即开始干活（页面可见子任务）；⑤ **保持本回合活跃**直至成员经 jarvis_ticket report 回报并验收完成（A2A 闭环），期间不做任何 dsh 重启；⑥ **成员数量没有上限**：队伍大就让 CEO 成员用原生子代理辅助（深度限 1 层），正式扩编/加人提 jarvis_ticket（action=propose）由你裁决后开单；**绝不要用 subagent 绕过派活**（那是顶层自己干，属于违规）。${stageHint}`
   } catch {
     return undefined
   }
