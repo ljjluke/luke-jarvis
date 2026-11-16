@@ -1207,11 +1207,24 @@ test('syncCompanyState：employee_started 领任务开工标 working（补全状
 })
 
 // 任务编排图校验（学 HuggingGPT 依赖图：拆结构化任务图过闸再派活）
+/** 缺陷 c 修复配套：taskgraph 新契约要求**真写盘**（没沉淀不许派活），
+ *  所以测试必须给它一个真实、可写的工作区——否则 ok 会因写盘失败变成 false。
+ *  统一夹具：临时目录 + .jarvis + company-state.json 可写。 */
+function mkTaskgraphWs() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-ws-'))
+  fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+  return dir
+}
+function rmTaskgraphWs(dir) { try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* 清理失败不影响测试结论 */ } }
+
 test('jarvis_taskgraph：健康任务图过闸（依赖闭环/每任务有验收/可并行）', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
   assert.ok(def, 'jarvis_taskgraph 工具存在')
+  const ws = mkTaskgraphWs()
+  try {
   const r = await def.execute({
     requirement: '做拼团电商小程序',
+    projectDir: ws,
     tasksJson: JSON.stringify([
       { id: 'T1', title: '方案设计', assignee: '架构', acceptance: '输出《方案设计》文档含模块划分+接口契约', deps: [] },
       { id: 'T2', title: '前端实现', assignee: '前端', deps: ['T1'], inputs: ['来自T1的方案设计文档'], acceptance: '页面能走通下单流程，通过验收用例' },
@@ -1224,11 +1237,15 @@ test('jarvis_taskgraph：健康任务图过闸（依赖闭环/每任务有验收
   assert.deepStrictEqual(r.issues, [], '无问题')
   // 拓扑分层：T1=第1批（首开工），T2/T3 同层可并行，T4 最后
   assert.ok(r.parallelGroups.some((g) => g.includes('前端实现') && g.includes('后端实现')), 'T2/T3 同层报可并行: ' + r.parallelGroups.join('|'))
+  assert.strictEqual(r.persisted, true, '新契约：必须真写盘（没沉淀不许派活）')
+  } finally { rmTaskgraphWs(ws) }
 })
 
 test('jarvis_taskgraph：悬空依赖/循环依赖/无验收 打回', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
-  const r = await def.execute({
+  const r = await def.execute({ projectDir: ws,
     requirement: 'x',
     tasksJson: JSON.stringify([
       { id: 'T1', title: 'A', assignee: '甲', acceptance: '产出A' },
@@ -1247,11 +1264,14 @@ test('jarvis_taskgraph：悬空依赖/循环依赖/无验收 打回', async () =
   assert.ok(all.includes('循环依赖'), '报循环依赖')
   assert.ok(all.includes('验收标准不可判定'), '报空泛验收')
   assert.ok(all.includes('缺负责人'), '报缺负责人')
+  } finally { rmTaskgraphWs(ws) }
 })
 
 test('jarvis_taskgraph：有依赖未写输入来源给提示；坏 JSON 报错', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
-  const r1 = await def.execute({
+  const r1 = await def.execute({ projectDir: ws,
     tasksJson: JSON.stringify([
       { id: 1, title: '做A', assignee: '甲', deps: [2], acceptance: 'A完成输出文档' },
       { id: 2, title: '做B', assignee: '乙', acceptance: 'B完成输出代码' },
@@ -1259,30 +1279,33 @@ test('jarvis_taskgraph：有依赖未写输入来源给提示；坏 JSON 报错'
   })
   assert.strictEqual(r1.ok, false, '有依赖但下游没写输入来源应提示')
   assert.ok(r1.issues.some((i) => i.includes('输入来源')), '提示输入来源')
-  const r2 = await def.execute({ tasksJson: 'not-json' })
+  const r2 = await def.execute({ projectDir: ws, tasksJson: 'not-json' })
   assert.strictEqual(r2.ok, false, '坏 JSON 打回')
   assert.ok(r2.issues.some((i) => i.includes('解析失败')), '报解析失败')
+  } finally { rmTaskgraphWs(ws) }
 })
 
 // jarvis_taskgraph：deps/inputs 一致性（学 HuggingGPT：参数引用是事实源，deps 必须覆盖 inputs 上游）
 test('jarvis_taskgraph：inputs 引用必须 ∈ deps（自引用/悬空引用/不一致打回）', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
   // 1) inputs 引用自己但 deps 没依赖自己 → 自引用打回
-  const r1 = await def.execute({ tasksJson: JSON.stringify([
+  const r1 = await def.execute({ projectDir: ws, tasksJson: JSON.stringify([
     { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
     { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T2的接口'], acceptance: '代码过测' },
   ]) })
   assert.strictEqual(r1.ok, false, '输入来源自引用应打回')
   assert.ok(r1.issues.some((i) => i.includes('自引用')), '报自引用')
   // 2) inputs 引用不存在的 T9 → 悬空打回
-  const r2 = await def.execute({ tasksJson: JSON.stringify([
+  const r2 = await def.execute({ projectDir: ws, tasksJson: JSON.stringify([
     { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
     { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T9的接口'], acceptance: '代码过测' },
   ]) })
   assert.strictEqual(r2.ok, false, '输入来源悬空应打回')
   assert.ok(r2.issues.some((i) => i.includes('悬空')), '报悬空')
   // 3) inputs 引用 T3 但 deps 只依赖 T1 → 不一致打回
-  const r3 = await def.execute({ tasksJson: JSON.stringify([
+  const r3 = await def.execute({ projectDir: ws, tasksJson: JSON.stringify([
     { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
     { id: 'T3', title: '接口', assignee: '丙', acceptance: '输出接口契约' },
     { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T3的接口'], acceptance: '代码过测' },
@@ -1290,11 +1313,12 @@ test('jarvis_taskgraph：inputs 引用必须 ∈ deps（自引用/悬空引用/�
   assert.strictEqual(r3.ok, false, 'deps 与 inputs 不一致应打回')
   assert.ok(r3.issues.some((i) => i.includes('不一致')), '报不一致: ' + r3.issues.join('|'))
   // 4) 正常：inputs 引用 T1 ∈ deps → 放行
-  const r4 = await def.execute({ tasksJson: JSON.stringify([
+  const r4 = await def.execute({ projectDir: ws, tasksJson: JSON.stringify([
     { id: 'T1', title: '方案', assignee: '甲', acceptance: '输出方案文档' },
     { id: 'T2', title: '实现', assignee: '乙', deps: ['T1'], inputs: ['来自T1的方案文档'], acceptance: '代码过测' },
   ]) })
   assert.strictEqual(r4.ok, true, 'inputs ∈ deps 应放行')
+  } finally { rmTaskgraphWs(ws) }
 })
 
 // 链路修复：会议联动员工状态（开会=离开工位，散会=回工位）
@@ -1486,18 +1510,21 @@ source: https://example-real.com/x
 
 // scan 教训：替代/重做类任务验收标准必须含"结构对齐参照基准"（防实现画蛇添足）
 test('jarvis_taskgraph：重做/对齐类任务验收须含结构对齐约束', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
   // 1) 标题说"对齐旧版"但验收没写结构对齐 → 打回
-  const r1 = await def.execute({ tasksJson: JSON.stringify([
+  const r1 = await def.execute({ projectDir: ws, tasksJson: JSON.stringify([
     { id: 'T1', title: '认证新增重做-对齐旧版两区结构', assignee: '实现A', acceptance: '分类型表单+测试按钮' },
   ]) })
   assert.strictEqual(r1.ok, false, '验收缺结构对齐应打回')
   assert.ok(r1.issues.some((i) => i.includes('结构/形态') || i.includes('画蛇添足')), '提示结构对齐: ' + r1.issues.join('|'))
   // 2) 验收含结构对齐 + 逐项对照 + 真实验证 → 放行（新要求：替代类须逐项对照参照基准+真实验证）
-  const r2 = await def.execute({ tasksJson: JSON.stringify([
+  const r2 = await def.execute({ projectDir: ws, tasksJson: JSON.stringify([
     { id: 'T1', title: '认证新增重做', assignee: '实现A', acceptance: 'UI 结构对齐旧版两页签形态，不加基准没有的；对照旧版逐项核字段/校验/交互无遗漏，关键操作真跑验证生效' },
   ]) })
   assert.strictEqual(r2.ok, true, '验收含结构对齐+逐项对照+真实验证应放行')
+  } finally { rmTaskgraphWs(ws) }
 })
 
 // ── ponder 真实性核验（lyj 会话教训：成员声称"十阶段全跑完/step-guard 全部 RECORDED"，
@@ -1606,8 +1633,10 @@ test('jarvis_ponder_check：run_id 不匹配（状态被别的 run 覆盖）→ 
 //    建队只配 CEO+猎头，8 个任务 6 个压 CEO 一人，CEO 成瓶颈、点名要的产出拖了三轮）──
 
 test('jarvis_taskgraph 编制闸：单一执行者包办全部任务 → 打回（编制不足）', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
-  const r = await def.execute({
+  const r = await def.execute({ projectDir: ws,
     requirement: '态感平台参与策略',
     tasksJson: JSON.stringify([
       { id: 'T1', title: '需求判读', assignee: 'CEO', acceptance: '输出判读文档含逐条结论' },
@@ -1618,9 +1647,12 @@ test('jarvis_taskgraph 编制闸：单一执行者包办全部任务 → 打回�
   assert.strictEqual(r.ok, false, '只有 1 个执行者应打回')
   assert.ok(r.issues.some((i) => /编制不足/.test(i)), '应报编制不足: ' + r.issues.join('|'))
   assert.strictEqual(r.staffing.executorCount, 1, '编制报告应给出执行角色数')
+  } finally { rmTaskgraphWs(ws) }
 })
 
 test('jarvis_taskgraph 编制闸：单角色承担 >60% → 报瓶颈但不误伤正常分工', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
   // CEO 承担 5/6 = 83% → 报瓶颈
   const overloaded = [
@@ -1631,7 +1663,7 @@ test('jarvis_taskgraph 编制闸：单角色承担 >60% → 报瓶颈但不误�
     { id: 'T5', title: '处置链设计', assignee: 'CEO', acceptance: '输出设计含闭环路径' },
     { id: 'T6', title: '收口评审', assignee: 'CEO', acceptance: '输出评审报告含逐项核对' },
   ]
-  const r1 = await def.execute({ requirement: 'x', tasksJson: JSON.stringify(overloaded) })
+  const r1 = await def.execute({ projectDir: ws, requirement: 'x', tasksJson: JSON.stringify(overloaded) })
   assert.strictEqual(r1.ok, false, 'CEO 83% 应报瓶颈')
   assert.ok(r1.issues.some((i) => /编制瓶颈/.test(i)), '应报编制瓶颈: ' + r1.issues.join('|'))
   assert.strictEqual(r1.staffing.maxLoad, 5)
@@ -1645,9 +1677,10 @@ test('jarvis_taskgraph 编制闸：单角色承担 >60% → 报瓶颈但不误�
     { id: 'T5', title: '处置链设计', assignee: '专家B', acceptance: '输出设计含闭环路径' },
     { id: 'T6', title: '收口评审', assignee: '专家C', acceptance: '输出评审报告含逐项核对' },
   ]
-  const r2 = await def.execute({ requirement: 'x', tasksJson: JSON.stringify(balanced) })
+  const r2 = await def.execute({ projectDir: ws, requirement: 'x', tasksJson: JSON.stringify(balanced) })
   assert.ok(!r2.issues.some((i) => /编制/.test(i)), '均衡分工不应报编制问题: ' + r2.issues.join('|'))
   assert.strictEqual(r2.staffing.executorCount, 3)
+  } finally { rmTaskgraphWs(ws) }
 })
 
 // ── 成员协议传递（lyj 教训：35 个会话只有 CEO 一个跑了 ponder——
@@ -1866,20 +1899,26 @@ test('syncCompanyState：员工开会前是 idle → 散会恢复 idle（不硬�
 // ── ponder 结论落地：替代/重建类任务验收须"逐项对照参照基准 + 真实验证"（scan 教训深化）──
 
 test('jarvis_taskgraph：替代类验收只有结构对齐（无逐项对照+真实验证）→ 打回', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
-  const r = await def.execute({ requirement: '替换旧系统', tasksJson: JSON.stringify([
+  const r = await def.execute({ projectDir: ws, requirement: '替换旧系统', tasksJson: JSON.stringify([
     { id: 'T1', title: '认证页移植-对齐旧版两页签', assignee: '实现A', acceptance: 'UI结构对齐旧版两页签形态' },
   ]) })
   assert.strictEqual(r.ok, false, '缺逐项对照+真实验证应打回')
   assert.ok(r.issues.some((i) => i.includes('逐项对照') && i.includes('真实验证')), '提示缺逐项对照+真实验证: ' + r.issues.join('|'))
+  } finally { rmTaskgraphWs(ws) }
 })
 
 test('jarvis_taskgraph：替代类验收含逐项对照+真实验证 → 放行', async () => {
+  const ws = mkTaskgraphWs()
+  try {
   const def = TOOLS.find((t) => t.name === 'jarvis_taskgraph')
-  const r = await def.execute({ requirement: '替换旧系统', tasksJson: JSON.stringify([
+  const r = await def.execute({ projectDir: ws, requirement: '替换旧系统', tasksJson: JSON.stringify([
     { id: 'T1', title: '认证页移植', assignee: '实现A', acceptance: '对照旧版认证页逐项核字段/校验/交互无遗漏；弱口令勾选后真跑验证后端收到' },
   ]) })
   assert.strictEqual(r.ok, true, '含逐项对照+真实验证应放行')
+  } finally { rmTaskgraphWs(ws) }
 })
 
 // ── ponder 结论落地：差异清单收口用 coverage 逐项销项（scan：t1 列了清单但收口没核销项→用户发现21处残余）──
