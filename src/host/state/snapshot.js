@@ -112,6 +112,84 @@ function listTeams(projectDir, fs, path) {
   return { teams: marked, open, completed, activeTeams: activeNames }
 }
 
+/** DSH 原生子会话扫描（UI 可见性兜底）。
+ *
+ *  问题（2026-11-16 实证）：用户在 DSH 会话里直接用原生 subagent 工具开子 agent，
+ *  完全绕过 jarvis 任务单系统（无 ticket / 无 .agent-teams / 无 events），
+ *  增强 UI 查 snap.tickets/tasks/events 全是空 → 显示空白，而实际有活在跑。
+ *
+ *  这里做的：扫 DSH 的会话目录，找出 origin=subagent 的会话，
+ *  标注「是否已纳入 jarvis 任务单」，让 UI 至少能说清「有什么在跑、哪些绕过了流程」。
+ *  只读 .zstd 的第一行（会话头，含 cwd/parentSession/origin），不读全文（省 IO）。
+ */
+function dshSubagents(dir, fs, path) {
+  const out = { total: 0, tracked: 0, untracked: 0, items: [] }
+  try {
+    const home = String(process.env.HOME || process.env.USERPROFILE || '/root')
+    const sroot = path.join(home, '.dsh', 'sessions')
+    if (!fs.existsSync(sroot)) return out
+    // DSH 会话目录按 cwd 命名：把路径里的 / 换成 -，前后加 --（如 --opt-work-luke-jarvis--）。
+    // 注意：路径本身可能含横线（luke-jarvis），所以只能正向比对「路径→横线形式」，
+    // 不能反向把横线还原成斜杠（会得到 opt/work/luke/jarvis，永远匹配不上）。
+    const norm = (s) => String(s || '').replace(/[\\/]+/g, '-').replace(/^[-]+|[-]+$/g, '').toLowerCase()
+    const targetNorm = norm(dir)
+    const candidates = []
+    try {
+      for (const d of fs.readdirSync(sroot)) {
+        if (d.startsWith('--') && d.endsWith('--') && norm(d.slice(2, -2)) === targetNorm) {
+          candidates.push(path.join(sroot, d))
+        }
+      }
+    } catch { /* 读不到会话根 */ }
+    for (const cdir of candidates) {
+      let names = []
+      try { names = fs.readdirSync(cdir) } catch { continue }
+      for (const n of names) {
+        if (/^session-/.test(n)) continue            // 主会话不算
+        const f = path.join(cdir, n, 'session.v4.jsonl.zstd')
+        if (!fs.existsSync(f)) continue
+        // zstd 压缩：必须解压才能读会话头（只取第一行，不解析全文，省内存）
+        let head = ''
+        try {
+          const zlib = _require('node:zlib')
+          const raw = fs.readFileSync(f)
+          const out = typeof zlib.zstdDecompressSync === 'function'
+            ? zlib.zstdDecompressSync(raw)
+            : null
+          if (!out) continue                       // 解压能力不可用：跳过（不影响主快照）
+          head = out.toString('utf8').split('\n')[0] || ''
+        } catch { continue }
+        let meta = null
+        try { meta = JSON.parse(head) } catch { continue }
+        if (!meta || String(meta.origin || '') !== 'subagent') continue
+        const sid = n
+        out.total++
+        // 是否已纳入 jarvis 任务单：exec-map 里登记过 = 是
+        let tracked = false
+        try {
+          const mapFile = path.join(dir, '.jarvis', 'tickets', 'exec-map.json')
+          if (fs.existsSync(mapFile)) {
+            const mp = JSON.parse(fs.readFileSync(mapFile, 'utf8'))
+            tracked = Object.values(mp || {}).some((slot) => Object.values(slot || {}).some((info) => String(info && info.childId || '') === sid))
+          }
+        } catch { tracked = false }
+        if (tracked) out.tracked++; else out.untracked++
+        out.items.push({
+          id: sid,
+          cwd: String(meta.cwd || ''),
+          parent: String(meta.parentSession || ''),
+          createdAt: meta.createdAt ? new Date(Number(meta.createdAt)).toISOString() : '',
+          tracked,
+        })
+      }
+    }
+    // 最新的在前，最多 20 条（UI 不需要几千条）
+    out.items.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    out.items = out.items.slice(0, 20)
+  } catch { /* 扫描失败不影响主快照 */ }
+  return out
+}
+
 function boardSummary(projectDir, fs, path) {
   const d = readJsonSafe(projectDir, '.jarvis/board.json', fs, path)
   const items = (d && Array.isArray(d.items) ? d.items : []).map((i) => ({
@@ -276,6 +354,7 @@ export function buildSnapshot(projectDir, meta = {}) {
       : null,
     cards,
     memory,
+    dshSubagents: dshSubagents(dir, fs, path),
     company: company || (teams.teams.length
       ? {
           company: { name: path.basename(dir) },

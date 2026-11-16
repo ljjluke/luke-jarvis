@@ -277,6 +277,16 @@ const I18N={
 'gc.card.copy':['这些文件很久没用了，建议清理；点开可以逐项确认。','These files have not been used for a while; open to review each one.'],
 'gc.card.unit':['项建议清理','suggestions'],
 'gc.card.kicker':['文件整理 · 建议清理','CLEANUP · SUGGESTIONS'],
+'dsh.sub.k':['未纳入流程','OFF-BOOK'],'dsh.sub.state':['{n} 个','{n} running'],
+'dsh.sub.title':['有 {n} 个任务在跑，但没走任务单','{n} tasks running outside the task system'],
+'dsh.sub.copy':['这些是直接开的子任务，没有登记进任务单，所以主屏看不到进度。','These were spawned directly and never registered, so their progress is invisible here.'],
+'dsh.sub.unit':['个未纳管','untracked'],
+'dsh.sub.kicker':['流程外子任务','OFF-BOOK SUBTASKS'],
+'dsh.sub.detail.title':['流程外子任务（{n} 个）','Off-book subtasks ({n})'],
+'dsh.sub.detail.copy':['它们正在工作区里干活，但没有对应的任务单，因此没有进度、没有验收、无法追溯。要纳入管理，请改用「安排工作」并由负责人接手。','They are working in the workspace but have no ticket — no progress, no acceptance, no trace. Use task dispatch to bring them under management.'],
+'dsh.sub.chip':['未纳管','untracked'],
+'dsh.sub.row':['由 {p} 开启 · {a}','spawned by {p} · {a}'],
+'dsh.sub.empty':['没有被纳入任务单的子任务。','All subtasks are registered.'],
 'gc.card.detail.title':['建议清理（{n} 项）','Cleanup suggestions ({n})'],
 'gc.card.detail.copy':['这些是建议，不会自动删除。确认后才会收进回收站（30 天内可恢复）。','Suggestions only — nothing is deleted automatically. Once confirmed, files move to the recycle bin (restorable for 30 days).'],
 'gc.card.row.sub':['{d} 天没改动','untouched for {d} days'],
@@ -483,7 +493,11 @@ function selectJarvisVoice(){if(!('speechSynthesis'in window))return null;const 
 function updateSpeakerUI(){}
 let speakQueue=[],speakingNow=false,lastSpokenText='',capGreeted=false;
 function splitSentences(t){return String(t||'').replace(/\s+/g,' ').split(/(?<=[。！？!?；;])/).map(s=>s.trim()).filter(Boolean)}
-function speakServer(s){return fetch('/api/jarvis/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:s})}).then(async r=>{if(!r.ok)return false;const blob=await r.blob();const url=URL.createObjectURL(blob);const audio=new Audio(url);await new Promise(res=>{audio.onended=res;audio.onerror=res;audio.play().catch(res)});URL.revokeObjectURL(url);return true}).catch(()=>false)}
+/* P0-3：语音配置（多供应商卡）本地缓存；拿不到就只用 text（浏览器语音兜底） */
+window.__JARVIS_TTS_CFG__=window.__JARVIS_TTS_CFG__||null;
+(async function loadTtsCfg(){try{const r=await fetch('/api/jarvis/voice',{cache:'no-store'});const b=await r.json();if(!b||!b.ok||!b.config)return;const c=b.config;const card=Array.isArray(c.providers)?c.providers.find(p=>p&&p.name===c.active):null;window.__JARVIS_TTS_CFG__=card||null}catch(e){}})();
+function ttsBody(s){const card=window.__JARVIS_TTS_CFG__||{};const body={text:s};if(card.voice)body.voice=card.voice;if(card.speed)body.speed=card.speed;if(card.instructions)body.instructions=card.instructions;if(card.emotion)body.emotion=card.emotion;if(card.style)body.style=card.style;return JSON.stringify(body)}
+function speakServer(s){return fetch('/api/jarvis/tts',{method:'POST',headers:{'content-type':'application/json'},body:ttsBody(s)}).then(async r=>{if(!r.ok)return false;const blob=await r.blob();const url=URL.createObjectURL(blob);const audio=new Audio(url);await new Promise(res=>{audio.onended=res;audio.onerror=res;audio.play().catch(res)});URL.revokeObjectURL(url);return true}).catch(()=>false)}
 function speakBrowser(s){return new Promise(resolve=>{if(!('speechSynthesis'in window))return resolve();const u=new SpeechSynthesisUtterance(s);u.lang='zh-CN';u.rate=.9;u.pitch=.86;u.volume=1;if(preferredVoice)u.voice=preferredVoice;u.onend=()=>resolve();u.onerror=()=>resolve();speechSynthesis.speak(u)})}
 async function speakNext(){if(!speakQueue.length){speakingNow=false;document.body.classList.remove('jarvis-speaking');return}const s=speakQueue.shift();const cap=document.getElementById('captionText');if(cap)cap.textContent=s+' ';document.body.classList.add('jarvis-speaking');const used=await speakServer(s);if(!used)await speakBrowser(s);document.body.classList.remove('jarvis-speaking');if(speakQueue.length)setTimeout(speakNext,160)}
 function speak(text,force=false){if(!voiceEnabled&&!force)return;const clean=String(text||'').replace(/\s+/g,' ').trim();if(!clean)return;if(clean===lastSpokenText&&!force)return;lastSpokenText=clean;if('speechSynthesis'in window)speechSynthesis.cancel();speakQueue=splitSentences(clean).slice(0,8);if(!speakQueue.length)return;speakingNow=true;speakNext()}
@@ -862,7 +876,7 @@ const esc=s=>String(s??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp
 const clip=(s,n)=>{const t=String(s??'').trim();return t.length>n?t.slice(0,n)+'…':t};
 const setText=(sel,text,root=document)=>{const el=$(sel,root);if(el)el.textContent=text};
 const STATUS_LABEL=k=>({in_progress:t('st.in_progress'),claimed:t('st.claimed'),pending:t('st.pending'),completed:t('st.completed'),failed:t('st.failed'),cancelled:t('st.cancelled'),dropped:t('st.dropped'),ready:'已完成',done:'已完成',working:'进行中',reviewing:'检查中',assigned:'已安排',blocked:'卡住了',progress:'进行中'})[k]||'进行中';
-const LIVE={snap:null,events:[],lastSeq:0,connected:false,demo:true,lastCapText:''};
+const LIVE={snap:null,events:[],lastSeq:0,maxEventSeq:0,connected:false,demo:true,lastCapText:''};
 
 // 六步进展的业务叫法（前端映射，host 侧标签保持不变，避免影响模型提示词与既有测试）
 const STEP_HUMAN=BOSS_STAGE;
@@ -1176,6 +1190,26 @@ function gcPathText(rel){
   if(parts.length<=2)return '…'+p.slice(-60);
   return parts[0]+'/…/'+parts.slice(-2).join('/');
 }
+/* DSH 原生子会话提示（兜底可见性）：用户在会话里直接用原生 subagent 开子 agent，
+   绕过了 jarvis 任务单 → 任务卡是空的，但实际有活在跑。这张卡把真相说出来，
+   而不是让主屏一片空白。 */
+function cardDshSubagents(snap){
+  const d=snap.dshSubagents;
+  if(!d||!Number(d.untracked||0))return null;
+  const items=(d.items||[]).filter(x=>!x.tracked).slice(0,6);
+  return {id:'dsh-subs',kind:'cleanup',k:t('dsh.sub.k'),
+    st:t('dsh.sub.state').replace('{n}',String(d.untracked)),
+    title:t('dsh.sub.title').replace('{n}',String(d.untracked)),
+    copy:t('dsh.sub.copy'),
+    data:String(d.untracked),dataLabel:t('dsh.sub.unit'),
+    detail:{kicker:t('dsh.sub.kicker'),
+      title:t('dsh.sub.detail.title').replace('{n}',String(d.untracked)),
+      copy:t('dsh.sub.detail.copy'),
+      meta:[['已纳入任务单',String(d.tracked||0)+' 个'],['未纳入',String(d.untracked)+' 个'],['总计',String(d.total||0)+' 个']],
+      rows:items.map(x=>({main:x.id.slice(0,8)+'…',chips:[{t:t('dsh.sub.chip'),c:'bad'}],
+        sub:t('dsh.sub.row').replace('{p}',String(x.parent||'?').slice(0,12)).replace('{a}',x.createdAt?new Date(x.createdAt).toLocaleString(window.JARVIS_LANG==='en'?'en-US':'zh-CN',{hour12:false}):'—')})),
+      empty:t('dsh.sub.empty')}}
+}
 /* 进行中的页面：每个页面一张卡，数量随任务动态变化 */
 function cardPageCards(){
   if(!LIVE.pages.length)return [];
@@ -1311,7 +1345,7 @@ function archiveCard(c, bornAt){
 function renderCards(snap){
   if(LIVE.dragging){LIVE.pendingSnap=snap;return}
   // 卡片函数可返回单张或数组。任务点卡优先（一张卡 = 一个任务点），其次页面卡、决策/协调卡。
-  const order=[cardTaskPoints,cardPageCards,cardDecision,cardProposal,cardBlocked,cardReport,cardQueue,cardTeam,cardGC];
+  const order=[cardTaskPoints,cardPageCards,cardDshSubagents,cardDecision,cardProposal,cardBlocked,cardReport,cardQueue,cardTeam,cardGC];
   const cards=order.flatMap(f=>{try{const r=f(snap);return Array.isArray(r)?r:(r?[r]:[])}catch(e){console.warn('card',e);return []}});
   const all=cards.filter(c=>c&&c.title);
   // 生命周期：满 5 分钟的卡片滚出主屏进历史（待拍板卡常驻）
@@ -1726,17 +1760,30 @@ async function loadState(){
     loadPages();
   }catch{LIVE.connected=false}
 }
+/* ── 实时事件流（P0-2）：EventSource 优先；不可用/断线自动回退到下面的轮询 ── */
+let eventStream=null;let eventStreamReady=false;
+function stopEventStream(){eventStreamReady=false;if(eventStream){try{eventStream.close()}catch(e){}eventStream=null}}
+function ingestEvents(batch){if(!Array.isArray(batch)||!batch.length)return false;let changed=false;for(const e of batch){const seq=Number(e&&e.seq);if(Number.isFinite(seq)&&seq>0&&seq<=LIVE.maxEventSeq)continue;LIVE.events.push(e);changed=true;if(Number.isFinite(seq)&&seq>0)LIVE.maxEventSeq=Math.max(LIVE.maxEventSeq,seq)}if(LIVE.events.length>200)LIVE.events=LIVE.events.slice(-200);return changed}
+function startEventStream(){
+  if(typeof EventSource!=='function')return false;
+  stopEventStream();
+  try{
+    const es=new EventSource(apiUrl('/api/jarvis/stream')+(apiUrl('/api/jarvis/stream').includes('?')?'&':'?')+`since=${LIVE.lastSeq}`);
+    eventStream=es;
+    es.addEventListener('snapshot',ev=>{try{const b=JSON.parse(ev.data);if(!b||!b.ok||!b.snapshot)return;LIVE.snap=b.snapshot;LIVE.connected=true;LIVE.demo=b.demo===true;renderAll&&renderAll()}catch(e){}});
+    es.addEventListener('events',ev=>{try{const b=JSON.parse(ev.data);if(!b||!b.ok)return;if(ingestEvents(b.events)){const adv=Number(b.nextSeq??0);if(adv>LIVE.lastSeq)LIVE.lastSeq=adv;if(LIVE.snap){renderMain(LIVE.snap);renderProgress(LIVE.snap)}}}catch(e){}});
+    es.onopen=()=>{eventStreamReady=true};
+    es.onerror=()=>{stopEventStream()};
+    return true;
+  }catch(e){stopEventStream();return false}
+}
 async function loadEvents(){
+  if(eventStreamReady)return; // SSE 在线不轮询；断线后自动恢复轮询
   try{
     const base=apiUrl('/api/jarvis/events');const r=await fetch(base+(base.includes('?')?'&':'?')+`since=${LIVE.lastSeq}&limit=50`,{cache:'no-store'});
     const body=await r.json();
     if(!body.ok||!Array.isArray(body.events))return;
-    if(body.events.length){
-      LIVE.events.push(...body.events);
-      if(LIVE.events.length>200)LIVE.events=LIVE.events.slice(-200);
-      LIVE.lastSeq=body.lastSeq||LIVE.lastSeq;
-      if(LIVE.snap){renderMain(LIVE.snap);renderProgress(LIVE.snap)}
-    }
+    if(ingestEvents(body.events)){LIVE.lastSeq=body.nextSeq||body.lastSeq||LIVE.lastSeq;if(LIVE.snap){renderMain(LIVE.snap);renderProgress(LIVE.snap)}}
   }catch{/* 事件失败不影响快照 */}
 }
 window.__JARVIS_UI__={live:LIVE,reload:loadState,showPage:showPageIframe};
@@ -1754,6 +1801,7 @@ document.getElementById('detailBody').addEventListener('keydown',e=>{
   if(row)showPageIframe(row.dataset.page,row.dataset.ptitle);
 });
 loadState();loadEvents();loadPages();loadRecent();
+startEventStream(); // P0-2：SSE 优先（不可用则静默，下面的轮询是回退通道）
 setInterval(loadState,5000);
 setInterval(loadEvents,3000);
 setInterval(loadPages,15000);
