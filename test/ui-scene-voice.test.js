@@ -7,7 +7,10 @@ const html = () => fs.readFileSync(new URL('../webui/jarvis-v2-wings.html', impo
 
 test('团队一览：嵌入项目内置的 PixOffice 场景（不是外部网站）', () => {
   const h = html()
-  assert.ok(/id="teamScene"[^>]*src="\/jarvis-office\/jarvis-scene\.html"/.test(h), '团队页必须嵌本地 PixOffice 场景')
+  // 必须用上游官方的 layout=scene 模式（只渲染办公室画面），不是把整站原样塞进来
+  assert.ok(/id="teamScene"[^>]*src="\/jarvis-office\/jarvis-scene\.html\?layout=scene"/.test(h), '必须用官方 layout=scene 模式（纯场景，不挂 chat/侧栏）')
+  assert.ok(/function applySceneAdapter/.test(h), '要有主题注入（把白底场景压到暗色，避免与 Wings 割裂）')
+  assert.ok(/hue-rotate\(-4deg\)/.test(h), '画面要压到冷青色调与 Wings 一致')
   assert.ok(/\.team-scene-frame\{/.test(h), 'iframe 要有铺满的样式')
   assert.ok(!/class="person p1"/.test(h), '不再用自绘 CSS 假人')
   assert.ok(!/class="worker-model"/.test(h) || !/teamScene.*worker-model/.test(h), '假人结构与 iframe 不共存')
