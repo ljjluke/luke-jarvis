@@ -56,6 +56,27 @@ const _writeProposals = (projectDir, list) => {
   } catch {}
 }
 
+// ── D6：前置检查的 fail-closed 契约（导出供单测：检查函数崩溃 ≠ 通过）────────────────────
+// 缺陷原文：`try { await cfg.check(missing) } catch {}` —— clarify 的 pre 是空数组，
+// 检查函数一旦抛异常，missing 保持空 → ok=true → 落闸 → 返回 ✅（检查异常被当成「前置齐备」）。
+// 修法：异常必须被记录并让本次判定按 BLOCKED 处理，且输出写明「校验执行异常：<message>」。
+/** 执行前置产物检查。check 抛错 → 返回 checkError（调用方必须 fail-closed，不许当通过）。 */
+export async function runFlowCheck(pre, check) {
+  const missing = [...(pre || [])]
+  let checkError = ''
+  try {
+    const filtered = await check(missing)
+    if (Array.isArray(filtered)) { missing.length = 0; missing.push(...filtered) } // F4：兼容「返回新数组」写法
+  } catch (e) {
+    checkError = String((e && e.message) || e) || '未知异常（无 message）'
+  }
+  return { missing, checkError }
+}
+/** 闸结论：只有「无缺失 且 检查未异常」才算通过（fail-closed）。 */
+export function flowGateOk(missing, checkError) {
+  return !checkError && Array.isArray(missing) && missing.length === 0
+}
+
 /** 本组工具（按原始顺序）；由 tools/index.js 汇总成 TOOLS。 */
 export const DELIVER_TOOLS = [
   {
@@ -486,6 +507,9 @@ export const DELIVER_TOOLS = [
         additionalProperties: false,
         properties: {
           sourceCount: { type: 'number', description: '源清单条目数' },
+          // D12：execute 实际返回 persisted（落盘路径数组），schema 必须声明——否则 output 校验
+          // `additionalProperties:false` 会把「调用成功」判成 invalid output（副作用已发生 + 用户看到报错，最坏的不一致）。
+          persisted: { type: 'array', items: { type: 'string' }, description: '覆盖矩阵落盘路径（persist=true 且写入成功时返回；未 persist/写入失败为空数组）' },
           uncovered: { type: 'array', items: { type: 'string' }, description: '未被任何目标覆盖的源条目（漏做/漏测——打回核心依据）' },
           danglingRefs: { type: 'array', items: { type: 'string' }, description: '悬空引用（refs 指向不存在的源 id）' },
           openItems: { type: 'array', items: { type: 'string' }, description: '未收口条目（status 非终态）' },
@@ -838,7 +862,10 @@ export const DELIVER_TOOLS = [
       }
       // T13 ⑤：状态根唯一化——插件仓库自身（有 package.json name=luke-jarvis 或 src/host/plugin.js）
       // 不是 jarvis 状态根；向它写 .jarvis/gates.json 会产生「第二个状态根 → 假 PASS」（T12 OBS-2 实证）。
-      if (looksLikePluginRepo(projectDir) && !(await hasGlob(getFsService(exec), path.join(projectDir, '.agent-teams'), 'team.json'))) {
+      // 缺陷 a 修复：标准结构是 .agent-teams/<team>/team.json（在子目录里），
+      //   一层 list 找不到 → 恒判 STATE_ROOT_CONFLICT → 流程自锁。
+      //   depth:3 = 覆盖 <team>/team.json 与更深的嵌套，不要求用户伪造根级空壳。
+      if (looksLikePluginRepo(projectDir) && !(await hasGlob(getFsService(exec), path.join(projectDir, '.agent-teams'), 'team.json', { depth: 3 }))) {
         return {
           verdict: `⛔ 状态根冲突：${projectDir} 是插件仓库自身，不是 jarvis 项目工作区。一个工作区只能有一个 .jarvis 状态根；请用真实项目目录（或删除该目录里的 .jarvis）`,
           ok: false,
@@ -852,15 +879,35 @@ export const DELIVER_TOOLS = [
       const sessionId0 = String((exec && exec.agent && exec.agent.session && exec.agent.session.id) || '')
       const ownedInfo = resolveOwnedTeams(projectDir, sessionId0)
       const ownedSet = new Set(ownedInfo.teams)
-      const missing = [...cfg.pre]
-      try {
-        const filtered = await cfg.check(missing)
-        if (Array.isArray(filtered)) { missing.length = 0; missing.push(...filtered) } // F4：兼容「返回新数组」写法
-      } catch {}
-      const ok = missing.length === 0
+      // D6：check 抛异常 → 记 checkError 并 fail-closed（原实现 catch {} 会把「无法判定」判成通过）
+      const { missing, checkError } = await runFlowCheck(cfg.pre, cfg.check)
+      const ok = flowGateOk(missing, checkError)
+      if (checkError) missing.push(`校验执行异常（fail-closed：检查函数崩溃 ≠ 前置齐备）：${checkError}`)
       // 落闸留痕：通过才记（后续建队/派活/收口会检查这些闸）
       const sessionId = String((exec && exec.agent && exec.agent.session && exec.agent.session.id) || '')
-      try { if (ok) recordGate(projectDir, step, true) } catch {}
+      // D5/K26：recordGate 的返回值必须消费——返回 false / 抛错 = 状态根被拒或写盘失败 = 本次不算通过。
+      // 原实现 `try { if (ok) recordGate(...) } catch {}` 丢弃返回值 → 闸没写、仍报 ✅ → 下游永远被阶段闸拒（鬼打墙）。
+      let gateRecorded = false
+      let gateError = ''
+      if (ok) {
+        try { gateRecorded = recordGate(projectDir, step, true) === true } catch (e) {
+          gateError = String((e && e.message) || e)
+        }
+      }
+      if (ok && !gateRecorded) {
+        return {
+          ownedTeams: ownedInfo.teams,
+          ownedSource: ownedInfo.source,
+          verdict:
+            `⛔ BLOCKED（闸记录未写入，本次不算通过）：${gateError ? '写入异常：' + gateError : '状态根被拒（插件仓库/只读目录不得持有 .jarvis 状态根）或写盘失败'}——` +
+            `前置产物已齐备但 .jarvis/gates.json 没落盘，下游阶段闸不会放行；请换真实项目工作区（或修复写权限）后重跑 jarvis_flowguard(step="${step}")。`,
+          ok: false,
+          step,
+          error: 'GATE_NOT_RECORDED',
+          missing: [...missing, `闸记录未写入（${gateError || 'STATE_ROOT_CONFLICT/写盘失败'}）——本次不算通过`],
+          next: `确认 ${projectDir} 可写且不是插件仓库自身（一个工作区只有一个状态根），再重跑 jarvis_flowguard(step="${step}")`,
+        }
+      }
       // D5-v2：build 闸通过 = 建队完成 → 把「本项目团队」写进 .jarvis/active-team.json（归属判据，
       // computeStage 据此只统计本项目团队的未完成任务；见 readActiveTeamMarker 注释里的判据关系与误判边界）。
       let activeTeamMarker = ''
@@ -881,32 +928,61 @@ export const DELIVER_TOOLS = [
         } catch (e) { activeTeamError = String((e && e.message) || e) }
       }
       // 步骤完成留痕（done=true 且前置齐备 → 记录到 .jarvis/flow-progress.json，学 ponder step-guard after）
+      // D5：留痕同样过状态根守卫——守卫拒绝/写盘失败必须**返回失败并写明原因**，不许静默写（否则出现
+      // 「闸没写、留痕写了」的半真状态，用户无法判断到底过没过）。
       let recorded = null
+      let progressError = ''
       if (args.done === true && ok) {
-        const fsSvc2 = getFsService(exec)
-        if (fsSvc2 && typeof fsSvc2.readText === 'function' && typeof fsSvc2.writeText === 'function') {
-          try {
-            const fp = path.join(projectDir, '.jarvis/flow-progress.json')
-            let prog = { steps: [], updatedAt: '' }
-            try { const t = await fsSvc2.readText(fp); if (t) prog = JSON.parse(t) } catch {}
-            const now = new Date().toISOString()
-            prog.steps = (prog.steps || []).filter((x) => x.step !== step)
-            prog.steps.push({ step, label: cfg.label, at: now })
-            prog.updatedAt = now
-            await fsSvc2.writeText(fp, JSON.stringify(prog, null, 2))
-            recorded = fp
-          } catch {}
+        const conflict = stateRootConflict(projectDir)
+        if (conflict) {
+          progressError = conflict.error + '：' + conflict.message
+        } else {
+          const fsSvc2 = getFsService(exec)
+          if (!fsSvc2 || typeof fsSvc2.readText !== 'function' || typeof fsSvc2.writeText !== 'function') {
+            progressError = '文件服务不可用（fsSvc 缺失），无法写入 .jarvis/flow-progress.json'
+          } else {
+            try {
+              const fp = path.join(projectDir, '.jarvis/flow-progress.json')
+              let prog = { steps: [], updatedAt: '' }
+              try { const t = await fsSvc2.readText(fp); if (t) prog = JSON.parse(t) } catch {}
+              const now = new Date().toISOString()
+              prog.steps = (prog.steps || []).filter((x) => x.step !== step)
+              prog.steps.push({ step, label: cfg.label, at: now })
+              prog.updatedAt = now
+              await fsSvc2.writeText(fp, JSON.stringify(prog, null, 2))
+              recorded = fp
+            } catch (e) {
+              progressError = String((e && e.message) || e) || '写盘失败'
+            }
+          }
+        }
+      }
+      if (progressError) {
+        return {
+          ownedTeams: ownedInfo.teams,
+          ownedSource: ownedInfo.source,
+          verdict: `⛔ BLOCKED（步骤留痕未写入）：${progressError}——done=true 要求把完成记录写进 .jarvis/flow-progress.json，写入被拒/失败时本次不算完成。`,
+          ok: false,
+          step,
+          error: 'PROGRESS_NOT_RECORDED',
+          missing: [...missing, `步骤留痕未写入（${progressError}）`],
+          next: `确认 ${projectDir} 可写且不是插件仓库自身，再重跑 jarvis_flowguard(step="${step}", done=true)`,
         }
       }
       const out = {
         ownedTeams: ownedInfo.teams,
         ownedSource: ownedInfo.source,
-        verdict: ok ? `✅ ${cfg.label}前置齐备，可进入${recorded ? '（已记录完成→' + recorded + '）' : ''}` : `⛔ BLOCKED：${cfg.label}缺前置产物——${missing.join('；')}`,
+        verdict: checkError
+          ? `⛔ BLOCKED（校验执行异常）：${checkError}——前置产物无法判定，按 BLOCKED 处理（fail-closed：检查函数崩溃 ≠ 通过；修复/重跑后再进${cfg.label}）`
+          : ok
+            ? `✅ ${cfg.label}前置齐备，可进入${recorded ? '（已记录完成→' + recorded + '）' : ''}`
+            : `⛔ BLOCKED：${cfg.label}缺前置产物——${missing.join('；')}`,
         ok,
         step,
         missing,
-        next: ok ? cfg.next : `先补齐缺失项（${missing.join('；')}）再进${cfg.label}`,
+        next: checkError ? `修复校验执行异常（${checkError}）后重跑 jarvis_flowguard(step="${step}")` : (ok ? cfg.next : `先补齐缺失项（${missing.join('；')}）再进${cfg.label}`),
       }
+      if (checkError) out.error = 'CHECK_FAILED'
       if (recorded) out.recorded = recorded
       if (activeTeamMarker) out.activeTeamMarker = activeTeamMarker
       if (activeTeamError) out.activeTeamError = activeTeamError
@@ -929,6 +1005,7 @@ export const DELIVER_TOOLS = [
         basis: { type: 'string', description: '提案的授权依据：引用黑板项/教训/待办的具体出处（propose 用）' },
         reason: { type: 'string', description: '驳回提案/换人/清理孤儿的理由（dismiss/retire/clean-orphans 用）' },
         projectDir: { type: 'string', description: '项目工作区（默认当前会话 cwd）' },
+        project: { type: 'string', description: '需求/项目名（老板看到的交付物名称，如「拼团电商」）。不传则回退为工作区路径' },
         title: { type: 'string', description: '任务单标题（open/adjudicate）' },
         stage: { type: 'string', description: '所属阶段 clarify/decompose/design/build/verify/close（默认 build）' },
         role: { type: 'string', description: '承接角色（默认 captain）；retire 时=要换掉的角色名（如「前端」）' },
@@ -1021,7 +1098,10 @@ export const DELIVER_TOOLS = [
           try { mandate = args?.mandate ? JSON.parse(String(args.mandate)) : undefined } catch { mandate = undefined }
           const input = {
             title: String(args?.title ?? '').trim() || '未命名任务',
-            project: projectDir,
+            // 交付物聚合层要的是「需求/项目名」，不是路径。
+            // 原实现硬编码 projectDir → 老板看到的交付物叫 /opt/work/xxx（文件夹名），不像需求。
+            // 修法：优先用调用方传的项目名（project/需求名），没传才回退 projectDir（保持兼容）。
+            project: String(args?.project ?? '').trim() || projectDir,
             stage: String(args?.stage ?? 'build').trim() || 'build',
             role: String(args?.role ?? 'captain').trim() || 'captain',
             mandate,

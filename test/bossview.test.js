@@ -54,6 +54,29 @@ test('A：没有 ticket 时 deliverables 为空（不编造）', () => {
   } finally { rm(ws) }
 })
 
+test('A：交付物名称用「需求名」而不是文件夹路径（老板看得懂）', () => {
+  const ws = mkWs([])
+  try {
+    // 直接造 ticket，project 传中文需求名（真实调用应这样传）
+    fs.writeFileSync(path.join(ws, '.jarvis/tickets/ticket-x1.json'), JSON.stringify({
+      id: 'ticket-x1', title: '下单页', project: '拼团电商', stage: 'build',
+      createdAt: '2026-11-16T02:00:00Z', updatedAt: '2026-11-16T02:00:00Z',
+      assignments: [{ role: '前端', state: 'running', report: { state: 'ready' } }],
+    }))
+    const s = buildSnapshot(ws, { version: 'x' })
+    assert.equal(s.deliverables[0].name, '拼团电商', '中文需求名必须原样显示')
+    // 旧数据（project 是路径）要能降级到末段名
+    fs.writeFileSync(path.join(ws, '.jarvis/tickets/ticket-x2.json'), JSON.stringify({
+      id: 'ticket-x2', title: '任务2', project: '/opt/work/my-proj', stage: 'build',
+      createdAt: '2026-11-16T03:00:00Z', updatedAt: '2026-11-16T03:00:00Z',
+      assignments: [],
+    }))
+    const s2 = buildSnapshot(ws, { version: 'x' })
+    const pathOne = s2.deliverables.find((x) => x.name === 'my-proj')
+    assert.ok(pathOne, '路径型 project 应显示末段名（不是整条路径）')
+  } finally { rm(ws) }
+})
+
 // ── E：验收状态归一 ──────────────────────────────────────────────────
 test('E：验收状态四态归一 + unknown 兜底', () => {
   const ws = mkWs([

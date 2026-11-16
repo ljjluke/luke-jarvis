@@ -257,10 +257,17 @@ function buildDeliverables(projectDir, tickets, path) {
   if (!all.length) return []
   const groups = new Map()
   for (const t of all) {
-    // 归属键：project 全路径 → 取末段做可读名；空则用工作区名
+    // 归属键：project 可以是需求名，也可以是路径（旧数据）。两者都要能聚合。
     const raw = String(t.project || '').trim()
     const key = raw || String(projectDir)
-    if (!groups.has(key)) groups.set(key, { key, name: raw ? path.basename(raw) || raw : path.basename(String(projectDir)), items: [] })
+    if (!groups.has(key)) {
+      // 显示名：像路径就用末段（/opt/work/xxx → xxx），否则原样（「拼团电商」直接用）
+      const looksLikePath = /^[A-Za-z]:[\\/]|[\\/]/.test(raw)
+      const name = raw
+        ? (looksLikePath ? (path.basename(raw) || raw) : raw)
+        : path.basename(String(projectDir))
+      groups.set(key, { key, name, items: [] })
+    }
     groups.get(key).items.push(t)
   }
   const out = []
