@@ -23,6 +23,10 @@ const CAPTAIN_DENY_TOOLS = new Set([
   'workflow', 'ralph',
 ])
 const _captainCache = { at: 0, cwd: '', ids: new Set() }
+/** 未建队时的「默认 captain」标记：认不出真实 captain 但工作区是 jarvis 时，
+ *  把所有调用当作顶层 captain 处理（见 captainExecutionGuard 的兜底分支）。 */
+export const ANY_TOPLEVEL = '__jarvis-any-toplevel__'
+
 export function _captainIds(cwd) {
   const now = Date.now()
   if (_captainCache.cwd === cwd && now - _captainCache.at < 3000) return _captainCache.ids
@@ -33,12 +37,21 @@ export function _captainIds(cwd) {
     // 只对 jarvis 工作区生效（非 jarvis 项目不受影响）；.jarvis/allow-captain-exec = 逃生阀
     if (fs.existsSync(path.join(cwd, '.jarvis')) && !fs.existsSync(path.join(cwd, '.jarvis/allow-captain-exec'))) {
       const teamsDir = path.join(cwd, '.agent-teams')
-      for (const team of fs.readdirSync(teamsDir)) {
+      let found = 0
+      let names = []
+      try { names = fs.readdirSync(teamsDir) } catch { names = [] }
+      for (const team of names) {
         try {
           const d = JSON.parse(fs.readFileSync(path.join(teamsDir, team, 'team.json'), 'utf8'))
-          if (d && d.captainSessionId) ids.add(String(d.captainSessionId))
+          if (d && d.captainSessionId) { ids.add(String(d.captainSessionId)); found++ }
         } catch { /* 单个团队坏文件忽略 */ }
       }
+      // 根治（2026-11-16 实证）：认不出 captain（没建队 / team.json 缺失）时，
+      // 原实现返回空集 → 守卫完全失效 → 用户在会话里用原生 subagent 随便开子 agent，
+      // 全部绕过任务单（实测 14 个会话 tracked=0，UI 只能靠提示卡兜底）。
+      // 修法：jarvis 工作区里没有可识别的 captain 时，插入 ANY_TOPLEVEL 标记，
+      // 让 captainExecutionGuard 对所有调用方生效——「未建队时谁都别自己执行」。
+      if (!found) ids.add(ANY_TOPLEVEL)
     }
   } catch { /* 无 .agent-teams/权限 → 不拦 */ }
   _captainCache.at = now
@@ -291,7 +304,21 @@ export function captainExecutionGuard(exec) {
         `${new Date().toISOString()} tool=${name} sid=${sessionId} cwd=${cwd} captains=[${[..._captainIds(String(cwd))].join(',')}]\n`,
       )
     } catch {}
-    if (!_captainIds(String(cwd)).has(String(sessionId))) return undefined
+    const captains = _captainIds(String(cwd))
+    // 根治（2026-11-16）：ANY_TOPLEVEL 表示「jarvis 工作区但认不出 captain（未建队）」——
+    // 此时任何顶层会话都按 captain 处理，禁止自行执行/开子 agent。
+    const isCaptain = captains.has(String(sessionId)) || captains.has(ANY_TOPLEVEL)
+    if (!isCaptain) return undefined
+    // 未建队时的专属提示：不是「改走派活」（还没队可派），而是「先建队」。
+    const unbeaten = captains.has(ANY_TOPLEVEL)
+    if (unbeaten) {
+      return `【jarvis 严格闸·插件级】当前工作区是 jarvis 项目，但**还没建队**，不能直接开子任务/亲自执行 ${name}。\n` +
+        '**正确顺序**：① 过需求/拆解/方案三闸（jarvis_flowguard step=clarify/decompose/design）；' +
+        '② jarvis_distill 蒸馏角色卡 → jarvis_company 让员工落盘（建队）；' +
+        '③ 用 jarvis_dispatch_task(assignee=成员, subject, description, acceptance) 派活。\n' +
+        '**为什么**：直接开的子任务不进任务单 → 没有进度/没有验收/无法追溯，UI 也看不到。\n' +
+        '**确需临时调试**：在工作区新建空文件 `.jarvis/allow-captain-exec` 即可放行（调试完请删除）。'
+    }
     // 缺陷 d 修复（2026-11-14 实证）：拒绝文案必须带「当前阶段 + 卡在哪 + 该走哪一步」。
     // 原因：原文案只说「改走派活」，但若流程还停在 clarify（前置产物没齐），
     // captain 派活也会被阶段网关拦 → 模型反复试 → 现象上像死锁。
