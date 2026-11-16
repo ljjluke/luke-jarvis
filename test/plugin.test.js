@@ -3730,8 +3730,10 @@ test('T9e Wings UI 面向老板：无技术术语、无写死的演示业务、�
   assert.ok(!/decision-actions'\)[^;]*innerHTML/.test(html) && !/acts\.innerHTML/.test(html), '决策按钮区不得被 innerHTML 重建（会丢点击监听）')
   // ⑦ 任务点卡片：一个任务点一张卡，不设 4 张人为上限
   assert.ok(/function cardTaskPoints/.test(html), '应有「每个任务点一张卡」的生成器')
-  assert.ok(/const order=\[cardTaskPoints/.test(html), '任务点卡应排最高优先级')
-  assert.ok(!/slice\(0,4\)/.test(html), '不得再把主屏卡死为 4 张（任务点多时都要显示）')
+  assert.ok(/const order=\[cardDeliverables/.test(html), '主屏第一张必须是交付物卡（老板视角，取代任务点卡）')
+  // B 方案后主屏只渲染交付物/空白/决策类——不再有「任务点全都要显示」的问题，
+  // 但交付物卡本身有 4 张上限（老板不需要一屏几十个需求），这是有意为之。
+  assert.ok(/list\.slice\(0,4\)/.test(html), '交付物卡应限制显示数量（老板不会一次看几十个需求）')
   // ⑧ 左右均分：不堆积在一边
   assert.ok(/Math\.ceil\(free\.length\/2\)/.test(html), '卡片应按数量左右均分')
   assert.ok(/leftArr|rightArr/.test(html), '应显式分左右两列')

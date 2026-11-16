@@ -287,6 +287,29 @@ const I18N={
 'dsh.sub.chip':['未纳管','untracked'],
 'dsh.sub.row':['由 {p} 开启 · {a}','spawned by {p} · {a}'],
 'dsh.sub.empty':['没有被纳入任务单的子任务。','All subtasks are registered.'],
+// ── 交付物卡（方案 B 主屏核心）──
+'deliv.k':['交付','DELIVERY'],'deliv.done':['已交付','Delivered'],'deliv.blocked':['卡住','Blocked'],'deliv.running':['进行中','In progress'],
+'deliv.untitled':['未命名需求','Untitled'],'deliv.label':['已交付 {a} / {b}','{a} / {b} delivered'],
+'deliv.stat':['已交付 {p} / {n} 项','{p} of {n} delivered'],'deliv.pending':['{n} 项待验收','{n} awaiting review'],
+'deliv.stuck':['{n} 项卡住','{n} blocked'],'deliv.drop':['{n} 项已放弃','{n} dropped'],
+'deliv.empty.stat':['还没有可交付成果','No deliverables yet'],
+'deliv.kicker':['交付 · 进展','DELIVERY · PROGRESS'],
+'deliv.detail.copy':['这里只统计“交付到位”的成果：已通过验收的算交付，成员说做完的算待验收。过程中谁加了班不计入。','Only delivered results count here: passed = delivered, reported done = awaiting review. Effort is not counted.'],
+'deliv.acc.passed':['已验收','Accepted'],'deliv.acc.pending':['待验收','Awaiting review'],
+'deliv.acc.blocked':['卡住','Blocked'],'deliv.acc.in_progress':['进行中','In progress'],'deliv.acc.abandoned':['已放弃','Dropped'],'deliv.acc.unknown':['状态未知','Unknown'],
+'deliv.empty':['这个需求还没有拆分出的任务。','No tasks yet for this delivery.'],
+// ── 空白语义卡（方案 C）──
+'empty.k':['没有任务','NO WORK'],'empty.kind.offbook':['流程外','Off-book'],'empty.kind.misplaced':['工作区不符','Wrong workspace'],'empty.kind.noWorkspace':['未接入','Not connected'],
+'empty.title.offbook':['有 {n} 个任务在跑，但没走任务单','{n} tasks running off-book'],
+'empty.title.misplaced':['工作区可能不对','Workspace may be wrong'],
+'empty.title.noWorkspace':['还没接入工作区','Not connected to a workspace'],
+'empty.kicker':['为什么这里是空的','WHY THIS IS EMPTY'],
+'empty.action':['可以这样处理','Next step'],
+'empty.fix.offbook':['让这些工作改用「安排工作」派给成员，才会进任务单、有进度和验收。','Have this work dispatched to members so it enters the task system with progress and acceptance.'],
+'empty.fix.misplaced':['确认 DSH 当前会话是否在正确的项目目录下打开。','Check that the DSH session is opened in the right project folder.'],
+// ── 日报/周报（方案 D，历史页）──
+'daily.title':['工作日报（最近 7 天）','Daily reports (last 7 days）'],
+'daily.empty':['还没有可汇报的工作记录。','No work records yet.'],
 'gc.card.detail.title':['建议清理（{n} 项）','Cleanup suggestions ({n})'],
 'gc.card.detail.copy':['这些是建议，不会自动删除。确认后才会收进回收站（30 天内可恢复）。','Suggestions only — nothing is deleted automatically. Once confirmed, files move to the recycle bin (restorable for 30 days).'],
 'gc.card.row.sub':['{d} 天没改动','untouched for {d} days'],
@@ -1190,9 +1213,61 @@ function gcPathText(rel){
   if(parts.length<=2)return '…'+p.slice(-60);
   return parts[0]+'/…/'+parts.slice(-2).join('/');
 }
-/* DSH 原生子会话提示（兜底可见性）：用户在会话里直接用原生 subagent 开子 agent，
-   绕过了 jarvis 任务单 → 任务卡是空的，但实际有活在跑。这张卡把真相说出来，
-   而不是让主屏一片空白。 */
+/* 交付物卡（方案 B 主屏核心）：老板只想知道「交了什么、还差多少、能不能验收」。
+   数据源是快照的 deliverables（按需求/项目聚合），不是任务点列表。
+   一个交付物一张卡：标题=需求名，正文=完成度 + 验收口径，卡住/卡死的优先展示。 */
+function cardDeliverables(snap){
+  const list=(snap&&snap.deliverables)||[];
+  if(!list.length)return [];
+  return list.slice(0,4).map(d=>{
+    const pct=Number(d.pct)||0;
+    const verdict=d.verdict;
+    const st=verdict==='delivered'?t('deliv.done')
+      :verdict==='blocked'?t('deliv.blocked')
+      :t('deliv.running');
+    // 正文只讲结果，不讲过程：完成了几项、还有几项没交付、验收口径
+    const parts=[];
+    parts.push(t('deliv.stat').replace('{p}',String(d.passed||0)).replace('{n}',String(d.total||0)));
+    if(Number(d.pending||0))parts.push(t('deliv.pending').replace('{n}',String(d.pending)));
+    if(Number(d.blocked||0))parts.push(t('deliv.stuck').replace('{n}',String(d.blocked)));
+    if(Number(d.abandoned||0))parts.push(t('deliv.drop').replace('{n}',String(d.abandoned)));
+    return {
+      id:'deliv-'+String(d.key||'').replace(/[^a-zA-Z0-9]/g,'_').slice(-40),
+      kind:verdict==='blocked'?'blocked':verdict==='delivered'?'done':'doing',
+      k:t('deliv.k'),st,
+      title:String(d.name||t('deliv.untitled')),
+      copy:parts.join(' · ')||t('deliv.empty.stat'),
+      pct,data:String(pct)+'%',dataLabel:t('deliv.label').replace('{a}',String(d.passed||0)).replace('{b}',String(d.total||0)),
+      detail:{kicker:t('deliv.kicker'),title:String(d.name||t('deliv.untitled')),
+        copy:t('deliv.detail.copy'),
+        meta:[['交付完成',String(d.passed||0)+' / '+String(d.total||0)],
+          ['待验收',String(d.pending||0)],['卡住',String(d.blocked||0)],
+          ...(d.updatedAt?[['最近更新',ago(d.updatedAt)||'—']]:[])],
+        // 明细：每条任务的验收状态（passed/pending/blocked/in_progress/unknown）
+        rows:(d.items||[]).map(x=>({main:taskText(x.title,120),
+          chips:[{t:t('deliv.acc.'+(x.acceptance||'unknown')),
+            c:x.acceptance==='passed'?'ok':x.acceptance==='blocked'?'bad':'mut'},
+            ...(x.role?[{t:x.role,c:'mut'}]:[])],
+          sub:reportText(x.summary,100)})),
+        empty:t('deliv.empty')}}
+  });
+}
+/* 空白语义卡（方案 C）：页面空的时候必须说清为什么空，而不是一片白。 */
+function cardEmptyReason(snap){
+  const e=snap&&snap.emptyReason;
+  if(!e||!e.text||e.kind==='none')return null;
+  // 只有异常型空白才占卡位；normal 交给字幕说，不占位
+  if(e.kind==='normal')return null;
+  const isOffbook=e.kind==='offbook';
+  return {id:'empty-reason',kind:'blocked',k:t('empty.k'),st:t('empty.kind.'+e.kind),
+    title:t('empty.title.'+e.kind).replace('{n}',String(e.count||0)),
+    copy:e.text,
+    detail:{kicker:t('empty.kicker'),title:t('empty.title.'+e.kind).replace('{n}',String(e.count||0)),
+      copy:e.text,
+      rows:[{main:isOffbook?t('empty.fix.offbook'):t('empty.fix.misplaced'),chips:[{t:t('empty.action'),c:'mut'}],sub:''}],
+      empty:''}}
+}
+
 function cardDshSubagents(snap){
   const d=snap.dshSubagents;
   if(!d||!Number(d.untracked||0))return null;
@@ -1283,6 +1358,13 @@ function showHistory(){
     return `<div class="detail-row"><div class="detail-row-main vlog-text">${esc(reportText(String(r.text),200))}</div><div class="detail-row-chips"><span class="chip mut">${esc(reportTime(r.time))}</span></div></div>`;
   }).join(''):`<p class="detail-copy">${esc(t('history.reports.empty'))}</p>`;
   const repTitle=`${t('history.reports.title')}${reps.length?' · '+reps.length:''}`;
+  // ④b 日报/周报（方案 D）：按天聚合，老板视角的「今天做了什么」
+  const dr=(LIVE.snap&&LIVE.snap.dailyReports)||[];
+  const drHtml=dr.length?dr.map(d=>{
+    const items=[...(d.done||[]).map(x=>({k:'ok',t:x.title,n:x.note})),...(d.stuck||[]).map(x=>({k:'bad',t:x.title,n:x.note}))];
+    return `<div class="detail-row"><div class="detail-row-chips"><span class="chip mut">${esc(d.date)}</span><span class="chip ${d.stuckCount?'bad':'ok'}">${esc(d.headline)}</span></div><div class="detail-row-main">${items.slice(0,6).map(x=>esc(taskText(x.t,90))).join('；')||esc(t('daily.empty'))}</div></div>`;
+  }).join(''):`<p class="detail-copy">${esc(t('daily.empty'))}</p>`;
+  const drTitle=`${t('daily.title')}${dr.length?' · '+dr.length:''}`;
   // ⑤ 卡片历史（满 5 分钟从主屏滚出的卡片，这里留档可查详细）
   const chist=(LIVE.cardHistory||[]).slice(0,40);
   const chistHtml=chist.length?chist.map(x=>{
@@ -1295,6 +1377,7 @@ function showHistory(){
   body.innerHTML=`<div class="detail-mandate" style="color:#7fd4ea;margin:0 0 10px">${esc(t('history.vlog.title'))}${allVlog.length?' · '+allVlog.length:''}</div>${vlogHtml}
     <div class="detail-mandate" style="color:#7fd4ea;margin:26px 0 10px">${esc(chistTitle)}</div>${chistHtml}
     <div class="detail-mandate" style="color:#7fd4ea;margin:26px 0 10px">${esc(t('history.boards.title'))}${rows.length?' · '+rows.length:''}</div>${archHtml}
+    <div class="detail-mandate" style="color:#7fd4ea;margin:26px 0 10px">${esc(drTitle)}</div>${drHtml}
     <div class="detail-mandate" style="color:#7fd4ea;margin:26px 0 10px">${esc(repTitle)}</div>${repHtml}
     <div class="detail-mandate" style="color:#7fd4ea;margin:26px 0 10px">${esc(trashTitle)}</div>${trashHtml}`;
   activateView(detailView,'#detail');
@@ -1345,7 +1428,11 @@ function archiveCard(c, bornAt){
 function renderCards(snap){
   if(LIVE.dragging){LIVE.pendingSnap=snap;return}
   // 卡片函数可返回单张或数组。任务点卡优先（一张卡 = 一个任务点），其次页面卡、决策/协调卡。
-  const order=[cardTaskPoints,cardPageCards,cardDshSubagents,cardDecision,cardProposal,cardBlocked,cardReport,cardQueue,cardTeam,cardGC];
+  // 方案 B：主屏只留「老板该看的」三类——交付物进展 / 需你决策 / 风险卡住。
+  // 技术细节（任务点/页面/子会话/队列/团队/GC）不占主屏：点开交付物卡看明细，
+  // 或去历史看板。原顺序保留在注释里以便回溯。
+  // 旧：cardTaskPoints,cardPageCards,cardDshSubagents,cardDecision,cardProposal,cardBlocked,cardReport,cardQueue,cardTeam,cardGC
+  const order=[cardDeliverables,cardEmptyReason,cardDecision,cardProposal,cardBlocked,cardReport];
   const cards=order.flatMap(f=>{try{const r=f(snap);return Array.isArray(r)?r:(r?[r]:[])}catch(e){console.warn('card',e);return []}});
   const all=cards.filter(c=>c&&c.title);
   // 生命周期：满 5 分钟的卡片滚出主屏进历史（待拍板卡常驻）

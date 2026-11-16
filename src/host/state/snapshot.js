@@ -221,6 +221,184 @@ function memorySummary(projectDir, fs, path) {
 }
 
 /** 票据体系摘要（wings 主屏数据源——待办#6：从 team.json 切 tickets）：.jarvis/tickets/ticket-*.json + proposals.jsonl（成员自主找活提案）。只读。 */
+/** E：验收状态归一。
+ *  老板只关心「能不能验收」。原始数据里 ended.outcome 是无枚举的字符串、
+ *  reportState 是 progress/waiting/ready/blocked/failed —— 两处都能推出部分信息。
+ *  原则：判得出来才说，判不出来就 unknown（不猜、不美化）。
+ *  返回：pending（待验收）/ passed（已验收）/ rejected（被打回）/ abandoned（已放弃）/ unknown
+ */
+function deriveAcceptance(ticket, asg) {
+  const ended = ticket && ticket.ended
+  const reportState = String((asg && asg.report && asg.report.state) || '').toLowerCase()
+  const outcome = String((ended && ended.outcome) || '').toLowerCase()
+  // ① 已结束：看 outcome 语义（无枚举，按关键词宽匹配）
+  if (ended) {
+    if (/fail|reject|abandon|drop|cancel|error/.test(outcome)) return 'abandoned'
+    if (/ready|pass|accept|done|complete|success|ok/.test(outcome)) return 'passed'
+    return 'unknown'                       // 结束了但看不出算不算通过
+  }
+  // ② 未结束：看最近汇报
+  if (reportState === 'ready') return 'pending'   // 成员说做完了 → 待验收
+  if (reportState === 'blocked' || reportState === 'failed') return 'blocked'
+  if (reportState === 'progress' || reportState === 'waiting') return 'in_progress'
+  return 'unknown'
+}
+
+/** A：交付物聚合层——把工作单按「项目/需求」聚合成老板能看懂的单位。
+ *
+ *  为什么需要：老板问「交了什么」，系统只答得出「T1 完成了、T2 完成了」= 苦劳清单。
+ *  交付物 = 一个需求/一个项目，带完成率 + 验收状态 + 是否卡住。
+ *
+ *  聚合键：ticket.project（已验证字段存在）；为空则退回「本工作区」单一分组，
+ *  仍能给出总完成率（不会退化成平铺列表）。
+ */
+function buildDeliverables(projectDir, tickets, path) {
+  const all = (tickets && tickets.open || []).concat(tickets && tickets.done || [])
+  if (!all.length) return []
+  const groups = new Map()
+  for (const t of all) {
+    // 归属键：project 全路径 → 取末段做可读名；空则用工作区名
+    const raw = String(t.project || '').trim()
+    const key = raw || String(projectDir)
+    if (!groups.has(key)) groups.set(key, { key, name: raw ? path.basename(raw) || raw : path.basename(String(projectDir)), items: [] })
+    groups.get(key).items.push(t)
+  }
+  const out = []
+  for (const g of groups.values()) {
+    const items = g.items
+    // 只算「真的完成」的：accepted = passed 或 pending（成员说做完了）都算交付到位？
+    // 老板视角：passed 才算交付；pending 是「做了待你验收」；其余都不算。
+    const passed = items.filter((x) => x.acceptance === 'passed').length
+    const pending = items.filter((x) => x.acceptance === 'pending').length
+    const blocked = items.filter((x) => x.acceptance === 'blocked' || x.ended === null && /fail/.test(String(x.state || ''))).length
+    const abandoned = items.filter((x) => x.acceptance === 'abandoned').length
+    const total = items.length
+    const doneCount = passed + pending                    // 交付到位的（含待验收）
+    const pct = total ? Math.round((doneCount / total) * 100) : 0
+    // 是否全部收口：全部 passed 且无 open
+    const allClosed = total > 0 && passed === total
+    out.push({
+      key: g.key,
+      name: g.name,
+      total,
+      pct,
+      passed,
+      pending,
+      blocked,
+      abandoned,
+      allClosed,
+      // 老板要看的是「能不能交」——一句话结论
+      verdict: allClosed ? 'delivered'
+        : blocked > 0 ? 'blocked'
+          : total === 0 ? 'empty'
+            : 'in_progress',
+      updatedAt: items.reduce((m, x) => (String(x.updatedAt || '') > m ? String(x.updatedAt) : m), ''),
+      items: items.map((x) => ({ id: x.id, title: x.title, role: x.role, acceptance: x.acceptance, summary: x.summary })).slice(0, 30),
+    })
+  }
+  // 有卡住的排前面（老板先看风险），然后按完成率低的排前
+  out.sort((a, b) => {
+    const rank = (x) => (x.verdict === 'blocked' ? 0 : x.allClosed ? 2 : 1)
+    return rank(a) - rank(b) || a.pct - b.pct
+  })
+  return out
+}
+
+/** C：空白语义化——把「页面为什么空」变成机器可判的事实。
+ *
+ *  三种空白对老板意义完全不同，必须区分（否则他分不清「没事」和「出事」）：
+ *    normal    还没派活 —— 正常，等需求
+ *    misplaced 有活但在别的工作区 —— 异常，应提示切换
+ *    offbook   活在别处跑（绕过任务单的原生子会话）—— 异常，应提示纳入
+ *    noWorkspace 根本没解析到工作区 —— 异常，配置问题
+ */
+function deriveEmptyReason(dir, snapshotParts) {
+  const { tickets, deliverables, dshSubagents, active } = snapshotParts
+  const hasTickets = (tickets.open || []).length > 0 || (tickets.done || []).length > 0
+  const hasDeliv = (deliverables || []).length > 0
+  if (hasTickets || hasDeliv) return { kind: 'none', text: '' }
+  if (!dir) return { kind: 'noWorkspace', text: '没有解析到工作区' }
+  const offbook = Number((dshSubagents && dshSubagents.untracked) || 0)
+  if (offbook > 0) {
+    return {
+      kind: 'offbook',
+      text: `这个工作区没有任务单，但检测到 ${offbook} 个原生子会话在工作区里跑——它们绕过了任务单，所以没有进度和验收。`,
+      count: offbook,
+    }
+  }
+  if (!active) return { kind: 'normal', text: '还没有开始工作。给一个需求，我就安排团队开工。' }
+  return { kind: 'normal', text: '当前没有进行中的任务。给一个需求，我就安排团队开工。' }
+}
+
+/** D：日报/周报聚合——按天把「做完的 / 卡住的 / 下一步」聚成一段人话。
+ *
+ *  为什么按天而不是按任务：老板问的是「今天干了什么」，不是「T3 的第三阶段做到哪了」。
+ *  数据来源（聚合 + 提炼兜底）：
+ *    ① 有 ticket 汇报 → 直接聚合 summary（最准）
+ *    ② 没汇报 → 从事件流提炼（只取 完成/验收/阻塞 三类，翻译成业务语言）
+ *  只保留最近 7 天（周报粒度），每天最多 8 条，避免变成流水账。
+ */
+function buildDailyReports(projectDir, tickets, fs, path) {
+  const all = (tickets.open || []).concat(tickets.done || [])
+  const days = new Map()                      // YYYY-MM-DD → {done:[],stuck:[],next:[]}
+  const dayOf = (iso) => String(iso || '').slice(0, 10)
+  for (const t of all) {
+    const at = t.updatedAt || t.createdAt || ''
+    const d = dayOf(at)
+    if (!d) continue
+    if (!days.has(d)) days.set(d, { date: d, done: [], stuck: [], next: [], total: 0 })
+    const day = days.get(d)
+    day.total++
+    const brief = String(t.summary || '').replace(/\s+/g, ' ').trim().slice(0, 160)
+    if (t.acceptance === 'passed' || t.acceptance === 'pending') {
+      day.done.push({ title: String(t.title || '').slice(0, 80), note: brief, role: String(t.role || '') })
+    } else if (t.acceptance === 'blocked' || t.acceptance === 'abandoned') {
+      day.stuck.push({ title: String(t.title || '').slice(0, 80), note: brief })
+    } else {
+      day.next.push({ title: String(t.title || '').slice(0, 80), note: brief })
+    }
+  }
+  // 提炼兜底：当天没有 ticket 汇报时，从事件流取 完成/阻塞 类
+  let events = []
+  try {
+    const evFile = path.join(projectDir, '.jarvis', 'events.jsonl')
+    if (fs.existsSync(evFile)) {
+      events = fs.readFileSync(evFile, 'utf8').split('\n').filter(Boolean).slice(-200).map((l) => {
+        try { return JSON.parse(l) } catch { return null }
+      }).filter(Boolean)
+    }
+  } catch { events = [] }
+  for (const e of events) {
+    const ty = String((e && e.type) || '')
+    if (!/task\.completed|gate|board|gc\.collected|assignment\./.test(ty)) continue   // 只取有业务含义的
+    const d = String((e && e.at) || '').slice(0, 10)
+    if (!d) continue
+    if (!days.has(d)) days.set(d, { date: d, done: [], stuck: [], next: [], total: 0 })
+    const day = days.get(d)
+    // 只在当天没有 ticket 数据时补（避免重复）
+    if (day.total > 0) continue
+    if (/task\.completed/.test(ty)) day.done.push({ title: '完成了一项任务', note: String((e.data && e.data.subject) || '').slice(0, 80), role: '' })
+    else if (/board/.test(ty)) day.next.push({ title: '有待处理事项', note: '', role: '' })
+  }
+  const out = [...days.values()]
+    .filter((d) => d.done.length || d.stuck.length || d.next.length)
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 7)
+    .map((d) => ({
+      date: d.date,
+      doneCount: d.done.length,
+      stuckCount: d.stuck.length,
+      // 一句话总结（老板只看这句）
+      headline: d.stuck.length
+        ? `${d.done.length} 项完成，${d.stuck.length} 项卡住`
+        : d.done.length ? `${d.done.length} 项完成` : '无进展',
+      done: d.done.slice(0, 8),
+      stuck: d.stuck.slice(0, 5),
+      next: d.next.slice(0, 5),
+    }))
+  return out
+}
+
 function ticketsSummary(projectDir, fs, path) {
   const dir = path.join(projectDir, '.jarvis', 'tickets')
   const tickets = []
@@ -241,9 +419,15 @@ function ticketsSummary(projectDir, fs, path) {
           id: String(t.id),
           title: String(t.title || ''),
           stage: String(t.stage || 'build'),
+          // 交付物聚合层（方案 A）用：这张单属于哪个项目/需求。
+          // 原投影丢了 project（原始 JSON 有），导致无法聚合 → 只能平铺任务点。
+          project: String(t.project || '').slice(0, 200),
           createdAt: t.createdAt || '',
           updatedAt: t.updatedAt || '',
           ended: t.ended || null,
+          // 验收状态归一（方案 E）：老板只关心「能不能验收」。
+          // 由 ended.outcome（取值无枚举）+ 最近汇报状态推导；判不出就是 unknown（不猜）。
+          acceptance: deriveAcceptance(t, asg),
           mandate: mandateText,
           origin: t.origin ? (typeof t.origin === 'string' ? t.origin : String(t.origin.type || t.origin.source || t.origin.kind || '')).slice(0, 80) : '',
           attempts: (t.assignments || []).length,
@@ -308,6 +492,9 @@ export function buildSnapshot(projectDir, meta = {}) {
   const teams = listTeams(dir, fs, path)
   const cards = listCards(dir, fs, path)
   const tickets = ticketsSummary(dir, fs, path)
+  // A/C 共用：只算一次（每个快照都算，避免重复扫盘/重复解压 zstd）
+  const deliverables = buildDeliverables(dir, tickets, path)
+  const subagents = dshSubagents(dir, fs, path)
   const memory = memorySummary(dir, fs, path)
   let gc = null
   try { gc = gcSummary(dir) } catch { gc = null }
@@ -342,6 +529,12 @@ export function buildSnapshot(projectDir, meta = {}) {
     },
     board,
     tickets,
+    // 方案 A：老板视角的交付物聚合（主屏只渲染这个）
+    deliverables,
+    // 方案 C：空白语义化——页面空的时候必须说清是哪种空
+    emptyReason: deriveEmptyReason(dir, { tickets, deliverables, dshSubagents: subagents, active }),
+    // 方案 D：日报/周报（历史页用，按天聚合 + 事件流提炼兜底）
+    dailyReports: buildDailyReports(dir, tickets, fs, path),
     gc,
     meetings: meetings
       ? {
@@ -354,7 +547,7 @@ export function buildSnapshot(projectDir, meta = {}) {
       : null,
     cards,
     memory,
-    dshSubagents: dshSubagents(dir, fs, path),
+    dshSubagents: subagents,
     company: company || (teams.teams.length
       ? {
           company: { name: path.basename(dir) },
