@@ -248,9 +248,22 @@ export async function auditStaleTasks(fsSvc, projectDir, path, owned) {
 // ── 基线/覆盖矩阵硬闸：改造/替换类任务防"覆盖面丢失"（webui 换皮丢页面教训）──
 const BASELINE_FILE_RE = /^基线清单[-_](.+)\.json$/
 /**
- * 收口闸：团队成员任务必须有 ponder 真核验记录（.jarvis/docs/ponder-verify/<taskId>-*.json，verdict=PASS）。
- * 背景（scan 实证）：6/6 会话 jarvis_distill=0、成员会话 jarvis 工具 0~1 次、jarvis_ponder_check 从未调用，
- * 成员"裸干"交付。此闸把"每个任务都过 ponder 核验"变成机械要求。
+ * ponder 核验校验能力：检查团队成员任务是否都有 ponder 真核验记录
+ * （.jarvis/docs/ponder-verify/<taskId>-*.json，verdict=PASS）。
+ *
+ * ⚠️ 本函数**当前未接入任何闸**——不要被函数名和"收口闸"的历史说法误导。
+ * 用户定调（docs/执行流程.md §八、CHANGELOG 0.15.x 四处记录、提交 a924bb7）：
+ * 固化流程但**不考核步骤**，ponder 是可选的深度思考方式，不是通行证。
+ *
+ * 保留原因：
+ *   · review.js 的 jarvis_ponder_check 在 PASS 时仍会写 ponder-verify 记录——记录本身
+ *     有价值（可追溯"这个任务当时做过哪些推演"），只是不作为放行条件；
+ *   · 能力留着：将来若要把"成员必须 ponder 核验"重新变成机械要求，接一行即可；
+ *   · 行为由 test/plugin.test.js「checkPonderVerify：成员已完成任务无 ponder 核验 → 拦；
+ *     有 PASS 记录 → 放行」覆盖（四组断言），删除会红测试并丢失能力。
+ *
+ * 背景（scan 实证，供将来权衡）：6/6 会话 jarvis_distill=0、成员会话 jarvis 工具 0~1 次、
+ * jarvis_ponder_check 从未调用，成员"裸干"交付——当时据此把它做成闸，后被用户定调撤下。
  */
 export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
   const missing = []
