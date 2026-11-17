@@ -2,7 +2,9 @@
 /**
  * T11 场景层探针：把插件的 relay 路由**挂在本地 node:http 上**，真实连 SSE 采样，断言：
  *   ① 收到首个 data: 帧且 JSON 合法、type=snapshot、seq≥1；
- *   ② 帧内 employees 含本公司 employee id（默认 emp-ceo-4as972，可用 COMPANY_EMP_ID 覆盖）；
+ *   ② 帧内 employees 与工作区 .jarvis/company-state.json 的员工一致——工作区自动发现
+ *      （挑第一个真有员工的目录），期望员工 id 取该工作区第一个员工，均可用
+ *      PROJECT_DIR / COMPANY_EMP_ID 覆盖；空工作区跳过这条（帧里本就不该有人）；
  *   ③ 帧内每个 sceneActorId 都在上游演员表（否则上游 INVALID_BINDING 整批丢弃）；
  *   ④ 采样窗口内没有 error 帧。
  * 为什么本地挂载而不是打 127.0.0.1:3080：运行副本仍旧代码（未重装），那边 relay 路由不存在；
@@ -12,10 +14,69 @@
  */
 import http from 'node:http'
 import path from 'node:path'
+import fs from 'node:fs'
+import os from 'node:os'
 import { apply } from '../src/host/plugin.js'
 
-const PROJECT_DIR = process.env.PROJECT_DIR || '/opt/work/first'
-const WANT_EMP_ID = process.env.COMPANY_EMP_ID || 'emp-ceo-4as972'
+/**
+ * 自动发现工作区与期望员工。
+ *
+ * 原来写死 `PROJECT_DIR || '/opt/work/first'` + `WANT_EMP_ID || 'emp-ceo-4as972'`：
+ * 那个目录和那个员工 id 来自某个早已清理的历史工作区，本机根本不存在——
+ * 探针一跑就报「应有 4 人」和「帧内缺 emp-ceo-...」，看起来像插件出了故障，
+ * 实际是断言本身指向了不存在的数据。
+ *
+ * 现在的规则：从若干候选目录里挑第一个**真实有员工**的工作区（读 .jarvis/company-state.json
+ * 的 employees 长度）；一个都没有就退化为"任选一个含 .jarvis 的目录，并只校验帧结构、
+ * 不校验具体人数"。期望员工 id 从该工作区数据里取第一个，不再硬编码。
+ * 显式设 PROJECT_DIR / COMPANY_EMP_ID 时仍然以环境变量为准。
+ */
+function discoverWorkspace () {
+  if (process.env.PROJECT_DIR) return process.env.PROJECT_DIR
+  const candidates = [
+    process.cwd(),
+    path.join(os.homedir(), '.dsh'),
+    '/opt/work',
+  ]
+  for (const base of candidates) {
+    let entries = []
+    try { entries = fs.readdirSync(base, { withFileTypes: true }) } catch { continue }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue
+      const dir = path.join(base, ent.name)
+      try {
+        const state = JSON.parse(fs.readFileSync(path.join(dir, '.jarvis', 'company-state.json'), 'utf8'))
+        if (Array.isArray(state.employees) && state.employees.length > 0) return dir
+      } catch { /* 没有 company-state 就继续 */ }
+    }
+  }
+  // 退一步：找任一含 .jarvis 的目录（能跑通帧结构校验，不校验人数）
+  for (const base of candidates) {
+    let entries = []
+    try { entries = fs.readdirSync(base, { withFileTypes: true }) } catch { continue }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue
+      const dir = path.join(base, ent.name)
+      if (fs.existsSync(path.join(dir, '.jarvis'))) return dir
+    }
+  }
+  return process.cwd()
+}
+
+const PROJECT_DIR = discoverWorkspace()
+
+/** 该工作区真实存在的员工 id 列表（读不到就是空数组）。 */
+function readEmployeeIds (projectDir) {
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(projectDir, '.jarvis', 'company-state.json'), 'utf8'))
+    return (state.employees || []).map((e) => String(e.id || '').trim()).filter(Boolean)
+  } catch { return [] }
+}
+
+const KNOWN_EMP_IDS = readEmployeeIds(PROJECT_DIR)
+// 没有员工数据时 WANT 为空——下面的断言会跳过"必须含某员工"这一条，
+// 而不是拿一个编造的 id 去卡真实数据。
+const WANT_EMP_ID = process.env.COMPANY_EMP_ID || KNOWN_EMP_IDS[0] || ''
 const SAMPLE_MS = Number(process.env.SAMPLE_MS || 6000)
 
 const routes = []
@@ -96,8 +157,11 @@ let bad = 0
 if (!snap) { console.error("❌ 未收到合法 office.sync 帧（envelope+snapshot）"); bad += 1 }
 if (snap && !['note', 'task.assigned', 'task.started', 'task.blocked', 'task.completed'].every((k) => eventKinds.every((x) => ['note', 'task.assigned', 'task.started', 'task.blocked', 'task.completed'].includes(x)))) { /* noop */ }
 if (snap && eventKinds.some((k) => !['note', 'task.assigned', 'task.started', 'task.blocked', 'task.completed'].includes(k))) { console.error(`❌ 事件 kind 超出上游枚举：${eventKinds.join(',')}`); bad += 1 }
-if (snap && (snap.employees || []).length !== 4) { console.error(`⚠️  快照员工数=${(snap.employees || []).length}（本工作区应有 4 人；0 人说明 company-state 没读到）`) }
-if (snap && !empIds.includes(WANT_EMP_ID)) { console.error(`❌ 帧内缺本公司 employee id ${WANT_EMP_ID}：${empIds.join(',')}`); bad += 1 }
+if (snap && KNOWN_EMP_IDS.length > 0 && (snap.employees || []).length !== KNOWN_EMP_IDS.length) {
+  console.error(`⚠️  快照员工数=${(snap.employees || []).length}，而 company-state 有 ${KNOWN_EMP_IDS.length} 人——两边不一致说明投影丢人`)
+}
+// 没有员工数据（空工作区/未建队）时跳过这条：帧里本来就不该有人。
+if (snap && WANT_EMP_ID && !empIds.includes(WANT_EMP_ID)) { console.error(`❌ 帧内缺本公司 employee id ${WANT_EMP_ID}：${empIds.join(',')}`); bad += 1 }
 if (snap && !actorOk) { console.error('❌ 存在 sceneActorId 不在上游演员表（会被 INVALID_BINDING 丢弃）'); bad += 1 }
 if (errFrames.length) { console.error(`❌ 收到 error 帧：${JSON.stringify(errFrames[0]).slice(0, 200)}`); bad += 1 }
 if (parseErrs.length) { console.error('❌ 存在不可解析的数据帧'); bad += 1 }
@@ -130,7 +194,7 @@ async function probeRoutes() {
 bad += await probeRoutes()
 try { server.close() } catch {}
 if (bad === 0) {
-  console.log(`✅ SSE 采样通过：信封 office.sync、快照含本公司员工（${WANT_EMP_ID}）、绑定合法、事件 kind 合法、无 error 帧；messages/ui/reply 三条路由均实跑通过`)
+  console.log(`✅ SSE 采样通过：信封 office.sync、绑定合法、事件 kind 合法、无 error 帧；messages/ui/reply 三条路由均实跑通过${WANT_EMP_ID ? `（含员工 ${WANT_EMP_ID}）` : '（空工作区，未校验具体员工）'}`)
   process.exit(0)
 }
 process.exit(1)
