@@ -134,14 +134,26 @@ function setup() {
   else say(`  ${C.err('fail')} ${patchCheck.reason}（包不完整，重新下载/构建）`)
 
   let profile = null
-  try { profile = resolveProfile() } catch (e) { say(`\n${C.warn('skip profile 注册')}：${e.message}`) }
+  let profileErr = ''
+  try { profile = resolveProfile() } catch (e) { profileErr = e.message }
 
-  if (profile) {
+  if (!profile) {
+    // 不静默跳过：profile 不存在时 bundles 注册不了，插件装了也不会加载——
+    // 这是客户「装了但页面打不开」最常见的一环。给出可直接执行的下一步，而不是只打一行 skip。
+    step('3) profile 注册（跳过——目录不存在）')
+    say(`  ${C.warn('skip')} ${profileErr}`)
+    say('')
+    say(`  ${C.warn('⚠️ 未完成 profile 注册：插件不会自动加载，/jarvis-ui 会 404。请按顺序执行：')}`)
+    say('     1. 先启动一次 dsh，让它生成 profile 目录：')
+    say('        dsh web --no-open        # 起一次即可，然后 Ctrl+C 或让它后台跑')
+    say(`     2. 重新执行本命令（profile 目录已存在）：`)
+    say(`        npx luke-jarvis setup${opt('profile', '') ? ' --profile ' + opt('profile', '') : ''}`)
+    say(`     3. 再重启 dsh web 并自检：npx luke-jarvis doctor`)
+  } else {
     step(`3) profile 注册（${profile.name}）`)
     const b = registerBundle(profile)
     if (b.ok) say(`  ${C.ok('ok')} bundles += luke-jarvis${b.already ? '（已存在）' : ''}${DRY ? C.dim(' (dry-run)') : ''}`)
-    else say(`  ${C.err('fail')} ${b.reason}`)
-
+    else say(`  ${C.err('fail')} ${b.reason} —— 插件装了但不会被加载，页面会 404`)
   }
 
   step('4) 下一步')

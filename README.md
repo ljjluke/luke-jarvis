@@ -42,16 +42,37 @@
 ## 🚀 快速开始
 
 ```bash
-# 1) 装包（二选一）
-dsh plugin --profile web add luke-jarvis                 # 发布后
-dsh plugin --profile web add file:C:/path/to/luke-jarvis # 本地开发
+# 0) 前置：Git ≥ 2.41（relay/搜索等内部工具依赖 git grep --max-count）
+git --version
+
+# 1) 装包——从源码目录（当前唯一可用方式；本包尚未发布到 npm）
+git clone <本仓库地址> luke-jarvis
+dsh plugin --profile web add file:/绝对路径/luke-jarvis
+
+# 1b) 团队功能还需要协作运行时（不会自动装，缺了建队会失败）
+cd ~/.dsh/profiles/web && pnpm add @nanmicoder/dsh-agent-teams
 
 # 2) 一条命令收尾：技能落位 + bundle 登记
+#    ⚠️ 需要 profile 目录已存在（先起过一次 dsh web 就会生成）；
+#    若提示「skip profile 注册」，先 `dsh web` 启动一次再重跑。
 npx luke-jarvis setup --profile web
 
 # 3) 重启 dsh web，然后自检
 npx luke-jarvis doctor --profile web
 ```
+
+安装后**必须重启** dsh web：插件在启动时注册路由与工具，静态资源按请求读盘（改 HTML 不用重启，改 JS 要重启）。
+
+**页面入口**：`/jarvis-ui`（会自动跳到增强界面）。
+
+**如果页面打不开**，按顺序排查：
+1. 浏览器 Console 有没有红色报错（F12 → Console）；
+2. 报 `crypto.randomUUID is not a function` → 说明是 http 或不受信证书的非安全上下文，
+   本插件已自带 polyfill（`office/crypto-polyfill.js`），确认它随包一起部署；
+3. 报 404 → 确认 `/jarvis-office/*`、`/assets/*`、`/characters/*` 三条静态路由已注册
+   （`curl -I http://<host>/jarvis-office/jarvis-scene.html` 应返回 200）；
+4. 页面能开但场景空白 → 属正常：工作区 `.jarvis/company-state.json` 里没有员工
+   （还没建队），场景本来就没有人。
 
 然后对你的 AI 说：
 
