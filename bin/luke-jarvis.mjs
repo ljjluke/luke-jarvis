@@ -217,6 +217,18 @@ async function doctor() {
         const v = JSON.parse(fs.readFileSync(runtime, 'utf8')).version
         v === VERSION ? ok(`${name}: 运行副本 ${v}`) : warn(`${name}: 运行副本 ${v} ≠ 本包 ${VERSION}（重装 + 重启后生效）`)
       } else warn(`${name}: 运行副本不存在（先 pnpm install）`)
+
+      // 协作运行时依赖：cordis.patch.yml 声明了 @nanmicoder/dsh-agent-teams，
+      // 但它**不会**随 dsh plugin add 自动安装（实测全新 profile 装完后该包缺失）。
+      // 缺了不报错、页面照开，但建队/派活会失败——静默失效比崩溃更难查。
+      const atPkg = path.join(dir, 'node_modules/@nanmicoder/dsh-agent-teams/package.json')
+      if (fs.existsSync(atPkg)) {
+        let atVer = '?'
+        try { atVer = JSON.parse(fs.readFileSync(atPkg, 'utf8')).version } catch { /* ignore */ }
+        ok(`${name}: 协作运行时 dsh-agent-teams ${atVer}`)
+      } else {
+        fail(`${name}: 缺协作运行时 @nanmicoder/dsh-agent-teams —— 团队功能（建队/派活）不可用。修复：cd ${dir} && pnpm add @nanmicoder/dsh-agent-teams`)
+      }
     }
   }
 
