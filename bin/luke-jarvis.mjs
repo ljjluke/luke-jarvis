@@ -210,7 +210,10 @@ async function doctor() {
     if (!fs.existsSync(path.join(dir, 'package.json'))) { warn(`${name}: 无 package.json（跳过）`); continue }
     bundles.includes('luke-jarvis')
       ? ok(`${name}: bundles 含 luke-jarvis`)
-      : warn(`${name}: bundles 未含 luke-jarvis —— 运行 npx luke-jarvis setup --profile ${name}`)
+      // 未装的 profile 不指挥用户去装：headless 这类只是 dsh 内置 bundle 的空骨架
+      // （无依赖、无 node_modules、无服务），用户从没打算在里面跑 jarvis。
+      // 用灰字提示而非 WARN，避免 doctor 输出堆满无意义的整改项。
+      : say(`  ${C.dim('info')} ${name}: 未安装 luke-jarvis（${bundles.length} 个内置 bundle）——需要时再执行 setup --profile ${name}`)
     if (bundles.includes('luke-jarvis')) {
       const runtime = path.join(dir, 'node_modules/luke-jarvis/package.json')
       if (fs.existsSync(runtime)) {
