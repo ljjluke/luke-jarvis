@@ -521,7 +521,12 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
 /** 进程级缓存：每工作区一个 executor（children 集合与提醒循环跨工具调用保持）。 */
 const _executors = new Map()
 export function dshExecutorFor(projectDir, getEngine) {
-  const root = String(projectDir || '')
+  // 缓存键必须是绝对路径。传进来的 projectDir 若带相对成分（例如 '.' 或末尾带 '..'），
+  // 同一工作区会算出不同的键：executor 各自持有一份 execMap 内存副本，
+  // 角色会话复用（findReusableChild 按 role 反查 childId）就会查不到历史 → 每次都新开子会话。
+  // path.resolve 在拿不到 path 模块时退回原字符串（宁可退化，也不能抛）。
+  const p = nodePath()
+  const root = p ? p.resolve(String(projectDir || '.')) : String(projectDir || '')
   let exec = _executors.get(root)
   if (!exec) {
     exec = createDshExecutor({ projectDir: root, getEngine })

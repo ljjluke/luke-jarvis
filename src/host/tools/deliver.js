@@ -318,7 +318,13 @@ export const DELIVER_TOOLS = [
     execute: async (args, exec) => {
       const path = _require('node:path')
       const fs = _require('node:fs')
-      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
+      // 绝对路径归一（同 jarvis_ticket 入口）：产物必须落在真实工作区，
+      // 退化成 '.' 会把 .jarvis/docs 写到进程 cwd 下，会话切换后读不回。
+      const projectDir = path.resolve(
+        String(args?.projectDir ?? '').trim()
+        || resolveWorkspace(getRuntimeContext(), exec)
+        || process.cwd(),
+      )
       const slug = String(args?.slug ?? 'baseline').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
       const kind = String(args?.kind ?? 'web-ui').trim()
       // 状态根守卫：插件仓库不写 .jarvis/docs（防记忆文件污染插件项目）
@@ -623,7 +629,12 @@ export const DELIVER_TOOLS = [
         if (want === 'true' || want === '1') {
           const path = _require('node:path')
           const fsm = _require('node:fs')
-          const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
+          // 绝对路径归一：覆盖矩阵必须落到真实工作区（同 jarvis_ticket 入口）。
+          const projectDir = path.resolve(
+            String(args?.projectDir ?? '').trim()
+            || resolveWorkspace(getRuntimeContext(), exec)
+            || process.cwd(),
+          )
           // 状态根守卫：插件仓库不写 .jarvis/docs（防记忆文件污染插件项目）
           const blocked = stateRootConflict(projectDir)
           const slug = String(args?.slug ?? 'matrix').trim().replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
@@ -706,7 +717,12 @@ export const DELIVER_TOOLS = [
     execute: async (args, exec) => {
       const path = _require('node:path')
       const step = String(args.step ?? '').trim()
-      const projectDir = String(args.projectDir ?? '').trim() || (resolveWorkspace(getRuntimeContext()) || '.')
+      // 绝对路径归一：flowguard 读的 gates.json 必须与 jarvis_ticket 写的是同一份。
+      const projectDir = path.resolve(
+        String(args.projectDir ?? '').trim()
+        || resolveWorkspace(getRuntimeContext())
+        || process.cwd(),
+      )
       const fsSvc = getFsService(exec)
       const exists = async (rel) => {
         if (!fsSvc || typeof fsSvc.readText !== 'function') return false
@@ -1037,7 +1053,18 @@ export const DELIVER_TOOLS = [
     },
     execute: async (args, exec) => {
       const path = _require('node:path')
-      const projectDir = String(args?.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext(), exec) || '.'
+      // projectDir 必须归一成绝对路径。原始写法 `|| '.'` 有两个真实后果：
+      //   ① executor 按 root 字符串缓存（dsh-executor.js:522 _executors），'.' 与
+      //      '/opt/work/xxx' 是两个不同的键 → 同一工作区出现两套 execMap；
+      //   ② execMap 会写到 './.jarvis/tickets/'，而进程 cwd 会随会话切换而变化，
+      //      之后再查历史 childId 就找不回 → 角色会话复用失效（表现为「每次都新开」）。
+      // 三种来源（args.projectDir / 会话 header.cwd / 进程 cwd）都 path.resolve 后再用，
+      // 保证同一工作区永远得到同一字符串键。
+      const projectDir = path.resolve(
+        String(args?.projectDir ?? '').trim()
+        || resolveWorkspace(getRuntimeContext(), exec)
+        || process.cwd(),
+      )
       // 状态根守卫：插件仓库不是 jarvis 状态根，不写任务单（防记忆文件污染插件项目）
       const conflict = stateRootConflict(projectDir)
       const action = String(args?.action ?? 'list').trim()
