@@ -1555,6 +1555,59 @@ export function apply(ctx, config) {
             },
           })
         )
+        // 2.1) PixOffice bundle 的根路径资源：/assets/office/* → office/assets/office/*
+        //   为什么需要：上游 bundle 里资源基址是**硬编码**的 le({baseUrl:'/assets/office'})
+        //   （office-DlFndzZI.js），core-sPzm0MZD.js 的 L 默认值同样是 '/assets/office'，
+        //   且 __PIXOFFICE_CONFIG__ 只被读取 relayUrl、没有 baseUrl 入口——客户端无法改基址。
+        //   本插件把场景托管在 /jarvis-office 下，若不补这条根映射，贴图会全部 404
+        //   （表现为 "Failed to load /assets/office/reference-v1/room-whiteboard-v3.png"）。
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/assets/office',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '/')
+                let rel = decodeURIComponent(url.split('?')[0].replace(/^\/assets\/office\/?/, ''))
+                if (!rel) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('not found') }
+                if (rel.includes('..')) { res.writeHead(403); return res.end('forbidden') }
+                const abs = path.join(officeRoot, 'assets/office', rel)
+                if (!abs.startsWith(officeRoot)) { res.writeHead(403); return res.end('forbidden') }
+                const data = fsm.readFileSync(abs)
+                const ext = path.extname(abs).toLowerCase()
+                res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': 'no-cache' })
+                return res.end(data)
+              } catch {
+                try { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found') } catch {}
+              }
+            },
+          })
+        )
+        // 2.2) 角色资源根：/characters/* → office/characters/*
+        //   上游 bundle 启动时调用 Ae('/characters') 注册角色图集根（registry.json 与各角色
+        //   atlas/manifest/portrait + visuals/）。不映这条，人物贴图与角色数据同样 404。
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/characters',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '/')
+                let rel = decodeURIComponent(url.split('?')[0].replace(/^\/characters\/?/, ''))
+                if (!rel) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('not found') }
+                if (rel.includes('..')) { res.writeHead(403); return res.end('forbidden') }
+                const abs = path.join(officeRoot, 'characters', rel)
+                if (!abs.startsWith(officeRoot)) { res.writeHead(403); return res.end('forbidden') }
+                const data = fsm.readFileSync(abs)
+                const ext = path.extname(abs).toLowerCase()
+                res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': 'no-cache' })
+                return res.end(data)
+              } catch {
+                try { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found') } catch {}
+              }
+            },
+          })
+        )
       }
     } catch {}
     // 0) 固定注入 jarvis 工作方式（每次请求都带，不依赖 skill、不受压缩影响）
