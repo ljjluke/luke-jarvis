@@ -319,6 +319,11 @@ export const INTAKE_TOOLS = [
       properties: {
         requirement: { type: 'string', description: '需求本质（任务图围绕它拆——每任务须指向需求某条可判定验收）' },
         tasksJson: { type: 'string', description: '任务清单 JSON 数组：[{id, title, assignee, deps, inputs, acceptance}]——id=任务编号(数字或字符串)；title=任务名；assignee=负责人角色；deps=依赖的上游任务 id 数组(无依赖=[]或省略)；inputs=输入槽位描述(注明来自哪个上游任务产出，如"来自T1的方案设计文档")；acceptance=验收标准(怎样算这个任务完成，可判定)' },
+        // D1（批次1b）：声明 projectDir —— 产物（.jarvis/docs/任务编排-*.md、company-state tasks）落在这个目录，
+        // 阶段闸也按它判（PROJECTDIR_TOOLS 白名单），不再出现「闸按会话 cwd 判、产物按别处写」的口径分裂。
+        projectDir: { type: 'string', description: '项目状态根（缺省=当前会话工作区）——任务编排 md 与 company-state tasks 写到这里，阶段闸也按它判' },
+        // D4：可选 slug（缺省从 requirement 派生关键词）
+        slug: { type: 'string', description: '产物文件名 slug（缺省=从 requirement 派生关键词，如 缺陷迭代-健壮性）' },
       },
     },
     output: {
@@ -336,6 +341,13 @@ export const INTAKE_TOOLS = [
             description: '编制健康报告：assignees(参与角色)/distribution(各角色任务数)/executorCount(执行角色数)/maxLoad(单人最大负载)——防"单一角色包办全部任务"',
           },
           verdict: { type: 'string' },
+          // ── D4（批次1b）：真写盘相关字段（execute 真返回的键，schema 必须声明——additionalProperties:false）──
+          slug: { type: 'string', description: '产物 slug（写盘成功时返回）' },
+          docPath: { type: 'string', description: '任务编排 md 落盘路径（校验通过且写盘成功时返回）' },
+          companyStatePath: { type: 'string', description: 'company-state.json 路径（tasks 表写入成功时返回）' },
+          persisted: { type: 'boolean', description: '是否真写盘（md + company-state tasks 都写入并自校验通过）' },
+          writeError: { type: 'string', description: '写盘失败原因（persisted=false 时返回，不静默）' },
+          error: { type: 'string', description: '错误码（写盘失败时 WRITE_FAILED）' },
         },
         required: ['ok', 'verdict'],
       },
@@ -346,7 +358,12 @@ export const INTAKE_TOOLS = [
         const staffLine = r.staffing
           ? '\n编制：' + (r.staffing.executorCount ?? '?') + ' 个执行角色 / 单人最大负载 ' + (r.staffing.maxLoad ?? '?') + ' 任务' + (dist ? '（' + dist + '）' : '')
           : ''
-        return `任务编排图：${r.ok ? '✅ 可派活' : '❌ 打回重拆'}（${r.taskCount} 任务）\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n并行建议：${(r.parallelGroups ?? []).join(' / ')}${staffLine}`
+        const writeLine = r.persisted
+          ? '\n落盘：' + r.docPath + ' + company-state tasks（' + r.taskCount + ' 条）'
+          : r.writeError
+            ? '\n⛔ 写盘失败：' + r.writeError
+            : ''
+        return `任务编排图：${r.ok ? '✅ 可派活' : '❌ 打回重拆'}（${r.taskCount} 任务）\n问题：${(r.issues ?? []).map((i) => '⚠️ ' + i).join('\n')}\n并行建议：${(r.parallelGroups ?? []).join(' / ')}${staffLine}${writeLine}`
       },
     },
     execute: async (args, exec) => {
@@ -496,14 +513,119 @@ export const INTAKE_TOOLS = [
         }
       }
       const ok = issues.length === 0
+      // ── D4（批次1b）：校验通过（= 可派活）才**真写盘** ───────────────────────────────
+      // 缺陷原文：工具描述宣称「产物沉淀 docs/任务编排-*.md + 写入 company-state tasks」，
+      // 实际零写盘 → decompose 阶段闸（认 docs/任务编排-*.md）永远过不去，用户看到「说沉淀了但没有」。
+      // 写盘纪律：① 先过状态根守卫（插件仓/非法目录不写）；② md + company-state tasks 都写；
+      //          ③ **写完自校验**（文件存在且非空 / JSON 可解析 / 任务条数 = 输入条数），
+      //          任一不满足 → ok:false + WRITE_FAILED + 原因（不许静默，也不许谎称已沉淀）。
+      let persisted = false
+      let slugOut = ''
+      let docPath = ''
+      let companyStatePath = ''
+      let writeError = ''
+      if (ok) {
+        const pathx = _require('node:path')
+        const fsx = _require('node:fs')
+        const now = new Date().toISOString()
+        const projectDir = String(args?.projectDir ?? '').trim() || (resolveWorkspace(getRuntimeContext(), exec) || '')
+        const conflict = projectDir ? stateRootConflict(projectDir) : null
+        const slugSafe = (s, fallback = 'taskgraph') => {
+          const t = String(s || '').replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
+          return t || fallback
+        }
+        slugOut = String(args?.slug ?? '').trim() ? slugSafe(args.slug, 'taskgraph') : slugSafe(req, 'taskgraph')
+        // 单元格转义（markdown 表格里 | 和换行会撑破列）
+        const cell = (v) => String(v ?? '').replace(/[|\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+        const depsOf = (t) => (Array.isArray(t?.deps) ? t.deps : []).map((d) => String(d ?? '').trim()).filter((d) => d && d !== '-1' && d !== 'none')
+        const inputsOf = (t) => (Array.isArray(t?.inputs) ? t.inputs : String(t?.inputs ?? '').split(/[、,;；]/).map((x) => x.trim()).filter(Boolean)).map(String)
+        const docText = [
+          `# 任务编排 ${slugOut}`,
+          '',
+          `- 生成时间：${now}`,
+          `- 来源需求：${cell(req).slice(0, 300) || '（未提供 requirement）'}`,
+          `- 任务数：${tasks.length}｜负责人：${cell(assigneeNames.join('、'))}｜可并行批次：${parallelGroups.length}`,
+          '',
+          '## 任务表',
+          '| id | 负责人 | 依赖 | 输入来源 | 验收标准 |',
+          '|---|---|---|---|---|',
+          ...tasks.map((t) => `| ${cell(normId(t?.id))} | ${cell(t?.assignee)} | ${cell(depsOf(t).join(',') || '—')} | ${cell(inputsOf(t).join('；') || '—')} | ${cell(t?.acceptance)} |`),
+          '',
+          '## 拓扑分层与并行建议',
+          ...(parallelGroups.length ? parallelGroups.map((g) => '- ' + g) : ['- （无并行批次：任务串行或单任务）']),
+          '',
+          '## 来源 requirement（摘要）',
+          '> ' + (cell(req).slice(0, 500) || '（未提供）'),
+          '',
+        ].join('\n')
+        const planTasks = tasks.map((t) => ({
+          id: normId(t?.id),
+          subject: String(t?.title ?? '').trim() || normId(t?.id),
+          assignee: String(t?.assignee ?? '').trim(),
+          deps: depsOf(t),
+          inputs: inputsOf(t),
+          acceptance: String(t?.acceptance ?? '').trim(),
+          status: 'pending',
+          source: 'jarvis_taskgraph',
+          planSlug: slugOut,
+          updatedAt: now,
+        }))
+        try {
+          if (!projectDir) throw new Error('未定位到项目工作区（传 projectDir 或从会话工作区解析）')
+          if (conflict) throw new Error(conflict.error + '：' + conflict.message)
+          if (!pathx.isAbsolute(projectDir)) throw new Error(`项目工作区必须是绝对路径（收到：${projectDir}）`)
+          if (!fsx.existsSync(projectDir)) throw new Error(`项目工作区不存在：${projectDir}——先确认状态根，不要凭空建目录`)
+          const docsDir = pathx.join(projectDir, '.jarvis/docs')
+          fsx.mkdirSync(docsDir, { recursive: true })
+          const docPathx = pathx.join(docsDir, `任务编排-${slugOut}.md`)
+          // 原子写（tmp + rename）：避免半截文件被阶段闸/UI 读到
+          const tmpDoc = docPathx + '.tmp-' + process.pid + '-' + Date.now()
+          fsx.writeFileSync(tmpDoc, docText)
+          fsx.renameSync(tmpDoc, docPathx)
+          docPath = docPathx
+          // company-state tasks：用现有读写函数（不新写一套存储）；只替换本工具上次写的条目，
+          // 其它来源 tasks 原样保留（不越权清别人的任务表）。
+          const fsSvc = getFsService(exec)
+          const state = await readCompanyState(fsSvc, projectDir)
+          const kept = (Array.isArray(state.tasks) ? state.tasks : []).filter((t) => !(t && t.source === 'jarvis_taskgraph'))
+          state.tasks = [...kept, ...planTasks]
+          const w = await writeCompanyState(fsSvc, state, projectDir)
+          if (!w || !w.ok) throw new Error(`company-state 写入失败（mode=${(w && w.mode) || 'unknown'}）`)
+          companyStatePath = companyStateFile(projectDir)
+          // ── 写完自校验（三件，任一不满足 = 本次不算沉淀）──
+          const docStat = fsx.statSync(docPath)
+          if (!(docStat.size > 0)) throw new Error(`自校验失败：${docPath} 写入为空文件`)
+          const parsedState = JSON.parse(fsx.readFileSync(companyStatePath, 'utf8'))
+          const mine = (Array.isArray(parsedState.tasks) ? parsedState.tasks : []).filter((t) => t && t.source === 'jarvis_taskgraph' && t.planSlug === slugOut)
+          if (mine.length !== tasks.length) throw new Error(`自校验失败：company-state tasks 条数 ${mine.length} ≠ 输入条数 ${tasks.length}`)
+          persisted = true
+        } catch (e) {
+          writeError = String((e && e.message) || e) || '未知写盘异常'
+          persisted = false
+        }
+      }
+      if (ok && !persisted) {
+        return {
+          taskCount: tasks.length,
+          issues: [...issues, `写盘失败：${writeError}（任务图本身合格，但产物没落盘——decompose 阶段闸不会放行）`],
+          ok: false,
+          error: 'WRITE_FAILED',
+          writeError,
+          parallelGroups,
+          staffing: staffingReport,
+          ...(slugOut ? { slug: slugOut } : {}),
+          verdict: `⛔ 写盘失败（WRITE_FAILED）：${writeError}——任务图健康检查已通过，但 .jarvis/docs/任务编排-*.md 与 company-state tasks 没有真正写入（或写完自校验不通过），本次不算沉淀、不许派活。修复状态根/写权限后重跑 jarvis_taskgraph（或显式传 projectDir=真实项目工作区）。`,
+        }
+      }
       return {
         taskCount: tasks.length,
         issues,
         ok,
         parallelGroups,
         staffing: staffingReport,
+        ...(ok ? { slug: slugOut, docPath, companyStatePath, persisted: true } : {}),
         verdict: ok
-          ? `任务编排图合格（${tasks.length} 任务）：依赖无悬空/无循环、每任务有负责人+可判定验收、独立任务可并行。可派活（jarvis_dispatch_task 或 jarvis_ticket action=open 逐个开单；依赖关系写入授权依据，由 captain 按图顺序派发）。任务图沉淀 docs/任务编排-*.md 并写入 company-state tasks 表（3D 看板可渲染）。`
+          ? `任务编排图合格（${tasks.length} 任务）：依赖无悬空/无循环、每任务有负责人+可判定验收、独立任务可并行。**已真写盘**：${docPath} + company-state tasks（${tasks.length} 条，自校验通过）→ 可过 jarvis_flowguard(step="decompose")后派活（jarvis_dispatch_task 或 jarvis_ticket action=open；依赖关系写入授权依据，由 captain 按图顺序派发）。`
           : `任务编排图待修（${issues.length} 项）：${issues.slice(0, 5).join('；')}。打回 CEO 重拆——任务图有结构问题不许派活（悬空依赖=下游等不到；循环=永远不开始；无验收=做完不知道算不算完）。`,
       }
     },

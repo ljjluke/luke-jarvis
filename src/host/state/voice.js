@@ -74,6 +74,10 @@ function normCard(p, prev) {
     model: String(o.model || '').trim(),
     voice: String(o.voice || '').trim() || 'nova',
     speed: Math.max(0.5, Math.min(1.5, Number(o.speed) || 0.95)),
+    // 人格/情绪（可选，P0-3）：给支持这些参数的供应商用；空字符串 = 不下发（不污染上游请求体）
+    instructions: String(o.instructions || '').trim(),
+    emotion: String(o.emotion || '').trim(),
+    style: String(o.style || '').trim(),
   }
 }
 
@@ -166,9 +170,19 @@ export function resolveActiveVoice(state) {
   const s = normalizeVoiceState(state)
   const card = s.active ? s.providers.find((p) => p.name === s.active) : null
   if (!card || card.protocol === 'browser') {
-    return { provider: 'browser', baseUrl: '', apiKey: '', model: '', voice: 'nova', speed: 0.95 }
+    return { provider: 'browser', baseUrl: '', apiKey: '', model: '', voice: 'nova', speed: 0.95, instructions: '', emotion: '', style: '' }
   }
-  return { provider: card.protocol, baseUrl: card.baseUrl, apiKey: card.apiKey, model: card.model, voice: card.voice, speed: card.speed }
+  return {
+    provider: card.protocol,
+    baseUrl: card.baseUrl,
+    apiKey: card.apiKey,
+    model: card.model,
+    voice: card.voice,
+    speed: card.speed,
+    instructions: card.instructions || '',
+    emotion: card.emotion || '',
+    style: card.style || '',
+  }
 }
 
 /** 设置页用的完整状态（apiKey 掩码、只写不读）。 */
@@ -183,6 +197,9 @@ export function publicVoiceState(state) {
       model: p.model,
       voice: p.voice,
       speed: p.speed,
+      instructions: p.instructions || '',
+      emotion: p.emotion || '',
+      style: p.style || '',
       apiKeyMasked: maskKey(p.apiKey),
       configured: p.protocol === 'browser' ? true : Boolean(p.apiKey && (p.protocol === 'aliyun' || p.baseUrl)),
     })),
@@ -199,10 +216,54 @@ export function publicVoiceConfig(cfg) {
     model: flat.model,
     voice: flat.voice,
     speed: flat.speed,
+    instructions: flat.instructions || '',
+    emotion: flat.emotion || '',
+    style: flat.style || '',
     apiKeyMasked: maskKey(flat.apiKey),
     configured: flat.provider !== 'browser' && Boolean(flat.apiKey && (flat.provider === 'aliyun' || flat.baseUrl)),
     configPath: voiceConfigPath(),
   }
+}
+
+// ── 管家人格台词（P0-3）：本地纯函数，绝不接外部模型 ─────────────────────────
+// 原则：短句、直给结论、必要时一句克制的锐评；绝不写「我会按流程推进」这类空话。
+// kind ∈ greeting/done/failed/waiting/idle；同 kind 多次调用轮换，避免每次播报一模一样。
+const PERSONA_LINES = Object.freeze({
+  greeting: [
+    '先生，我在。有事直接说。',
+    '先生，我在这儿。该看的都看过了，说正题。',
+    '先生，醒了。今天的账我会算清。',
+  ],
+  done: [
+    '办妥了，先生。',
+    '成了，先生。下一步等您示下。',
+    '收工，先生。证据都留着了。',
+  ],
+  failed: [
+    '没成，先生。原因记下了，换条路再来。',
+    '这一手没通，先生。我不装作没事。',
+    '栽了，先生。错处我认，改法我带着。',
+  ],
+  waiting: [
+    '等您一句话，先生。',
+    '卡在您这儿了，先生。您点头我就动。',
+    '您还没定，先生。我不替您拍板。',
+  ],
+  idle: [
+    '暂无要务，先生。该核的都核过一遍。',
+    '手头没活，先生。闲着也不编活。',
+    '暂时空着，先生。有活我会先报。',
+  ],
+})
+const PERSONA_CURSOR = { greeting: 0, done: 0, failed: 0, waiting: 0, idle: 0 }
+
+/** 管家式短句：kind 未收录按 idle 处理（不抛、不返回空串）。 */
+export function personaLine(kind) {
+  const k = String(kind || '').trim()
+  const list = PERSONA_LINES[k] || PERSONA_LINES.idle
+  const i = Number(PERSONA_CURSOR[k] || 0) % list.length
+  PERSONA_CURSOR[k] = i + 1
+  return list[i]
 }
 
 /** 规范化 baseUrl：允许用户填 `https://api.openai.com/v1` 或完整 `/audio/speech`。 */

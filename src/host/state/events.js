@@ -15,13 +15,44 @@ export function eventsFile(projectDir, path = _require('node:path')) {
 }
 
 /** GC：事件日志轮转阈值。超过即把 events.jsonl 整体让位为 events.jsonl.old（覆盖上一代），
- *  当前文件重开、seq 重新从 1 计——防止长期运行 append-only 无限膨胀。 */
+ *  当前文件重开——防止长期运行 append-only 无限膨胀。
+ *  K17：轮转**不重置 seq**（见下）；seq 继续接旧文件最大值编号。 */
 const EVENTS_ROTATE_BYTES = 2 * 1024 * 1024
+
+/** 读文件里最大的 seq（只在轮转这一刻整读一次旧文件，不在热路径）。
+ *  为什么不用行数：坏行/并发丢行会让行数 < maxSeq，续接值偏小 → 前端 since 之后的事件被重复或漏掉。 */
+function maxSeqInFile(file, fs) {
+  let max = 0
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const e = JSON.parse(line)
+        if (e && Number(e.seq) > max) max = Number(e.seq)
+      } catch { /* 坏行跳过 */ }
+    }
+  } catch { /* 文件不存在 */ }
+  return max
+}
+
+/** 轮转后的编号基线（`events.jsonl.base`，单行数字）。
+ *  K17：旧实现轮转后新文件 seq 从 1 重算，前端拿旧 lastSeq 做 since 永远读不到新事件（时间轴静默停更）。
+ *  把旧文件 maxSeq 落成基线文件，重启后也能续接（不能只靠内存或 .old 解析：.old 会被下一代轮转覆盖）。 */
+export function rotationBaseSeq(file, fs = _require('node:fs')) {
+  try {
+    const n = Number(fs.readFileSync(file + '.base', 'utf8').trim())
+    return Number.isFinite(n) && n > 0 ? n : 0
+  } catch { return 0 }
+}
 
 function rotateIfNeeded(file, fs) {
   try {
     const st = fs.statSync(file)
     if (st.size <= EVENTS_ROTATE_BYTES) return
+    const max = maxSeqInFile(file, fs)
+    if (max > 0) {
+      try { fs.writeFileSync(file + '.base', String(max) + '\n') } catch { /* 基线写不了：续接退化为行数（仍好于归零） */ }
+    }
     fs.renameSync(file, file + '.old') // rename 覆盖同名 .old
   } catch { /* 文件不存在/被并发轮转：不处理 */ }
 }
@@ -33,12 +64,14 @@ export function appendEvent(projectDir, type, data = {}, path = _require('node:p
   const file = eventsFile(projectDir, path)
   try {
     let seq = 0
+    try { rotateIfNeeded(file, fs) } catch { /* 轮转失败：继续写旧文件（最多不轮转） */ }
+    // K17：seq = 轮转基线 + 当前文件行数（新文件从 base 之后继续，绝不归零）
+    const base = rotationBaseSeq(file, fs)
     try {
-      rotateIfNeeded(file, fs) // GC：超限先轮转再写
       const text = fs.readFileSync(file, 'utf8')
-      seq = text.split('\n').filter(Boolean).length
+      seq = base + text.split('\n').filter(Boolean).length
     } catch {
-      seq = 0
+      seq = base
     }
     const e = { seq: seq + 1, at: new Date().toISOString(), type: String(type || ''), data: data && typeof data === 'object' ? data : {} }
     const line = JSON.stringify(e) + '\n'

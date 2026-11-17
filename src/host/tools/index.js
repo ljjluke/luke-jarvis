@@ -8,9 +8,12 @@
  *  顺序沿用历史（intake→memory→distill→review→org→deliver），新增工具请放进对应域模块并在此登记。
  */
 // 本地断言：不依赖 @deepseek-ai/dsh-tools（它连带 peer 依赖会让插件在 profile 里加载失败）
+import fs from 'node:fs'
+import path from 'node:path'
 import { assertObjectJsonSchema, assertSupportedJsonSchema } from './schema.js'
-import { getRuntimeContext, setRuntimeContext, rememberExec, markJarvisSession } from '../runtime.js'
+import { getRuntimeContext, setRuntimeContext, rememberExec, markJarvisSession, resolveWorkspace } from '../runtime.js'
 import { renderStage } from '../gates/stage.js'
+import { stateRootConflict } from '../gates/ownership.js'
 import { renderResumeFacts } from '../state/resume.js'
 import { recordProgress } from '../state/progress.js'
 import { MIND_TOOLS, mindDigestFor } from './mindtools.js'
@@ -106,12 +109,34 @@ function trackExecution(tool, args, exec) {
     /* 记账失败不影响工具本身执行 */
   }
   const isJarvis = String(tool.name).startsWith('jarvis_')
-  const cwdOf = () => {
-    try { return (exec && exec.agent && exec.agent.session && exec.agent.session.header && exec.agent.session.header.cwd) || '' } catch { return '' }
+  // D11：进度流水的落点必须是「本次工具调用的状态根」，不是会话 cwd。
+  // 缺陷机理：原实现直接用 exec 会话 cwd → 源仓/状态根分离时把 .jarvis/progress/ 写进源仓
+  // （源仓一旦出现 .jarvis 而 gates.json 缺失，阶段闸会把它判成「阶段 1」→ 下游工具全被拒）。
+  // 解析口径：① 工具入参里显式 projectDir（绝对路径+存在目录）；② resolveWorkspace(ctx, exec)；
+  //          都拿不到 → **跳过写入**（宁可不记，也不退回错误目录）；③ 状态根守卫拒绝（插件仓库）→ 跳过。
+  const progressDirOf = () => {
+    try {
+      const absExistingDir = (p) => {
+        try {
+          const s = String(p || '').trim()
+          if (!s || !path.isAbsolute(s)) return ''
+          return fs.statSync(s).isDirectory() ? s : ''
+        } catch { return '' }
+      }
+      const explicit = absExistingDir(args && args.projectDir)
+      if (explicit) return explicit
+      const resolved = absExistingDir(resolveWorkspace(getRuntimeContext(), exec))
+      return resolved
+    } catch { return '' }
   }
   const note = (ok, msg) => {
     if (!isJarvis) return
-    try { const cwd = cwdOf(); if (cwd) recordProgress(cwd, tool.name, args, { ok, note: msg || '' }) } catch { /* 落盘失败不扩散 */ }
+    try {
+      const cwd = progressDirOf() // 变量名沿用 cwd，语义已改为「本次调用的状态根」（见上）
+      if (!cwd) return // 解析不出状态根 → 跳过（不退回错误目录）
+      if (stateRootConflict(cwd)) return // 插件仓库自身不是状态根：不写（D11/STATE-ROOT-POLLUTION）
+      recordProgress(cwd, tool.name, args, { ok, note: msg || '' })
+    } catch { /* 落盘失败不扩散 */ }
   }
   let result
   try {

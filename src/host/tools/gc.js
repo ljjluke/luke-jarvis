@@ -12,6 +12,7 @@
 import { collect, listTrash, restore, restoreMany, purgeExpired, RETENTION_DAYS } from '../adapters/trash.js'
 import { appendEvent } from '../state/events.js'
 import { getRuntimeContext } from '../runtime.js'
+import { stateRootConflict } from '../gates/ownership.js'
 import { findGeneratedGarbage, pruneRegistry } from './generated.js'
 
 const fs = () => _require('node:fs')
@@ -319,6 +320,9 @@ export function maybeAutoGc(projectDir, opts = {}) {
   if (!absRoot) return null
   // ⛔ 只排除 .jarvis 自身（状态目录不是工作区），不再排除插件仓库——插件仓库的备份同样需要清理
   if (/(^|[\\/])\.jarvis$/.test(absRoot)) return null
+  // D11：状态根守卫——插件仓库自身不是 jarvis 状态根，绝不在这里写 .jarvis/gc.auto.json 等运行时文件
+  // （原缺陷：自动 GC 以「会话 cwd」为工作区，源仓/状态根分离时把 .jarvis 写进源仓 → 阶段闸把源仓判成阶段 1）。
+  if (stateRootConflict(absRoot)) return null
   // 工作区状态目录存在才 GC（非 jarvis 项目不碰）
   try { if (!fs().statSync(pathMod().join(absRoot, '.jarvis')).isDirectory()) return null } catch { return null }
   const flag = pathMod().join(absRoot, GC_FLAG())

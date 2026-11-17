@@ -19,7 +19,9 @@ const clip = (s, n) => {
 const STATE = {
   snapshot: null,
   lastSeq: 0,
+  maxEventSeq: 0, // 事件去重游标（SSE 与轮询可同时进行：只接受比它新的 seq）
   events: [],
+  syntheticOnly: false,
   voiceConfig: null,
   voiceEnabled: false,
   voiceEngine: 'browser',
@@ -72,11 +74,13 @@ function renderMain(snap) {
     ? `已过闸 ${Object.keys(snap.gates || {}).length} 项 · 角色卡 ${cards.filter((c) => c.ok).length}/${cards.length} 张`
     : '写下 project.md 后，建队/派活闸才会放行')
 
-  // 最新事件
+  // 最新事件（只认真实事件：合成事件不会进 STATE.events，见 loadEvents）
   const lastEvent = STATE.events[STATE.events.length - 1]
   setText('mEventState', lastEvent ? `#${lastEvent.seq}` : '—')
-  setText('mEventTitle', lastEvent ? eventLine(lastEvent) : '暂无事件')
-  setText('mEventCopy', lastEvent ? new Date(lastEvent.at).toLocaleTimeString('zh-CN') : '事件流为空')
+  setText('mEventTitle', lastEvent ? eventLine(lastEvent) : (STATE.syntheticOnly ? '暂无真实事件' : '暂无事件'))
+  setText('mEventCopy', lastEvent
+    ? new Date(lastEvent.at).toLocaleTimeString('zh-CN')
+    : (STATE.syntheticOnly ? '后端只有推算事件，不作为历史显示' : '事件流为空'))
 
   // 接入通道
   const teams = tasks.teams || []
@@ -135,7 +139,9 @@ function renderProgress(snap) {
     const rows = STATE.events.slice(-8).reverse()
     consoleEl.innerHTML = rows.length
       ? rows.map((e) => `<div><span class="time">${new Date(e.at).toLocaleTimeString('zh-CN')}</span>${esc(eventLine(e))}</div>`).join('')
-      : '<div><span class="time">--:--</span>暂无事件（闸/黑板/会议/派活会写事件）</div>'
+      : STATE.syntheticOnly
+        ? '<div><span class="time">--:--</span>暂无真实事件（后端仅有推算，不作为历史展示）</div>'
+        : '<div><span class="time">--:--</span>暂无事件（闸/黑板/会议/派活会写事件）</div>'
   }
   const meetings = snap.meetings || { required: [] }
   const lastMeeting = meetings.last
@@ -282,7 +288,78 @@ async function loadState() {
   }
 }
 
+// ── 实时事件流（P0-2）：EventSource 优先；不可用/连接错自动回退到下面的轮询 ──
+//  为什么保留轮询：SSE 被反向代理/中间层掐断时不能让时间轴静默停更（回退比"更实时"更重要）。
+let eventStream = null
+let eventStreamReady = false
+
+function stopEventStream() {
+  eventStreamReady = false
+  if (eventStream) {
+    try { eventStream.close() } catch { /* 已关闭 */ }
+    eventStream = null
+  }
+}
+
+/** 事件入 STATE（按 seq 去重：SSE 与轮询可能同时到达同一批）。 */
+function ingestEvents(batch) {
+  if (!Array.isArray(batch) || !batch.length) return false
+  let changed = false
+  for (const e of batch) {
+    const seq = Number(e && e.seq)
+    if (Number.isFinite(seq) && seq > 0 && seq <= STATE.maxEventSeq) continue
+    STATE.events.push(e)
+    changed = true
+    if (Number.isFinite(seq) && seq > 0) STATE.maxEventSeq = Math.max(STATE.maxEventSeq, seq)
+  }
+  if (STATE.events.length > 300) STATE.events = STATE.events.slice(-300)
+  return changed
+}
+
+function startEventStream() {
+  if (typeof EventSource !== 'function') return false
+  stopEventStream()
+  try {
+    const url = `/api/jarvis/stream?since=${STATE.lastSeq}` + workspaceQuery(true)
+    const es = new EventSource(url)
+    eventStream = es
+    es.addEventListener('snapshot', (ev) => {
+      try {
+        const b = JSON.parse(ev.data)
+        if (!b || !b.ok || !b.snapshot) return
+        STATE.snapshot = b.snapshot
+        setText('cWorkspace', String(b.snapshot.workspace || '—'))
+        setText('sysState', `DSH 已连接 · v${(b.snapshot.capabilities || {}).version || '?'}`)
+        renderMain(b.snapshot)
+        renderProgress(b.snapshot)
+        renderTeam(b.snapshot)
+      } catch { /* 坏帧忽略 */ }
+    })
+    es.addEventListener('events', (ev) => {
+      try {
+        const b = JSON.parse(ev.data)
+        if (!b || !b.ok) return
+        STATE.syntheticOnly = false
+        if (ingestEvents(b.events)) {
+          const advanced = Number(b.nextSeq ?? 0)
+          if (advanced > STATE.lastSeq) STATE.lastSeq = advanced
+          if (STATE.snapshot) { renderMain(STATE.snapshot); renderProgress(STATE.snapshot) }
+        }
+      } catch { /* 坏帧忽略 */ }
+    })
+    es.onopen = () => { eventStreamReady = true }
+    // 连接错误/被断：关掉 SSE，轮询自动接上（loadEvents 里 eventStreamReady=false 时照常拉取）
+    es.onerror = () => { stopEventStream() }
+    return true
+  } catch {
+    stopEventStream()
+    return false
+  }
+}
+
 async function loadEvents() {
+  // SSE 在线时不再轮询（省一次请求；断线后 eventStreamReady=false 自动恢复轮询）
+  if (eventStreamReady) return
   try {
     // since 用服务端回的 nextSeq（本次返回的最后一条），不是 lastSeq（全库最后一条）：
     // 否则当积压事件多于 limit 时，中间事件会被静默跳过。首屏用 tail=1 直接拿最新一批。
@@ -294,11 +371,16 @@ async function loadEvents() {
       const r = await fetch(url, { cache: 'no-store' })
       const body = await r.json()
       if (!body.ok) return
-      if (Array.isArray(body.events) && body.events.length) {
-        STATE.events.push(...body.events)
-        if (STATE.events.length > 300) STATE.events = STATE.events.slice(-300)
-        changed = true
+      // D9：服务端在无真实事件时会合成 task.* 事件并带 synthetic:true。
+      // 合成事件不是「发生过的历史」：不进 STATE.events，也不推进真实 seq 游标
+      // （伪 seq 是 1..n 的独立空间，推进它会让后续真实事件被 since 吃掉）。
+      if (body.synthetic) {
+        if (!STATE.syntheticOnly) changed = true // 空态提示要从「暂无事件」刷成「暂无真实事件」
+        STATE.syntheticOnly = true
+        break
       }
+      STATE.syntheticOnly = false
+      if (ingestEvents(body.events)) changed = true
       const advanced = Number(body.nextSeq ?? 0)
       if (advanced > STATE.lastSeq) STATE.lastSeq = advanced
       else if (!STATE.lastSeq && body.lastSeq) STATE.lastSeq = Number(body.lastSeq)
@@ -367,26 +449,40 @@ function voiceLabel(text) {
   setText('voiceEngineLabel', text)
 }
 
+// 当前生效的语音供应商卡（/voice 返回的是多供应商形状 {active, providers}；兼容旧的扁平形状）
+function activeVoiceCard() {
+  const c = STATE.voiceConfig || {}
+  if (c && c.provider) return c
+  const list = Array.isArray(c && c.providers) ? c.providers : []
+  return list.find((p) => p && p.name === c.active) || null
+}
+
 async function speak(text, force = false) {
   if (!text) return
   if (!STATE.voiceEnabled && !force) return
   STATE.lastSpeech = text
-  const cfg = STATE.voiceConfig || {}
-  if (cfg.provider === 'openai' && cfg.configured) {
+  const card = activeVoiceCard()
+  if (card && card.protocol === 'openai' && card.configured) {
     try {
       voiceLabel('正在请求语音模型…')
+      // P0-3 人格/情绪：只有卡里显式配置过才下发（空值不塞给上游）
+      const extra = {}
+      if (card.instructions) extra.instructions = card.instructions
+      if (card.emotion) extra.emotion = card.emotion
+      if (card.style) extra.style = card.style
       const r = await fetch('/api/jarvis/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, voice: cfg.voice, speed: cfg.speed }),
+        body: JSON.stringify({ text, voice: card.voice, speed: card.speed, ...extra }),
       })
       if (!r.ok) throw new Error(`TTS ${r.status}`)
       const blob = await r.blob()
       const audio = new Audio(URL.createObjectURL(blob))
-      audio.onended = () => voiceLabel(`语音模型：${cfg.model || 'tts'} · 音色 ${cfg.voice || '默认'}`)
+      audio.onended = () => voiceLabel(`语音模型：${card.model || 'tts'} · 音色 ${card.voice || '默认'}`)
       await audio.play()
       return
     } catch (e) {
+      // 失败静默回落浏览器语音（不打断播报）
       voiceLabel(`语音模型不可用（${e.message}），已回退浏览器语音`)
     }
   }
@@ -398,7 +494,7 @@ async function speak(text, force = false) {
   speechSynthesis.cancel()
   const u = new SpeechSynthesisUtterance(text)
   u.lang = 'zh-CN'
-  u.rate = Number(cfg.speed || 0.9)
+  u.rate = Number((card && card.speed) || 0.9)
   u.pitch = 0.9
   if (preferredVoice) u.voice = preferredVoice
   u.onstart = () => voiceLabel(`Jarvis 正在播报 · ${preferredVoice ? preferredVoice.name : '系统语音'}`)
@@ -422,9 +518,9 @@ async function loadVoiceConfig() {
     if (body.ok && body.config) {
       STATE.voiceConfig = body.config
       STATE.presets = body.presets || {}
-      const cfg = body.config
-      voiceLabel(cfg.provider === 'openai' && cfg.configured
-        ? `语音模型：${cfg.model || 'tts'} · 音色 ${cfg.voice || '默认'}`
+      const card = activeVoiceCard()
+      voiceLabel(card && card.protocol === 'openai' && card.configured
+        ? `语音模型：${card.model || 'tts'} · 音色 ${card.voice || '默认'}`
         : '未配置语音模型 · 使用浏览器语音')
     }
   } catch { /* 静默 */ }
@@ -938,6 +1034,7 @@ setInterval(tickClock, 20000)
 await loadVoiceConfig()
 await loadState()
 await loadEvents()
+startEventStream() // P0-2：SSE 优先（不可用则静默，下面的轮询是回退通道）
 setInterval(loadState, 5000)
 setInterval(loadEvents, 3000)
 

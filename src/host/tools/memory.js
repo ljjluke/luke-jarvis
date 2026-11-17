@@ -414,6 +414,10 @@ export const MEMORY_TOOLS = [
           resourceBlockNote: { type: 'string', description: '资源未闭环提示（有 open 资源需求时输出）' },
           resolvedItems: { type: 'array', description: '已解决条目（历史——主展示不含，需要时查看）' },
           needsUserItems: { type: 'array', description: '待用户回答条目（内部分析判定 needs_user 的信息缺口——最上层与用户沟通的候选，用户回答后 resolve）' },
+          // D12：execute 实际返回的持久化字段，schema 未声明 → output 校验（additionalProperties:false）报错。
+          persisted: { type: 'boolean', description: '本次是否真写盘（黑板真源 .jarvis/board.json 已更新）' },
+          storage: { type: 'string', description: '写盘路径（persisted=true 时返回）' },
+          writeError: { type: 'string', description: '写盘失败原因（persisted=false 时返回，不伪造持久化）' },
         },
         required: ['items', 'needsMeeting'],
       },
@@ -552,15 +556,19 @@ export const MEMORY_TOOLS = [
       const resourceBlockNote = openResources.length
         ? ('；⚠️ ' + openResources.length + ' 条资源需求未闭环（' + openResources.map((r) => r.id + '[' + r.content.slice(0, 24) + ']').join(', ') + '）——依赖这些资源的任务不得标记完成：CEO 分配/上报用户（只有客户能给的→问客户要）→ 提供后 resolve 闭环；资源未到前做不依赖它的任务，不许幻觉跳过/假装有')
         : ''
-      const out = { items, openItems, blockers, needsMeeting, reason, summary: summary + resourceBlockNote, openResources, resourceBlockNote: resourceBlockNote.trim() || undefined }
+      // D12：**不许留 undefined 字段**——DSH 的 output 校验先走 lossless JSON 边界（`JSON.stringify` 会丢
+      // undefined 值）→ 旧写法 `resourceBlockNote: ... || undefined` 让返回对象「不可无损序列化」，
+      // jarvis_board 调用直接报 `value is not lossless JSON`（黑板写不进去）。空的字段 = 干脆不挂 key。
+      const out = { items, openItems, blockers, needsMeeting, reason, summary: summary + resourceBlockNote, openResources }
+      if (resourceBlockNote.trim()) out.resourceBlockNote = resourceBlockNote.trim()
       // 用户要求"未解决的展示、已解决的不展示(历史信息里面)"——resolved 条目归入历史
       out.resolvedItems = items.filter((i) => i.status === 'resolved')
       // 待用户回答清单（内部分析判定 needs_user 的条目——最上层与用户沟通的候选）
       out.needsUserItems = items.filter((i) => i.answerNeeded === 'needs_user')
       if (fsSvc && typeof fsSvc.readText === 'function' && typeof fsSvc.writeText === 'function') {
         out.persisted = persisted.ok
-        out.storage = persisted.ok ? '.jarvis/board.json' : undefined
-        if (!persisted.ok) out.writeError = persisted.error
+        if (persisted.ok) out.storage = '.jarvis/board.json'
+        else out.writeError = String(persisted.error || '写盘失败')
       }
       return out
     },

@@ -280,13 +280,18 @@ test('release_check：stable 过滤 prerelease；有新版给升级步骤；API 
   }
 })
 
-test('TOOLS 注册：3 个自进化工具进 TOOLS 且通过 DSH 契约校验（数量 35，含 GC）', async () => {
+test('TOOLS 注册：3 个自进化工具进 TOOLS 且通过 DSH 契约校验（关键工具名 + 结构性下限，不写死数量）', async () => {
   const { TOOLS } = await import('../src/host/tools/index.js')
   for (const n of ['jarvis_report_issue', 'jarvis_issue_sync', 'jarvis_release_check']) {
     assert.ok(TOOLS.some((t) => t.name === n), `${n} 必须注册进 TOOLS`)
   }
   assert.ok(TOOLS.some((t) => t.name === 'jarvis_gc'), 'jarvis_gc 必须注册进 TOOLS')
-  assert.equal(TOOLS.length, 35)
+  // 单一真源=TOOLS.length：这里不写字面工具数（新增工具不该弄碎测试），
+  // 改用「结构性下限 + 关键工具名存在性」抓「工具被误删 / 漏注册」。
+  assert.ok(TOOLS.length >= 30, `工具数不应少于 30（当前 ${TOOLS.length}）`)
+  for (const n of ['jarvis_flowguard', 'jarvis_ticket', 'jarvis_meeting', 'jarvis_dispatch_task']) {
+    assert.ok(TOOLS.some((t) => t.name === n), `核心流程工具 ${n} 必须注册进 TOOLS`)
+  }
   const { TOOL_GROUPS, toolSpecs } = await import('../src/host/state/command.js')
   const grouped = new Set(Object.values(TOOL_GROUPS).flat())
   for (const n of ['jarvis_report_issue', 'jarvis_issue_sync', 'jarvis_release_check', 'jarvis_gc']) {
