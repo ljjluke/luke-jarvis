@@ -112,6 +112,60 @@ function listTeams(projectDir, fs, path) {
   return { teams: marked, open, completed, activeTeams: activeNames }
 }
 
+/** 转录解析缓存：(文件路径|mtime|size) → digest。append-only 转录按此键失效即可。 */
+const _DIGEST_CACHE = new Map()
+
+/**
+ * 从一段解压后的会话转录（JSONL 文本）里提取「它在做什么」。
+ *
+ * 逐行扫描，只保留需要的少量信息，避免把整份转录留在内存：
+ *   · 第一行            → meta（cwd/parentSession/origin/createdAt）
+ *   · subagent/descriptor → label（任务标题）、agentModel
+ *   · assistant/message   → 最后一条非空文本，截断 240 字
+ *   · tool/call           → 最近一次工具名
+ *   · step/end            → 计数（近似"做了多少步"）
+ *   · 任意事件带 time     → 最后一次活动时间
+ *
+ * 任何一行解析失败都跳过该行，绝不抛出：快照是 UI 的命脉，
+ * 一条坏数据不该让整个面板空白。
+ */
+function sessionDigest(text) {
+  const out = { meta: null, label: '', model: '', lastText: '', lastTool: '', steps: 0, lastAt: 0 }
+  const lines = String(text || '').split('\n')
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i]
+    if (!raw) continue
+    let e = null
+    try { e = JSON.parse(raw) } catch { continue }
+    if (!e || typeof e !== 'object') continue
+    const type = String(e.type || '')
+    const at = Number(e.time || 0)
+    if (at > out.lastAt) out.lastAt = at
+    if (type === 'session' && !out.meta) { out.meta = e; continue }
+    if (type === 'subagent/descriptor') {
+      const d = e.data || {}
+      if (!out.label && d.label) out.label = String(d.label)
+      if (!out.model && d.agentModel) out.model = String(d.agentModel)
+      continue
+    }
+    if (type === 'assistant/message') {
+      const parts = ((e.data || {}).message || {}).content || []
+      const body = Array.isArray(parts)
+        ? parts.filter((p) => p && p.type === 'text').map((p) => String(p.text || '')).join(' ').trim()
+        : ''
+      if (body) out.lastText = body.slice(0, 240)
+      continue
+    }
+    if (type === 'tool/call') {
+      const name = String((e.data || {}).name || '')
+      if (name) out.lastTool = name
+      continue
+    }
+    if (type === 'step/end') out.steps += 1
+  }
+  return out
+}
+
 /** DSH 原生子会话扫描（UI 可见性兜底）。
  *
  *  问题（2026-11-16 实证）：用户在 DSH 会话里直接用原生 subagent 工具开子 agent，
@@ -148,19 +202,34 @@ function dshSubagents(dir, fs, path) {
         if (/^session-/.test(n)) continue            // 主会话不算
         const f = path.join(cdir, n, 'session.v4.jsonl.zstd')
         if (!fs.existsSync(f)) continue
-        // zstd 压缩：必须解压才能读会话头（只取第一行，不解析全文，省内存）
-        let head = ''
-        try {
-          const zlib = _require('node:zlib')
-          const raw = fs.readFileSync(f)
-          const out = typeof zlib.zstdDecompressSync === 'function'
-            ? zlib.zstdDecompressSync(raw)
-            : null
-          if (!out) continue                       // 解压能力不可用：跳过（不影响主快照）
-          head = out.toString('utf8').split('\n')[0] || ''
-        } catch { continue }
+        // ⚠️ 必须用 zstdcat 而不是 zlib.zstdDecompressSync：
+        //    DSH 转录是**多帧 zstd 追加写**（实测单文件 282 个帧魔数），
+        //    zstdDecompressSync 只解第一帧 → 只拿到 2 行会话头，
+        //    后面的 descriptor/assistant/tool 全部读不到（这就是 UI 只知道
+        //    「有几个会话在跑」却不知道「它们在做什么」的根因）。
+        //    zstdcat 解全部帧（671 行），14 个会话合计约 13ms，成本可接受。
+        // 结果按 (文件, mtime, size) 缓存——转录 append-only，没变就不重复解压。
         let meta = null
-        try { meta = JSON.parse(head) } catch { continue }
+        let digest = null
+        try {
+          let st = null
+          try { st = fs.statSync(f) } catch { st = null }
+          const cacheKey = st ? `${f}|${st.mtimeMs}|${st.size}` : ''
+          const hit = cacheKey && _DIGEST_CACHE.get(cacheKey)
+          if (hit) { digest = hit }
+          else {
+            const cp = _require('node:child_process')
+            const txt = cp.execSync(`zstdcat "${f}"`, {
+              encoding: 'utf8', timeout: 8000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
+            })
+            digest = sessionDigest(txt)
+            if (cacheKey) {
+              if (_DIGEST_CACHE.size >= 200) _DIGEST_CACHE.clear()
+              _DIGEST_CACHE.set(cacheKey, digest)
+            }
+          }
+          meta = digest.meta
+        } catch { continue }
         if (!meta || String(meta.origin || '') !== 'subagent') continue
         const sid = n
         out.total++
@@ -180,6 +249,13 @@ function dshSubagents(dir, fs, path) {
           parent: String(meta.parentSession || ''),
           createdAt: meta.createdAt ? new Date(Number(meta.createdAt)).toISOString() : '',
           tracked,
+          // ── 真实工作内容（让 UI 显示「它在干什么」，而不是只有一个数量）──
+          label: String(digest.label || ''),           // subagent/descriptor.label：任务标题
+          model: String(digest.model || ''),           // agentModel
+          lastText: String(digest.lastText || ''),     // 最后一条 assistant 文本（摘要 240 字）
+          lastTool: String(digest.lastTool || ''),     // 最近一次 tool/call 的工具名
+          steps: Number(digest.steps || 0),            // step/end 次数 ≈ 完成的推理步数
+          lastActivityAt: digest.lastAt ? new Date(Number(digest.lastAt)).toISOString() : '',
         })
       }
     }

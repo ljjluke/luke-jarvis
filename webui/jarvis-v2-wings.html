@@ -175,7 +175,11 @@ body.jarvis-speaking .plasma-layer{animation-duration:2.4s}
 </div>
 <script>
 const mainView=document.getElementById('mainView'),progressView=document.getElementById('progressView'),teamView=document.getElementById('teamView'),detailView=document.getElementById('detailView');
-// ── 国际化：语言来自 dsh 设置（lang 字段，zh/en），{n} = 助手名字。静态文本按原文匹配替换，JS 文案走 t() ──
+// ── 国际化：语言来自 dsh 设置（lang 字段，zh/en）。
+//    占位符分两类，绝不混用：
+//      {name} = 助手名字（t() 自动填）；{n}/{m}/{d}/{p}/{i}/{t}/{l}/{s} 等 = 数字或文本，
+//      由调用方 .replace() 填。历史上 t() 曾把 {n} 一律当名字替换，
+//      导致「有 {n} 个任务在跑」显示成「有 小云 个任务在跑」。 ──
 window.JARVIS_LANG=(()=>{try{return localStorage.getItem('jarvis.lang')||'zh'}catch(e){return 'zh'}})();
 const I18N={
 'OFFLINE':['离线','Offline'],'系统正常':['系统正常','Systems OK'],'系统运行正常':['系统运行正常','Running normally'],
@@ -203,12 +207,12 @@ const I18N={
 '专家模式 · 原生 WebUI':['专家模式 · 原生 WebUI','Expert mode · Native WebUI'],'查看运行日志':['查看运行日志','View run logs'],
 // ── JS 动态文案 ──
 'voice.on':['语音播报已开启','Voice on'],'voice.off':['语音播报已关闭','Voice off'],'voice.muted':['语音播报已静音','Voice announcements muted'],'voice.muted.cmd':['已通过语音指令静音','Muted by voice command'],
-'voice.status':['授权后可使用语音指令，{n} 将以语音回应。','After authorization, {n} will respond by voice.'],
+'voice.status':['授权后可使用语音指令，{name} 将以语音回应。','After authorization, {name} will respond by voice.'],
 'voice.hint':['已收到语音。可尝试“查看进度”“打开员工空间”或“返回总览”。','Heard. Try "show progress", "open team space" or "back to overview".'],
 'mic.st.offline':['离线','OFFLINE'],'mic.st.waiting':['授权中','AUTH'],'mic.st.live':['聆听中','LISTENING'],'mic.st.wake':['待命','STANDBY'],'mic.st.error':['异常','ERROR'],
 'mic.connect':['连接麦克风','Connect mic'],'mic.disconnect':['断开麦克风','Disconnect mic'],'mic.waiting':['等待授权…','Waiting for permission…'],
 'mic.title.off':['点击连接麦克风','Click to connect mic'],'mic.title.waiting':['等待麦克风授权','Waiting for microphone permission'],'mic.title.error':['麦克风连接失败','Microphone connection failed'],
-'mic.title.live':['我在听，先生。',"I'm listening, Sir."],'mic.title.wake':['待命中 · 叫「{n}」即可唤醒','Standby · say "{n}" to wake'],
+'mic.title.live':['我在听，先生。',"I'm listening, Sir."],'mic.title.wake':['待命中 · 叫「{name}」即可唤醒','Standby · say "{name}" to wake'],
 'mic.err.nosupport':['当前浏览器不支持麦克风，请使用新版 Edge 或 Chrome。','Microphone not supported; use latest Edge or Chrome.'],
 'mic.err.denied':['麦克风权限被拒绝。请在浏览器地址栏中重新允许。','Microphone permission denied. Re-allow it in the address bar.'],
 'mic.err.nodev':['未检测到可用麦克风，请检查设备连接。','No microphone found. Check the device connection.'],
@@ -216,7 +220,7 @@ const I18N={
 'mic.off':['麦克风已断开。','Microphone disconnected.'],'mic.off.detail':['麦克风已断开，音频不会继续采集。','Microphone disconnected; audio capture stopped.'],'mic.reconnect':['点击可重新连接麦克风','Click to reconnect the microphone'],
 'voice.off.hint':['语音沟通模式未开启：可在 DSH 设置面板打开「语音沟通模式」','Voice mode is off: enable "Voice mode" in DSH settings'],
 'listen':['正在聆听：','Listening: '],'chat.you':['你：','You: '],
-'wake.here':['在，我在听。',"Yes, I'm listening."],'wake.wait':['等待唤醒：说“{n}”','Waiting for wake word: say "{n}"'],'wake.miss':['（待命中，说“{n}”唤醒）你：{t}','(standby, say "{n}" to wake) You: {t}'],'wake.announce':['语音待命已开启，叫我{n}就能唤醒。','Voice standby is on. Just call my name, {n}, to wake me.'],
+'wake.here':['在，我在听。',"Yes, I'm listening."],'wake.wait':['等待唤醒：说“{name}”','Waiting for wake word: say "{name}"'],'wake.miss':['（待命中，说“{name}”唤醒）你：{t}','(standby, say "{name}" to wake) You: {t}'],'wake.announce':['语音待命已开启，叫我{name}就能唤醒。','Voice standby is on. Just call my name, {name}, to wake me.'],
 'decision.approved':['已同意，团队会按这个方向继续推进。','Approved; the team will proceed.'],
 'decision.test':['先按小范围试，不会影响其他工作。','Kept as a pilot; nothing else changes.'],
 'decision.approved.short':['已同意','Approved'],'decision.test.short':['小范围试','Pilot'],
@@ -236,7 +240,7 @@ const I18N={
 'card.waiting':['等你决定','WAITING YOU'],'card.reply':['回复','REPLY'],'card.meeting.req':['需要开个会：','Required meeting: '],'card.meeting.dot':['需要开会 · ','Required meeting · '],
 'meet.attendees':['参会人：','Attendees: '],'meet.agenda.item':['议题 {i}：','Agenda {i}: '],'meet.person':['{p} 手上还有 {k} 项没做完','{p} has {k} open items'],
 'meet.m.doing':['进行中','In progress'],'meet.m.queued':['等开工','Queued'],'meet.m.done':['已完成','Done'],'meet.m.members':['成员','Members'],
-'card.waiting.copy':['有事项需要你答复，{n} 在等你决定。','Items await your reply; {n} is waiting on you.'],
+'card.waiting.copy':['有事项需要你答复，{name} 在等你决定。','Items await your reply; {name} is waiting on you.'],
 'card.from':['来自 ','from '],'empty.decision':['暂无待决定事项。','Nothing awaiting your decision.'],
 'BOARD · 需要你处理':['需要你处理','NEEDS YOU'],'需要你决定的事项':['需要你决定的事项','Items needing your decision'],
 'kick.decision':['需要你处理 · 待回复','NEEDS YOU · REPLY'],'kick.proposal':['需要你处理 · 同事提议','NEEDS YOU · PROPOSAL'],
@@ -294,7 +298,7 @@ const I18N={
 'dsh.sub.detail.title':['流程外子任务（{n} 个）','Off-book subtasks ({n})'],
 'dsh.sub.detail.copy':['它们正在工作区里干活，但没有对应的任务单，因此没有进度、没有验收、无法追溯。要纳入管理，请改用「安排工作」并由负责人接手。','They are working in the workspace but have no ticket — no progress, no acceptance, no trace. Use task dispatch to bring them under management.'],
 'dsh.sub.chip':['未纳管','untracked'],
-'dsh.sub.row':['由 {p} 开启 · {a}','spawned by {p} · {a}'],
+'dsh.sub.row':['由 {p} 开启 · {a}','spawned by {p} · {a}'],'dsh.sub.steps':['步','steps'],
 'dsh.sub.empty':['没有被纳入任务单的子任务。','All subtasks are registered.'],
 // ── 交付物卡（方案 B 主屏核心）──
 'deliv.k':['交付','DELIVERY'],'deliv.done':['已交付','Delivered'],'deliv.blocked':['卡住','Blocked'],'deliv.running':['进行中','In progress'],
@@ -331,14 +335,14 @@ const I18N={
 'pages.archived.banner':['这是已归档的看板 · 只读查看 · 到期自动清理','Archived board · read-only · auto-cleaned after retention'],
 'pages.more.title':['还有 {n} 个看板','{n} more boards'],'pages.more.copy':['点开看完整列表。','Open for the full list.'],
 'pages.more.state':['还有 {n} 个','{n} more'],'pages.fallback.title':['工作看板 {n}','Board {n}'],
-'以下是当前需要你亲自决定的内容，其余任务 Jarvis 会继续推进。':['以下是需要你亲自决定的内容，其余工作 {n} 会继续推进。','These need your personal decision; {n} keeps the rest moving.'],
+'以下是当前需要你亲自决定的内容，其余任务 Jarvis 会继续推进。':['以下是需要你亲自决定的内容，其余工作 {name} 会继续推进。','These need your personal decision; {name} keeps the rest moving.'],
 'card.mission':['正在推进','IN PROGRESS'],'card.running':['进行中','RUNNING'],
 'card.mission.copy':['{a} · {s} · 第 {i}/{t2} 步 {l}','{a} · {s} · Step {i}/{t2} {l}'],
 'card.mission.data':['已完成 {d} / {n2} 项','{d} / {n2} done'],
 'MISSION · 正在推进':['正在推进','IN PROGRESS'],'m.overall':['整体完成','Overall'],'m.doing':['进行中','In progress'],'m.done':['已完成','Done'],'m.stage':['当前步骤','Step'],
 'card.mission.detail':['负责人 {a} · 状态 {s}{att}{dep}','Owner {a} · Status {s}{att}{dep}'],
 'card.gap':['还差这些','STILL NEEDED'],'card.open':[' 项待补',' open'],'stage.cur':['当前','current'],'card.gap.title':['「{l}」还差这几件','{l} · still needed'],
-'STAGE · 下一步':['下一步','NEXT'],'card.gap.next':['补齐后：','Then: '],'card.gap.auto':['这些补齐后，{n} 会自动进入下一步。','Once done, {n} moves to the next step automatically.'],'empty.gap':['暂无待补事项。','Nothing outstanding.'],
+'STAGE · 下一步':['下一步','NEXT'],'card.gap.next':['补齐后：','Then: '],'card.gap.auto':['这些补齐后，{name} 会自动进入下一步。','Once done, {name} moves to the next step automatically.'],'empty.gap':['暂无待补事项。','Nothing outstanding.'],
 'card.queue':['接下来','UP NEXT'],'card.pending':[' 项待做',' pending'],
 'card.queue.copy':['{a} · {s}{more}','{a} · {s}{more}'],'card.queue.more':[' 等 {q} 项排在后面',' · {q} more queued'],
 'QUEUE · 接下来':['接下来','QUEUE'],'card.queue.title':['排在后面的工作（{q}）','Up next ({q})'],'card.queue.desc':['这些工作已安排，会在当前这件事之后依次推进。','These are lined up and will run after current work.'],
@@ -352,11 +356,11 @@ const I18N={
 'card.events':['最新进展','LIVE UPDATES'],'card.live':['实时','LIVE'],'card.events.copy':['进展实时更新：谁接手了什么、哪一步完成、有什么结果。','Live updates: who took what, which step finished, what came out.'],
 'EVENTS · 最新进展':['最新进展','UPDATES'],'最近事件':['最近动态','Recent updates'],
 'card.pages':['生成的看板','DASHBOARDS'],'card.pages.n':[' 个',' pages'],
-'card.pages.copy':['{n} 刚生成的看板（{m} 分钟前）· 点击查看 · 闲置自动清理','A dashboard {n} just made ({m} min ago) · click to view · auto-cleaned'],
+'card.pages.copy':['{name} 刚生成的看板（{m} 分钟前）· 点击查看 · 闲置自动清理','A dashboard {name} just made ({m} min ago) · click to view · auto-cleaned'],
 'card.recent':['最近汇报','RECENT REPORTS'],'ev.taskDone':['已完成','done'],'ev.taskStart':['进行中','in progress'],'ev.taskAssign':['已交给','assigned to'],
-'pages.title':['{n} 生成的看板（闲置 24 小时自动清理）','Dashboards by {n} (auto-cleaned after 24h idle)'],
+'pages.title':['{name} 生成的看板（闲置 24 小时自动清理）','Dashboards by {name} (auto-cleaned after 24h idle)'],
 'pages.row':['{m} 分钟前生成 · 点击打开','generated {m} min ago · click to open'],
-'pages.empty':['{n} 还没有做过看板。直接说「给我做个 XX 看板」，结果会出现在这里。','{n} has no dashboards yet. Just ask for one and it will appear here.'],
+'pages.empty':['{name} 还没有做过看板。直接说「给我做个 XX 看板」，结果会出现在这里。','{name} has no dashboards yet. Just ask for one and it will appear here.'],
 'pages.banner':['本页由 {n} 生成 · 闲置 24 小时自动清理','Made by {n} · auto-cleaned after 24h idle'],
 'pages.back':['← 返回列表','← Back to list'],
 'detail.kicker':['{n} · 详情','{n} · DETAILS'],'detail.title':['详情','Details'],'empty.generic':['暂无内容','No content'],'empty.more':['暂无更多信息。','No more information.'],
@@ -370,9 +374,9 @@ const I18N={
 'sp.ws':['当前工作区：{w}。','Current workspace: {w}. '],'sp.need':['有{k}件事需要你决定，比如：{s}。','{k} items need your call, e.g.: {s}. '],'sp.doing':['{a}正在做：{s}。','{a} is working on: {s}. '],'sp.done':['{s}已完成。','{s} is done. '],
 'sp.board':['有 {k} 件事需要你决定。','{k} items need your decision. '],'sp.gap':['还有 {k} 件事没做完。','{k} items still outstanding. '],'sp.next':['下一步：{s}。','Next: {s}. '],
 'stage.none':['尚未开始','Not started'],'stage.na':['未接入','Not connected'],
-'prog.fallback':['{n} 的工作台','{n} Workspace'],'prog.sub':['{tm} · 第 {i}/{t} 步 {l}','{tm} · Step {i}/{t} {l}'],
+'prog.fallback':['{name} 的工作台','{name} Workspace'],'prog.sub':['{tm} · 第 {i}/{t} 步 {l}','{tm} · Step {i}/{t} {l}'],
 'prog.percent':['正在推进 · 已完成 {d}/{t} 项工作','In progress · {d}/{t} items done'],
-'prog.core':['{n} 正在盯「{l}」这一步','{n} is on the "{l}" step'],
+'prog.core':['{name} 正在盯「{l}」这一步','{name} is on the "{l}" step'],
 'prog.ready':['这一步该做的都做完了，可以进入下一步。','This step is complete; ready for the next one.'],
 'prog.steps':['{d} / {t} 步','{d} / {t} steps'],'ph.done':['已完成','Done'],'ph.cur':['进行中','Running'],'ph.todo':['还没开始','To do'],
 'm.done2':['已完成','Completed'],'m.open':['待处理','Pending'],'m.block':['卡住','Blocked'],'m.last':['最近完成','Latest done'],
@@ -383,7 +387,17 @@ const I18N={
 'team.openN':['（还有 {o} 项）','({o} open)'],'team.cursess':[' · 当前会话',' · current session'],'team.cur':[' · 当前',' · current'],
 'san.link':['链接','a link'],'san.mem':['项目记忆文件','project memory'],'san.path':['项目路径','a project path'],
 };
-window.t=function(k){const e=I18N[k];if(!e)return k;let v=window.JARVIS_LANG==='en'?e[1]:e[0];v=String(v).replace(/\{n\}/g,window.JARVIS_NAME||'Jarvis');return v};
+window.t=function(k){
+  const e=I18N[k];
+  if(!e)return k;
+  let v=window.JARVIS_LANG==='en'?e[1]:e[0];
+  v=String(v);
+  // {n} 是**数字占位符**（"有 {n} 个任务在跑"），由调用方 .replace('{n}', count) 填。
+  // 这里绝不能用 JARVIS_NAME 去替——那会让所有含 {n} 的文案显示成「有 小云 个任务在跑」。
+  // 需要名字的文案统一用 {name}，只替它。
+  v=v.replace(/\{name\}/g, window.JARVIS_NAME||'Jarvis');
+  return v;
+};
 // 人类语言化：把技术字符串翻译成老板能听懂的话（字幕、语音、事件流、详情页共用）
 // 六步进展用业务语言表达；host 传入的 stage.label 是流程术语，前端按 stage id 重新映射。
 const BOSS_STAGE={clarify:'需求确认',decompose:'任务拆分',design:'方案设计',build:'安排人手',execute:'推进落地',close:'交付收尾',verify:'检查验收'};
@@ -1270,13 +1284,15 @@ function cardEmptyReason(snap){
   if(!e||!e.text||e.kind==='none')return null;
   // 只有异常型空白才占卡位；normal 交给字幕说，不占位
   if(e.kind==='normal')return null;
-  const isOffbook=e.kind==='offbook';
+  // offbook 由 cardDshSubagents 专门呈现（带每个子任务的标题与工作内容），
+  // 这里再出一张「流程外」卡就是同一件事说两遍。
+  if(e.kind==='offbook')return null;
   return {id:'empty-reason',kind:'blocked',k:t('empty.k'),st:t('empty.kind.'+e.kind),
     title:t('empty.title.'+e.kind).replace('{n}',String(e.count||0)),
     copy:e.text,
     detail:{kicker:t('empty.kicker'),title:t('empty.title.'+e.kind).replace('{n}',String(e.count||0)),
       copy:e.text,
-      rows:[{main:isOffbook?t('empty.fix.offbook'):t('empty.fix.misplaced'),chips:[{t:t('empty.action'),c:'mut'}],sub:''}],
+      rows:[{main:t('empty.fix.misplaced'),chips:[{t:t('empty.action'),c:'mut'}],sub:''}],
       empty:''}}
 }
 
@@ -1284,17 +1300,38 @@ function cardDshSubagents(snap){
   const d=snap.dshSubagents;
   if(!d||!Number(d.untracked||0))return null;
   const items=(d.items||[]).filter(x=>!x.tracked).slice(0,6);
-  return {id:'dsh-subs',kind:'cleanup',k:t('dsh.sub.k'),
+  // 主屏 copy 不只是「它们绕过任务单」，而是直接列出**最近在做什么**——
+  // 用户要的是「看起来内容对得上」，一句概况做不到这一点。
+  // 注意：这里**不能用 taskText()**——它会清洗路径/UUID/英文缩写，
+  // 把「I'll start by reading the CEO card」压成「I'll by .」。
+  // label 是人工写的任务标题，lastText 是模型原文，都按原样展示（只做长度截断）。
+  const clipRaw=(s,n)=>{const v=String(s||'').replace(/\s+/g,' ').trim();return v.length>n?v.slice(0,n)+'…':v};
+  const named=items.filter(x=>String(x.label||'').trim());
+  const preview=named.slice(0,3).map(x=>clipRaw(x.label,32)).join(' · ');
+  const busy=items.filter(x=>String(x.lastText||'').trim());
+  const doing=busy.length?clipRaw(busy[0].lastText,90):'';
+  const copy=preview
+    ? (doing?`${preview}${named.length>3?` 等 ${named.length} 项`:''}。最新进展：${doing}`:preview)
+    : t('dsh.sub.copy');
+  return {id:'dsh-subs',kind:'cleanup',k:t('dsh.sub.k'),rawText:true,
     st:t('dsh.sub.state').replace('{n}',String(d.untracked)),
     title:t('dsh.sub.title').replace('{n}',String(d.untracked)),
-    copy:t('dsh.sub.copy'),
+    copy,
     data:String(d.untracked),dataLabel:t('dsh.sub.unit'),
     detail:{kicker:t('dsh.sub.kicker'),
       title:t('dsh.sub.detail.title').replace('{n}',String(d.untracked)),
       copy:t('dsh.sub.detail.copy'),
       meta:[['已纳入任务单',String(d.tracked||0)+' 个'],['未纳入',String(d.untracked)+' 个'],['总计',String(d.total||0)+' 个']],
-      rows:items.map(x=>({main:x.id.slice(0,8)+'…',chips:[{t:t('dsh.sub.chip'),c:'bad'}],
-        sub:t('dsh.sub.row').replace('{p}',String(x.parent||'?').slice(0,12)).replace('{a}',x.createdAt?new Date(x.createdAt).toLocaleString(window.JARVIS_LANG==='en'?'en-US':'zh-CN',{hour12:false}):'—')})),
+      rows:items.map(x=>{
+        // 主行显示「它在做什么」而不是会话 id：label 取自 subagent/descriptor，
+        // 副行显示最后一条工作文本（文本缺失时退回「由谁开启·何时」）。
+        const main=(x.label||'').trim()||(x.id.slice(0,8)+'…');
+        const chips=[{t:t('dsh.sub.chip'),c:'bad'}];
+        if(Number(x.steps||0)>0)chips.push({t:String(x.steps)+' '+t('dsh.sub.steps'),c:'mut'});
+        if(x.lastTool)chips.push({t:x.lastTool,c:'mut'});
+        const fallback=t('dsh.sub.row').replace('{p}',String(x.parent||'?').slice(0,12)).replace('{a}',x.createdAt?new Date(x.createdAt).toLocaleString(window.JARVIS_LANG==='en'?'en-US':'zh-CN',{hour12:false}):'—');
+        return {main,chips,sub:((x.lastText||'').trim()||fallback).slice(0,80)};
+      }),
       empty:t('dsh.sub.empty')}}
 }
 /* 进行中的页面：每个页面一张卡，数量随任务动态变化 */
@@ -1440,11 +1477,13 @@ function archiveCard(c, bornAt){
 function renderCards(snap){
   if(LIVE.dragging){LIVE.pendingSnap=snap;return}
   // 卡片函数可返回单张或数组。任务点卡优先（一张卡 = 一个任务点），其次页面卡、决策/协调卡。
-  // 方案 B：主屏只留「老板该看的」三类——交付物进展 / 需你决策 / 风险卡住。
-  // 技术细节（任务点/页面/子会话/队列/团队/GC）不占主屏：点开交付物卡看明细，
-  // 或去历史看板。原顺序保留在注释里以便回溯。
-  // 旧：cardTaskPoints,cardPageCards,cardDshSubagents,cardDecision,cardProposal,cardBlocked,cardReport,cardQueue,cardTeam,cardGC
-  const order=[cardDeliverables,cardEmptyReason,cardDecision,cardProposal,cardBlocked,cardReport];
+  // 方案 B：主屏只留「老板该看的」——交付物进展 / 需你决策 / 风险卡住 / 流程外子任务。
+  // 技术细节（任务点/页面/队列/团队/GC）不占主屏：点开交付物卡看明细，或去历史看板。
+  //
+  // cardDshSubagents 必须留在主屏：它是「绕过任务单的原生子会话」唯一可见处，
+  // 现在每条都带 label（任务标题）/lastText（正在做什么）/steps/lastTool——
+  // 去掉它，用户只能看到「有 N 个任务在跑」这一句，看不到它们在干什么。
+  const order=[cardDeliverables,cardDshSubagents,cardEmptyReason,cardDecision,cardProposal,cardBlocked,cardReport];
   const cards=order.flatMap(f=>{try{const r=f(snap);return Array.isArray(r)?r:(r?[r]:[])}catch(e){console.warn('card',e);return []}});
   const all=cards.filter(c=>c&&c.title);
   // 生命周期：满 5 分钟的卡片滚出主屏进历史（待拍板卡常驻）
@@ -1464,7 +1503,7 @@ function renderCards(snap){
   }
   if(!picked.length){layer.innerHTML='';if(svg)svg.replaceChildren();return}
   layer.innerHTML=picked.map((c,i)=>`<section class="hud-node" data-card="${i}" data-card-id="${esc(c.id||String(i))}" data-kind="${esc(c.kind||'task')}" role="button" tabindex="0" aria-label="${esc(c.title)}，点击查看详情">
-    <div class="node-kicker"><span>${esc(c.k)}</span><span>${esc(c.st||'')}</span></div><div class="node-title">${esc(taskText(c.title,70))}</div><div class="node-copy">${esc(reportText(c.copy,120))}</div>
+    <div class="node-kicker"><span>${esc(c.k)}</span><span>${esc(c.st||'')}</span></div><div class="node-title">${esc(c.rawText?clip(c.title,70):taskText(c.title,70))}</div><div class="node-copy">${esc(c.rawText?clip(c.copy,140):reportText(c.copy,120))}</div>
     ${c.data?`<div class="node-data"><b>${esc(c.data)}</b><span>${esc(c.dataLabel||'')}</span></div>`:''}${c.pct!=null?`<div class="thin-progress"><i style="width:${Math.max(0,Math.min(100,c.pct))}%"></i></div>`:''}${actionMarkup(c,i)}</section>`).join('');
   $$('[data-card-option]',layer).forEach(btn=>btn.addEventListener('click',e=>{e.stopPropagation();const [i,j]=btn.dataset.cardOption.split(':').map(Number);const c=LIVE.cards[i],opt=c&&c.options[j];if(opt)submitCardOption(i,opt[0],btn)}));
   $$('[data-card-custom]',layer).forEach(form=>form.addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();const i=Number(form.dataset.cardCustom),input=$('input',form),value=input.value.trim();if(value)submitCardOption(i,value,form)}));
