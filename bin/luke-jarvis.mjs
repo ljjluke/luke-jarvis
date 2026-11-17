@@ -272,6 +272,14 @@ async function doctor() {
         fail(`${name}: package.json 缺 dsh.client/exports./client 声明——client 模块无法被发现（副本偏旧，重装）`)
         continue
       }
+      // schemastery 是插件 Config schema 的 peer 依赖。profile 若设 autoInstallPeers:false
+      // （superagent 就是），`dsh plugin add` 不会自动装它 → 插件 host 侧 import 失败 →
+      // 配置卡片不显示，而 dsh 只会记一句 skipping bundle。先于下面的 try 检查，给明确指引。
+      const smPkg = path.join(PROFILES_DIR, name, 'node_modules/@deepseek-ai/schemastery/package.json')
+      if (!fs.existsSync(smPkg)) {
+        fail(`${name}: 缺 @deepseek-ai/schemastery（插件 Config schema 的 peer 依赖）——设置里的配置卡片不会显示。修复：cd ${PROFILES_DIR}/${name} && pnpm add @deepseek-ai/schemastery`)
+        continue
+      }
       ok(`${name}: 配置卡片两件套完整（volatile Config + client 半）——设置 → 内置插件 → luke-jarvis 应可见`)
     } catch (e) {
       fail(`${name}: Config schema 加载失败（${String(e.message || e).slice(0, 100)}）——配置卡片无法显示`)
