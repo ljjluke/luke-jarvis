@@ -1583,6 +1583,35 @@ export function apply(ctx, config) {
             },
           })
         )
+        // 2.15) bundle 内部的模块与静态资源走**根路径** /assets/*：它们由 bundle 在运行时
+        //   用 import.meta.url 或写死的 '/assets/xxx.js' 拼出来（Filter-*.js、WebGLRenderer-*.js、
+        //   browserAll-*.js 等模块，以及 rolldown-runtime 这类按需 chunk），与 HTML 里写的
+        //   /jarvis-office/assets/ 前缀无关 —— 改 HTML 覆盖不到它们，只能在服务端补根映射。
+        //   磁盘结构是 office/assets/：顶层是 48 个 js + 6 个 css，另有 office/ 子目录（贴图）。
+        //   因此 /assets/* 与 /assets/office/* 两条路由结果自洽：/assets/office/x 经这条映射成
+        //   office/assets/office/x，正是真实位置，两条互为冗余但不会指错。
+        ctx.effect(() =>
+          webSvc2.register({
+            kind: 'prefix',
+            path: '/assets',
+            handler: async (req, res) => {
+              try {
+                const url = String((req && req.url) || '/')
+                let rel = decodeURIComponent(url.split('?')[0].replace(/^\/assets\/?/, ''))
+                if (!rel) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('not found') }
+                if (rel.includes('..')) { res.writeHead(403); return res.end('forbidden') }
+                const abs = path.join(officeRoot, 'assets', rel)
+                if (!abs.startsWith(officeRoot)) { res.writeHead(403); return res.end('forbidden') }
+                const data = fsm.readFileSync(abs)
+                const ext = path.extname(abs).toLowerCase()
+                res.writeHead(200, { 'content-type': MIME[ext] || 'application/octet-stream', 'cache-control': 'no-cache' })
+                return res.end(data)
+              } catch {
+                try { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found') } catch {}
+              }
+            },
+          })
+        )
         // 2.2) 角色资源根：/characters/* → office/characters/*
         //   上游 bundle 启动时调用 Ae('/characters') 注册角色图集根（registry.json 与各角色
         //   atlas/manifest/portrait + visuals/）。不映这条，人物贴图与角色数据同样 404。

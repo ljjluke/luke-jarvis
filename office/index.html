@@ -16,6 +16,8 @@
     <meta property="og:url" content="https://pixoffice.online/" />
     <link rel="canonical" href="https://pixoffice.online/" />
     <title>PixOffice · 可编程的二维办公室</title>
+    <!-- crypto.randomUUID 仅在 secure context 可用；非 https/不受信证书下缺失会让 bundle 构造即崩。必须在 module script 之前加载。 -->
+    <script src="/jarvis-office/crypto-polyfill.js"></script>
     <script type="module" crossorigin src="/jarvis-office/assets/website-BUObjCxz.js"></script>
     <link rel="modulepreload" crossorigin href="/jarvis-office/assets/modulepreload-polyfill-Dezn_h7o.js">
     <link rel="modulepreload" crossorigin href="/jarvis-office/assets/rolldown-runtime-Bh1tDfsg.js">
