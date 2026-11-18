@@ -67,7 +67,7 @@
 /* 语音心跳：Jarvis 说话时核心光球律动（双跳节律，类似心跳） */
 body.jarvis-speaking .jarvis-orb{animation:heartbeat 1.5s ease-in-out infinite}
 body.jarvis-speaking .jarvis-visual{animation:heartbeatGlow 1.5s ease-in-out infinite}
-body.jarvis-speaking .jarvis-core{animation:heartbeatCore 1.5s ease-in-out infinite}
+body.jarvis-speaking .jarvis-core{animation:heartbeatCore 1.5s ease-in-out infinite}.core-status{position:absolute;left:50%;top:50%;transform:translate(-50%,172px);z-index:9;white-space:nowrap;font:400 14px "Microsoft YaHei",sans-serif;letter-spacing:3px;color:rgba(112,234,255,.92);text-shadow:0 0 22px rgba(112,234,255,.55),0 0 5px rgba(2,11,17,.95);pointer-events:none;transition:color .35s ease,letter-spacing .35s ease}.core-status.idle{color:rgba(112,234,255,.5);letter-spacing:5px}.core-status.busy{color:rgba(60,242,165,.95);text-shadow:0 0 26px rgba(60,242,165,.55);letter-spacing:2px}
 body.jarvis-speaking .core-halo{animation-duration:1.1s}
 body.jarvis-speaking .gyro.g1{animation-duration:3.5s}
 body.jarvis-speaking .gyro.g2{animation-duration:5.5s}
@@ -117,7 +117,7 @@ body.jarvis-speaking .plasma-layer{animation-duration:2.4s}
       <div class="progress-orbit"><svg viewBox="0 0 660 660"><circle class="base" cx="330" cy="330" r="318"/><circle class="active" cx="330" cy="330" r="318"/></svg></div>
       <div class="jarvis-core"><div class="gyro g1"></div><div class="gyro g2"></div><div class="gyro g3"></div><div class="core-halo"></div><div class="core-halo h2"></div><div class="core-halo h3"></div><div class="jarvis-visual" aria-hidden="true"><img class="jarvis-orb" src="/jarvis-wings-assets/generated-images/JARVIS_AI_assistant_glowing_or_2026-11-05T01-56-27.png" alt=""><div class="plasma-layer pa"></div><div class="plasma-layer pb"></div><div class="plasma-layer pc"></div><div class="arc-field"><i></i><i></i><i></i><i></i></div><div class="core-depth"></div><canvas id="coreWave" width="320" height="320"></canvas></div></div>
     </div>
-    <div id="cardLayer" aria-live="polite"></div>
+    <div id="cardLayer" aria-live="polite"></div><div class="core-status idle" id="coreStatus">待命</div>
     <div class="jarvis-dialogue"><div class="dialogue-line"><p class="dialogue-main"><span id="captionText">正在接入…</span><em></em></p></div>
       <div class="voice-strip" id="voiceNode" role="button" tabindex="0" aria-label="连接或断开麦克风">
         <span class="vs-state" id="micState">离线</span><span id="voiceNodeTitle">连接麦克风</span><canvas id="micWaveform" width="110" height="18"></canvas>
@@ -291,14 +291,14 @@ const I18N={
 'gc.card.copy':['这些文件很久没用了，建议清理；点开可以逐项确认。','These files have not been used for a while; open to review each one.'],
 'gc.card.unit':['项建议清理','suggestions'],
 'gc.card.kicker':['文件整理 · 建议清理','CLEANUP · SUGGESTIONS'],
-'dsh.sub.k':['未纳入流程','OFF-BOOK'],'dsh.sub.state':['{n} 个','{n} running'],
-'dsh.sub.title':['有 {n} 个任务在跑，但没走任务单','{n} tasks running outside the task system'],
-'dsh.sub.copy':['这些是直接开的子任务，没有登记进任务单，所以主屏看不到进度。','These were spawned directly and never registered, so their progress is invisible here.'],
-'dsh.sub.unit':['个未纳管','untracked'],
+'dsh.sub.k':['没登记的活','OFF-BOOK'],'dsh.sub.state':['{n} 个','{n} running'],
+'dsh.sub.title':['有 {n} 件事在跑，但没登记到我这儿','{n} things running that I was not told about'],
+'dsh.sub.copy':['这些活是直接开的，没经过我，所以我看不到它们的进度。','These were started directly without going through me, so I cannot track them.'],
+'dsh.sub.unit':['件没登记','untracked'],
 'dsh.sub.kicker':['流程外子任务','OFF-BOOK SUBTASKS'],
 'dsh.sub.detail.title':['流程外子任务（{n} 个）','Off-book subtasks ({n})'],
 'dsh.sub.detail.copy':['它们正在工作区里干活，但没有对应的任务单，因此没有进度、没有验收、无法追溯。要纳入管理，请改用「安排工作」并由负责人接手。','They are working in the workspace but have no ticket — no progress, no acceptance, no trace. Use task dispatch to bring them under management.'],
-'dsh.sub.chip':['未纳管','untracked'],
+'dsh.sub.chip':['没登记','untracked'],
 'dsh.sub.row':['由 {p} 开启 · {a}','spawned by {p} · {a}'],'dsh.sub.steps':['步','steps'],
 'dsh.sub.empty':['没有被纳入任务单的子任务。','All subtasks are registered.'],
 // ── 交付物卡（方案 B 主屏核心）──
@@ -313,13 +313,13 @@ const I18N={
 'deliv.acc.blocked':['卡住','Blocked'],'deliv.acc.in_progress':['进行中','In progress'],'deliv.acc.abandoned':['已放弃','Dropped'],'deliv.acc.unknown':['状态未知','Unknown'],
 'deliv.empty':['这个需求还没有拆分出的任务。','No tasks yet for this delivery.'],
 // ── 空白语义卡（方案 C）──
-'empty.k':['没有任务','NO WORK'],'empty.kind.offbook':['流程外','Off-book'],'empty.kind.misplaced':['工作区不符','Wrong workspace'],'empty.kind.noWorkspace':['未接入','Not connected'],
-'empty.title.offbook':['有 {n} 个任务在跑，但没走任务单','{n} tasks running off-book'],
+'empty.k':['没有任务','NO WORK'],'empty.kind.offbook':['没登记的活','Off-book'],'empty.kind.misplaced':['工作区不符','Wrong workspace'],'empty.kind.noWorkspace':['未接入','Not connected'],
+'empty.title.offbook':['有 {n} 件事在跑，但没登记到我这儿','{n} things running unregistered'],
 'empty.title.misplaced':['工作区可能不对','Workspace may be wrong'],
 'empty.title.noWorkspace':['还没接入工作区','Not connected to a workspace'],
 'empty.kicker':['为什么这里是空的','WHY THIS IS EMPTY'],
 'empty.action':['可以这样处理','Next step'],
-'empty.fix.offbook':['让这些工作改用「安排工作」派给成员，才会进任务单、有进度和验收。','Have this work dispatched to members so it enters the task system with progress and acceptance.'],
+'empty.fix.offbook':['把这些活交给我安排，我才能跟踪进度、验收结果。','Let me assign these so I can track progress and acceptance.'],
 'empty.fix.misplaced':['确认 DSH 当前会话是否在正确的项目目录下打开。','Check that the DSH session is opened in the right project folder.'],
 // ── 日报/周报（方案 D，历史页）──
 'daily.title':['工作日报（最近 7 天）','Daily reports (last 7 days）'],
@@ -1495,7 +1495,12 @@ function renderCards(snap){
   // cardDshSubagents 必须留在主屏：它是「绕过任务单的原生子会话」唯一可见处，
   // 现在每条都带 label（任务标题）/lastText（正在做什么）/steps/lastTool——
   // 去掉它，用户只能看到「有 N 个任务在跑」这一句，看不到它们在干什么。
-  const order=[cardDeliverables,cardDshSubagents,cardEmptyReason,cardDecision,cardProposal,cardBlocked,cardReport];
+  // 主屏按「指挥官最该先看什么」排序，不是按数据源：
+  //   ① 等你拍板（卡住了 / 需要你决定 / 有人提方案）—— 不处理就停摆
+  //   ② 正在做的事（交付进展 / 最近完成）—— 让你知道活没停
+  //   ③ 登记的活（绕过我的那些）—— 需要知道，但不该占据视线焦点
+  // 空状态放最后：只有在真的什么都没有时才出现。
+  const order=[cardBlocked,cardDecision,cardProposal,cardDeliverables,cardReport,cardDshSubagents,cardEmptyReason];
   const cards=order.flatMap(f=>{try{const r=f(snap);return Array.isArray(r)?r:(r?[r]:[])}catch(e){console.warn('card',e);return []}});
   const all=cards.filter(c=>c&&c.title);
   // 生命周期：满 5 分钟的卡片滚出主屏进历史（待拍板卡常驻）
@@ -1637,12 +1642,22 @@ mainView.addEventListener('keydown',e=>{
 function renderMain(snap){
   renderCards(snap);
   const cap=$('#captionText');
-  let capText='目前没有待办。你直接给我下一个目标就行。';
+  // 默认字幕说「事实」而不是口号。JARVIS 从不催人给目标，它报告态势。
+  let capText='团队待命。有新的事随时说。';
   const cards=LIVE.cards||[],decision=cards.find(c=>c.kind==='decision'),blocked=cards.find(c=>c.kind==='blocked'),doing=cards.find(c=>c.kind==='doing'),done=cards.find(c=>c.kind==='done');
   if(decision)capText=`有件事等你拍板：${taskText(decision.title,58)}。点卡片选，或者直接告诉我。`;
   else if(blocked)capText=`有件事卡住了：${taskText(blocked.title,58)}。${reportText(blocked.copy,55)}`;
   else if(doing)capText=`正在做：${taskText(doing.title,58)}。${reportText(doing.copy,55)}`;
   else if(done)capText=`刚做完：${taskText(done.title,58)}。${reportText(done.copy,55)}`;
+  else {
+    // 没有任务单，但有子会话在跑：直接说它们各自在做什么（原始标题，不经术语清洗）。
+    const sub=snap.dshSubagents;
+    const live=((sub&&sub.items)||[]).filter(x=>!x.tracked&&String(x.label||'').trim());
+    if(live.length){
+      const names=live.slice(0,3).map(x=>clip(String(x.label).trim(),24));
+      capText=live.length+' 件活在推进：'+names.join('、')+(live.length>3?(' 等 '+live.length+' 件'):'')+'。需要我盯哪一件？';
+    }
+  }
   capText=capText.replace(/。{2,}/g,'。').trim();
   // 需求收集/确认/待答问题期间不覆盖字幕（那些字幕由 say() 逐句播放，不能被状态轮询冲掉）
   // 状态驱动字幕：只在内容真正变化时重播一次（5 秒一轮询，不能每轮都打断逐句播放）
@@ -1652,7 +1667,29 @@ function renderMain(snap){
   }
   mainSpeech=sanitizeSpeech(capText);
   const ok=$('.clockbox .ok'),bind=$('#bindInfo');
-  if(bind){const sid=(window.__activeSessionId||'').replace('session-','').slice(0,8);bind.textContent=`会话 ${sid||'?'} · 工作区 ${(snap.workspace&&snap.workspace.cwd)||'?'}`}
+  // 顶部只回答「我现在看着哪个团队」，不显示会话 id 与文件路径——
+  // 那两样是工程调试信息，指挥官视角里不该出现（参考 JARVIS：只有任务与状态）。
+  if(bind){
+    const teamName=(snap.workspace&&snap.workspace.name)||'当前工作区';
+    const teams=((snap.tasks&&snap.tasks.teams)||[]).map(x=>String(x&&x.name||'')).filter(Boolean);
+    bind.textContent=teams.length?`团队 · ${teams.slice(0,2).join(' / ')}${teams.length>2?` 等 ${teams.length} 组`:''}`:`团队 · ${teamName}`;
+  }
+  // 中央核心状态：让那个球承载信息，而不是纯粹呼吸。
+  // JARVIS 的核心永远能一眼看出「他在不在、在忙什么」，这里照此实现：
+  //   空闲 → 「待命」（暗、字距宽）；有事在跑 → 「在忙 N 件」（亮绿、贴近核心）。
+  const core=document.getElementById('coreStatus');
+  if(core){
+    const tk=snap.tickets||{};
+    const running=((tk.open||[]).length)+((snap.dshSubagents&&snap.dshSubagents.untracked)||0);
+    const waiting=((tk.open||[]).filter(x=>x&&(x.reportState==='blocked'||x.state==='blocked')).length);
+    if(running>0){
+      core.className='core-status busy';
+      core.textContent=waiting>0?`在忙 ${running} 件 · ${waiting} 件等你`:`在忙 ${running} 件`;
+    }else{
+      core.className='core-status idle';
+      core.textContent='待命';
+    }
+  }
   if(ok)ok.innerHTML=`<i class="pulse-dot"></i>${LIVE.demo?'已连接 · 演示工作区':'已连接 · '+esc(clip((snap.workspace&&snap.workspace.name)||'当前工作区',20))}`;
 }
 
