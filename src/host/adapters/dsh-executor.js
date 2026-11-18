@@ -202,17 +202,51 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     let status = ''
     try { status = String(agent.status || '') } catch { status = '' }
     if (status === 'ended' || status === 'closed' || status === 'terminated') return null
-    // 正在跑另一单：不复用（避免交错）
-    if (status === 'running' || status === 'working') {
-      try {
-        const engine = getEngine && getEngine()
-        const agentTicket = engine && typeof engine.viewByChild === 'function' ? engine.viewByChild(best.childId) : null
-        if (agentTicket && !agentTicket.ticket.ended) return null
-      } catch { /* 查不到归属就不复用（保守） */ }
-      return null
-    }
-    console.debug(`[luke-jarvis] 复用角色「${wanted}」的子会话 ${best.childId}`)
+    // ⚠️ 角色正忙时**不再拒绝复用**——原实现这里无条件 return null，
+    // 结果是「同一个角色在跑 A，派 B 给它就新开一个会话」，子会话数随任务线性增长。
+    // 用户定调（2026-11-18）：只有「CEO 开除员工 → 猎头重新招募」才允许创建新的成员会话。
+    // 正忙时的正确做法是**排队投递**（deliverPrompt 的 'queue' 档），让它干完 A 再办 B，
+    // 而不是另开一个人。所以这里不再按 running 状态拦截，交由投递通道排队。
+    console.debug(`[luke-jarvis] 复用角色「${wanted}」的子会话 ${best.childId}${status ? `（当前 ${status}，新任务排队）` : ''}`)
     return best.childId
+  }
+
+  /**
+   * 新建成员会话前的**唯一合法凭据检查**。
+   *
+   * 用户定调（2026-11-18）：不要无限创建子任务。新建只允许一种情况——
+   * 该角色已被 CEO 开除（exec-map 里有 retired 记录 / company-state 里 status=terminated），
+   * 且走的是「猎头重新招募」这条路径。除此之外，新任务一律排队进原会话。
+   *
+   * @returns {{allowed:boolean, reason:string, retiredRecord?:object}}
+   */
+  function canCreateNewChild(role) {
+    const wanted = String(role || '').trim()
+    if (!wanted) return { allowed: false, reason: '角色名为空，无法判断是否可新建' }
+    // ① 查 exec-map：这个角色是否被标过 retired（换人）
+    let retired = null
+    for (const [, slot] of Object.entries(execMap)) {
+      for (const [, info] of Object.entries(slot || {})) {
+        if (String(info && info.role || '') !== wanted) continue
+        if (info && info.retired) {
+          const at = String(info.retiredAt || info.startedAt || '')
+          if (!retired || at > String(retired.retiredAt || '')) retired = { ...info, retiredAt: at }
+        }
+      }
+    }
+    if (retired) return { allowed: true, reason: `角色「${wanted}」已被换下（${retired.retireReason || '未写原因'}）`, retiredRecord: retired }
+    // ② 再查 company-state：员工是否 terminated（开除）
+    try {
+      const pathM = nodePath()
+      const fsM = nodeFs()
+      if (!pathM || !fsM) return { allowed: false, reason: '拿不到 fs/path，无法核对开除记录' }
+      const st = JSON.parse(fsM.readFileSync(pathM.join(root, '.jarvis', 'company-state.json'), 'utf8'))
+      const emp = (st && Array.isArray(st.employees) ? st.employees : []).find((e) => String((e && (e.role || e.name)) || '') === wanted)
+      if (emp && String(emp.status || '') === 'terminated') {
+        return { allowed: true, reason: `员工「${wanted}」已离任（${emp.leaveReason || emp.note || '未写原因'}）` }
+      }
+    } catch { /* 没有 company-state 就只看 exec-map */ }
+    return { allowed: false, reason: `角色「${wanted}」没有开除记录——按规则应复用原会话排队，而不是新开` }
   }
 
   async function deliverPrompt(runtime, parent, childId, content) {
@@ -375,9 +409,47 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
         watchChild(ticket.id, assignment.id, reuseId, parent)
         return reuseId
       } catch (e) {
-        // 复用投递失败（如会话刚死）：退回新建，不让任务卡住
+        // 复用投递失败：**不再静默退回新建**。
+        // 用户定调：不要无限创建子任务；只有 CEO 开除 → 猎头重招才能新开。
+        // 投递失败通常是会话刚死/宿主暂时不可用——让它报错，由 captain 决定
+        // 是「等一会重试」还是「正式开除这个角色再重招」，而不是偷偷多开一个人。
         try { appendEvent(root, 'assignment.reuse.failed', { role: assignment.role, childId: reuseId, error: String((e && e.message) || e) }) } catch { /* 审计失败忽略 */ }
+        const gate = canCreateNewChild(assignment.role)
+        if (!gate.allowed) {
+          throw new Error(
+            `派活失败：角色「${assignment.role}」的既有会话投递不进去（${String((e && e.message) || e)}），` +
+            `且没有开除凭据，不能新开会话。按规则只能复用同一角色会话：` +
+            `请等它恢复后重试（jarvis_ticket action=retry），或由 CEO 正式换人后重派。`
+          )
+        }
+        // 有开除凭据：继续往下走新建流程（这是规则允许的唯一例外）
       }
+    }
+
+    // ⛔ 新建成员会话前的最后一道闸（用户定调 2026-11-18）：
+    //    只有「CEO 开除 → 猎头重招」才允许。没有开除记录就到这里，说明
+    //    findReusableChild 没找到可复用会话（比如 exec-map 里压根没这个角色），
+    //    但**首次为该角色开单**是正常流程，不是「无端新开」——
+    //    所以规则是：该角色历史上开过会话但已死/被除名，才要求开除凭据；
+    //    从没开过（首次上岗）允许直接新建。
+    const everHadSession = (() => {
+      for (const [, slot] of Object.entries(execMap)) {
+        for (const [, info] of Object.entries(slot || {})) {
+          if (String(info && info.role || '') === String(assignment.role || '') && String(info && info.childId || '')) return true
+        }
+      }
+      return false
+    })()
+    if (everHadSession) {
+      const gate = canCreateNewChild(assignment.role)
+      if (!gate.allowed) {
+        throw new Error(
+          `拒绝为角色「${assignment.role}」新开会话：它历史上已有成员会话，但没有开除/离任记录（${gate.reason}）。` +
+          `按规则只能复用原会话排队执行。若确实要换人，请先由 CEO 开除该角色（jarvis_company actionType=employee_terminated）、` +
+          `走猎头重招，再派活。`
+        )
+      }
+      try { appendEvent(root, 'assignment.newchild.authorized', { role: assignment.role, reason: gate.reason }) } catch { /* 忽略 */ }
     }
 
     const label = `${labelPrefix}:${ticket.id}:${assignment.role}`
