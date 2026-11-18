@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { toPixOfficeSnapshot } from './office-bridge.js'
 import { Engine, reasonText } from './core/index.js'
 import { JsonTicketRepositories } from './adapters/json-tickets.js'
+import { dshExecutorFor } from './adapters/dsh-executor.js'
 import { collect, listTrash } from './adapters/trash.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from './distill/index.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from './protocol/index.js'
@@ -965,6 +966,49 @@ export function apply(ctx, config) {
                 try { appendEvent(projectDir || '', 'chat', { sessionId: out.sessionId, chars: out.chars, messageId: out.messageId }) } catch {}
               }
               return sendJsonLocal(res, 200, out)
+            },
+          })
+
+        // 0.947) 中途干预：对**正在跑的子会话**说一句话（贾维斯式「等等，换个做法」）
+        //
+        //   与 /api/jarvis/chat 的区别：chat 把话投给主会话（等于让主会话去安排）；
+        //   这里直接插进某个成员的当前这轮——宿主 `deliver(..., 'steer')` 会调
+        //   agent.steer()，它立刻改变方向，而不是排到队尾等做完再听。
+        //
+        //   安全性：
+        //     · 同源校验（与 chat 一致）；
+        //     · 只允许对**本工作区执行器派出**的子会话投递（executor.isChild 双保险，
+        //       executor 内部还会再查 children 集合），防止误投到别人的会话；
+        //     · 长文本截断到 2000 字（这是插话，不是写公文）。
+        apiRoute({
+            kind: 'exact',
+            path: '/api/jarvis/steer',
+            handler: async (req, res) => {
+              if (String(req.method || 'GET').toUpperCase() !== 'POST') {
+                return sendJsonLocal(res, 405, { ok: false, error: '只接受 POST' })
+              }
+              if (!sameOriginOk(req)) return sendJsonLocal(res, 403, { ok: false, error: '跨站消息被拒绝（同源校验失败）' })
+              const body = await readJsonBody(req).catch((e) => ({ __error: String(e.message || e) }))
+              if (body && body.__error) return sendJsonLocal(res, 400, { ok: false, error: body.__error })
+              const childId = String((body && body.childId) || '').trim()
+              const text = String((body && body.text) || '').trim().slice(0, 2000)
+              if (!childId) return sendJsonLocal(res, 200, { ok: false, error: '缺少 childId（要跟哪个会话说话）' })
+              if (!text) return sendJsonLocal(res, 200, { ok: false, error: '要说的话是空的' })
+              let projectDir = ''
+              try { projectDir = requestWorkspace(ctx, req) } catch { projectDir = '' }
+              if (!projectDir) return sendJsonLocal(res, 200, { ok: false, error: '拿不到工作区，无法定位执行器' })
+              try {
+                const executor = dshExecutorFor(projectDir, () => null)
+                const out = await executor.steerChild(childId, text, null)
+                if (out && out.ok) {
+                  try { appendEvent(projectDir, 'steer', { childId, chars: text.length, degraded: !!out.degraded }) } catch {}
+                  return sendJsonLocal(res, 200, { ok: true, delivered: true, degraded: !!out.degraded,
+                    note: out.degraded ? '宿主不支持立即打断，已排到它的下一轮' : '已插入它的当前这轮' })
+                }
+                return sendJsonLocal(res, 200, { ok: false, error: (out && out.error) || '投递失败' })
+              } catch (e) {
+                return sendJsonLocal(res, 200, { ok: false, error: String((e && e.message) || e) })
+              }
             },
           })
 

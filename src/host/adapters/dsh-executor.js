@@ -230,6 +230,33 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     throw new Error('无可用 prompt 投递通道')
   }
 
+  /**
+   * 中途干预：把一句话**插进正在跑的成员会话**，而不排队等它做完。
+   *
+   * 语义差别（宿主原来就有两档，这里各用其位）：
+   *   · followup/queue —— 排到队尾，等当前这轮跑完再处理（派新活用这个）
+   *   · steer        —— 打断当前这轮，立刻改变它的方向（老板说「等等，别打那个」用这个）
+   *
+   * 这正是贾维斯与"任务队列"的分水岭：托尼能随时开口改主意，
+   * 而不是只能等助手把活干完再提意见。
+   *
+   * 投递前校验：必须是本执行器派出的子会话（children 集合），防止误投到别人的会话。
+   */
+  async function steerPrompt(runtime, parent, childId, content) {
+    if (!childId) throw new Error('缺少目标会话')
+    if (!children.has(String(childId))) throw new Error('只能对这次派出去的成员说话')
+    const deliver = runtime[DELIVER_PROMPT]
+    if (typeof deliver === 'function' && parent) {
+      // 第 7 参数是 delivery 档位：'steer' 走 agent.steer()，立即生效
+      return deliver.call(runtime, parent, childId, content, undefined, undefined, 'steer')
+    }
+    // 宿主没有 deliverPrompt 符号时，退化为 followup（排队语义，聊胜于无，但要如实标注）
+    if (typeof runtime.followup === 'function' && parent) {
+      return runtime.followup.call(runtime, parent, childId, content, {})
+    }
+    throw new Error('宿主不支持中途干预（无 deliverPrompt/steer 通道）')
+  }
+
   /** 成员会话续接线索：上下文压缩后成员会忘掉 brief，提醒时重新给最小可抓线索。
    *  （长会话保活第 ④ 层：成员是独立会话，压缩同样致命，而它没有主会话那套续接注入） */
   function memberResumeHint(ticket, assignment, projectDir) {
@@ -403,6 +430,33 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     },
     /** 该会话是否本执行器派出的成员（jarvis_ticket 用它拦成员越权动作）。 */
     isChild(agentId) { return children.has(String(agentId)) },
+    /**
+     * 对正在跑的成员说一句话（中途干预）。
+     * 返回 { ok, delivered, degraded? }；degraded=true 表示宿主不支持 steer，
+     * 已退化为排队投递——调用方应如实告知用户"它要等当前这轮做完"。
+     */
+    async steerChild(childId, text, parentHint) {
+      const body = String(text || '').trim()
+      if (!body) return { ok: false, error: '要说的话是空的' }
+      let runtime = null
+      try { runtime = getRuntimeContext() } catch { runtime = null }
+      if (!runtime) return { ok: false, error: '拿不到宿主运行时' }
+      const ctxAgents = (() => { try { return runtime.get ? runtime.get('agents') : undefined } catch { return undefined } })() || (runtime.agents || undefined)
+      const childAgent = (() => {
+        try { return ctxAgents && typeof ctxAgents.get === 'function' ? ctxAgents.get(String(childId)) : null } catch { return null }
+      })()
+      // parent 用子会话自己的父链：宿主 deliverPrompt 需要 parent 来定位树。
+      const parent = parentHint || (childAgent && childAgent.session && childAgent.session.header && childAgent.session.header.parentSession) || null
+      const hadSteer = typeof runtime[DELIVER_PROMPT] === 'function'
+      try {
+        await steerPrompt(runtime, parent, String(childId), body)
+        try { appendEvent(root, 'assignment.steer', { childId: String(childId), chars: body.length, degraded: !hadSteer }) } catch { /* 审计失败忽略 */ }
+        return { ok: true, delivered: true, degraded: !hadSteer }
+      } catch (e) {
+        try { appendEvent(root, 'assignment.steer.failed', { childId: String(childId), error: String((e && e.message) || e) }) } catch { /* 忽略 */ }
+        return { ok: false, error: String((e && e.message) || e) }
+      }
+    },
     childOf(ticketId, assignmentId) {
       const slot = execMap[ticketId] || {}
       return slot[assignmentId] ? slot[assignmentId].childId : null

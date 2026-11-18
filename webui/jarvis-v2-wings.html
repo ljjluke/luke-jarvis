@@ -299,7 +299,7 @@ const I18N={
 'dsh.sub.detail.title':['流程外子任务（{n} 个）','Off-book subtasks ({n})'],
 'dsh.sub.detail.copy':['它们正在工作区里干活，但没有对应的任务单，因此没有进度、没有验收、无法追溯。要纳入管理，请改用「安排工作」并由负责人接手。','They are working in the workspace but have no ticket — no progress, no acceptance, no trace. Use task dispatch to bring them under management.'],
 'dsh.sub.chip':['没登记','untracked'],
-'dsh.sub.row':['由 {p} 开启 · {a}','spawned by {p} · {a}'],'dsh.sub.steps':['步','steps'],
+'dsh.sub.row':['由 {p} 开启 · {a}','spawned by {p} · {a}'],'dsh.sub.steps':['步','steps'],'steer.prompt':['要对它说什么？（它会立即按你说的调整方向）','Say something to it (it will steer immediately)'],'steer.ok':['已经把你的话插进去了，它会按新方向调整。','Message inserted; it will steer from here.'],'steer.fail':['没能把话送进去：','Could not deliver: '],
 'dsh.sub.empty':['没有被纳入任务单的子任务。','All subtasks are registered.'],
 // ── 交付物卡（方案 B 主屏核心）──
 'deliv.k':['交付','DELIVERY'],'deliv.done':['已交付','Delivered'],'deliv.blocked':['卡住','Blocked'],'deliv.running':['进行中','In progress'],
@@ -1385,7 +1385,7 @@ function cardJarvisBrief(snap){
       chips:[{t:String(x.steps||0)+' 步',c:'mut'}],
       sub:clipRaw(x.lastText,80)})),
     ...running.slice(0,6).map(x=>({main:'· '+clipRaw(x.label,42),
-      chips:[{t:String(x.steps||0)+' 步',c:'mut'},...(x.lastTool?[{t:String(x.lastTool),c:'mut'}]:[])],
+      chips:[{t:String(x.steps||0)+' 步',c:'mut'},...(x.lastTool?[{t:String(x.lastTool),c:'mut'}]:[])],childId:x.id,
       sub:clipRaw(x.lastText,80)})),
   ];
 
@@ -1672,7 +1672,7 @@ function showDetail(c){
   if(d.brief)html+=`<div class="detail-mandate"><b style="color:#7fd4ea">任务要求 · </b>${esc(d.brief)}</div>`;
   if(d.meta&&d.meta.length)html+=`<div class="report-metrics" style="margin-top:0;margin-bottom:18px">${d.meta.map(([k,v])=>`<div class="report-metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
   const rows=[...(d.rows||[]),...(d.extra||[])];
-  if(rows.length)html+=`<div class="detail-rows">${rows.slice(0,20).map(r=>`<div class="detail-row"><div class="detail-row-main">${esc(r.main)}</div>${r.chips&&r.chips.length?`<div class="detail-row-chips">${r.chips.map(ch=>`<span class="chip ${ch.c||''}">${esc(ch.t)}</span>`).join('')}</div>`:''}${r.sub?`<div class="detail-row-sub">${esc(r.sub)}</div>`:''}</div>`).join('')}</div>`;
+  if(rows.length)html+=`<div class="detail-rows">${rows.slice(0,20).map(r=>`<div class="detail-row"><div class="detail-row-main">${esc(r.main)}</div>${r.chips&&r.chips.length?`<div class="detail-row-chips">${r.chips.map(ch=>`<span class="chip ${ch.c||''}">${esc(ch.t)}</span>`).join('')}</div>`:''}${r.sub?`<div class="detail-row-sub">${esc(r.sub)}</div>`:''}${r.childId?`<div class="detail-row-chips" style="margin-top:8px"><button type="button" class="card-act" data-steer="${esc(r.childId)}">对它说一句</button></div>`:''}</div>`).join('')}</div>`;
   else html+=`<div class="detail-rows"><div class="board-meta" style="padding:12px">${esc(d.empty||t('empty.generic'))}</div></div>`;
   body.innerHTML=html||`<p class="detail-copy">${esc(t('empty.more'))}</p>`;
   activateView(detailView,'#detail');
@@ -2108,6 +2108,28 @@ window.__JARVIS_UI__={live:LIVE,reload:loadState,showPage:showPageIframe};
 document.getElementById('detailBody').addEventListener('click',e=>{
   const arch=e.target.closest&&e.target.closest('[data-trash]');
   if(arch){showPageIframe(arch.dataset.trash,arch.dataset.ptitle,arch.dataset.trash);return}
+  // 中途干预：对某个正在跑的成员说一句话（贾维斯式「等等，换个做法」）。
+  // 用 prompt 收集一句话就够了——这是插话，不是写公文。宿主侧走 steer 通道立即生效。
+  const steerBtn=e.target.closest&&e.target.closest('[data-steer]');
+  if(steerBtn){
+    const childId=String(steerBtn.dataset.steer||'').trim();
+    const text=window.prompt(t('steer.prompt')||'要对它说什么？（它会立即按你说的调整方向）','');
+    if(!childId||!text||!String(text).trim())return;
+    steerBtn.disabled=true;
+    fetch(apiUrl('/api/jarvis/steer'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({childId,text:String(text).trim(),workspace:LIVE.positionWorkspace||''})})
+      .then(r=>r.json())
+      .then(out=>{
+        const cap=document.getElementById('captionText');
+        if(out&&out.ok){
+          if(cap)cap.textContent=out.degraded?'已排到它的下一轮（宿主不支持立即打断）。':t('steer.ok')||'已经把你的话插进去了，它会按新方向调整。';
+        }else{
+          if(cap)cap.textContent=(t('steer.fail')||'没能把话送进去：')+clip(String((out&&out.error)||''),60);
+        }
+      })
+      .catch(()=>{const cap=document.getElementById('captionText');if(cap)cap.textContent=t('steer.fail')||'没能把话送进去。'})
+      .finally(()=>{steerBtn.disabled=false});
+    return
+  }
   const row=e.target.closest&&e.target.closest('[data-page]');
   if(row)showPageIframe(row.dataset.page,row.dataset.ptitle);
 });
