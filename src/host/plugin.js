@@ -429,10 +429,18 @@ function cwdOfSession(ctx, sessionId) {
     const list = agents && typeof agents.list === 'function' ? agents.list() : []
     const wanted = String(sessionId || '')
     if (!wanted) return ''
+    // 会话 id 在宿主里是 `session-<uuid>` 形式，而前端（以及地址栏 ?session=）
+    // 有时传的是裸 uuid（去掉前缀）。两种都认，否则匹配不上 → 静默回退到「谁有活」。
+    const bare = wanted.replace(/^session-/, '')
+    const withPrefix = /^session-/.test(wanted) ? wanted : ('session-' + wanted)
+    const matchId = (id) => {
+      const s = String(id || '')
+      return s === wanted || s === bare || s === withPrefix
+    }
     for (const a of Array.isArray(list) ? list : []) {
       try {
         const s = a && a.session
-        if (String((s && s.id) || '') !== wanted) continue
+        if (!matchId(s && s.id)) continue
         const c1 = s && s.header && s.header.cwd
         const c2 = s && s.cwd
         const c3 = a && a.cwd
@@ -1255,8 +1263,21 @@ export function apply(ctx, config) {
             path: '/jarvis-ui',
             handler: async (req, res) => {
               try {
-                const wantLegacy = PLUGIN_CONFIG.ui === 'legacy' ? !/[?&]ui=wings/.test(String((req && req.url) || '')) : /[?&]ui=legacy/.test(String((req && req.url) || ''))
-                const dest = wantLegacy ? '/jarvis-office/v2/index.html' : '/jarvis-wings'
+                const url = String((req && req.url) || '')
+                const wantLegacy = PLUGIN_CONFIG.ui === 'legacy' ? !/[?&]ui=wings/.test(url) : /[?&]ui=legacy/.test(url)
+                // 转发上下文参数：入口常带 ?session=<id>（来自会话头部的贾维斯按钮），
+                // 少了它，302 之后的页面不知道「你从哪个会话进来」，
+                // 后端只能自己挑「谁有活」→ 显示别的项目的数据（用户实测反馈过）。
+                const passthrough = []
+                try {
+                  const q = new URL(url, 'http://x').searchParams
+                  for (const k of ['session', 'workspace', 'embedded']) {
+                    const v = q.get(k)
+                    if (v) passthrough.push(k + '=' + encodeURIComponent(v))
+                  }
+                } catch { /* 解析失败就不带参数 */ }
+                const destBase = wantLegacy ? '/jarvis-office/v2/index.html' : '/jarvis-wings'
+                const dest = destBase + (passthrough.length ? '?' + passthrough.join('&') : '')
                 res.writeHead(302, { location: dest, 'cache-control': 'no-store' })
                 res.end(`→ ${dest}`)
               } catch {}
