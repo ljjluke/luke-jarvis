@@ -2021,7 +2021,13 @@ async function loadGreeting(){
 }
 async function loadState(){
   try{
-    const r=await fetch(apiUrl('/api/jarvis/state'),{cache:'no-store'});
+    // 必须带上「我在看哪个会话」——否则后端 firstSessionCwd 会自己挑「谁有活」，
+    // 你可能在看 A 会话却拿到 B 项目的数据（用户 2026-11-18 实测反馈）。
+    // apiUrl() 已自动带 workspace=wsOverride；这里只补 session（地址栏没带时用已绑定的）。
+    const sid=(()=>{try{const s=new URLSearchParams(location.search).get('session');if(s)return s}catch(e){}return window.__activeSessionId||''})();
+    const base=apiUrl('/api/jarvis/state');
+    const url=base+(sid?(base.includes('?')?'&':'?')+'session='+encodeURIComponent(sid):'');
+    const r=await fetch(url,{cache:'no-store'});
     const body=await r.json();
     if(!body.ok||!body.snapshot)return;
     LIVE.snap=body.snapshot;LIVE.connected=true;LIVE.demo=body.demo===true;

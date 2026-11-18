@@ -391,12 +391,57 @@ function requestWorkspace(ctx, req) {
       if (safe) return safe
     }
   } catch { /* 非法 query：忽略 */ }
-  // HTTP 路由的工作区：只信本服务的 live 会话（或显式 ?workspace=）。
+
+  // ── 会话优先：前端带上 ?session= 时，就用**那个会话**的工作区 ──
+  // 用户实测（2026-11-18）：打开增强 UI 看到的信息不是当前会话的内容。
+  // 根因就是下面 firstSessionCwd 会遍历所有会话、按「谁有活」排序取第一个——
+  // 你正在看 A 会话，它可能给你 B 项目的数据。
+  // 有显式 session 时以它为准；该会话的 cwd 不存在/不合法时才回退。
+  try {
+    const sid = String((req && req.url) || '').match(/[?&]session=([^&]+)/)
+    if (sid && sid[1]) {
+      const wanted = decodeURIComponent(sid[1])
+      const cwd = cwdOfSession(ctx, wanted)
+      if (cwd) {
+        // 会话 cwd 直接可信（它就是该会话正在跑的项目）；仍做一次安全校验，
+        // 但不像 ?workspace= 那样要求必须有 .jarvis——会话可能还没建队。
+        const safe = safeWorkspaceArg(cwd)
+        if (safe) return safe
+        // 没 .jarvis 也允许：至少让页面显示「这个会话在哪个工作区、还没开工」
+        return cwd
+      }
+    }
+  } catch { /* 忽略 */ }
+
+  // HTTP 路由的工作区：只信本服务的 live 会话（或显式 ?workspace=/?session=）。
   // 不吃"最近一次工具 exec"：那是别的会话/别的时间点的事实，会把读接口带到别的项目。
   const live = firstSessionCwd(ctx)
   if (live) return live
   // 不吃 apply 期缓存：它是 process.cwd()（systemd 下 '/'、测试里是插件仓库），拿它拼出的 .jarvis 必错。
   // 宁可明确说「没解析到工作区」，也不给一个看起来能用、实际读到空/别处的路径。
+  return ''
+}
+
+/** 按会话 id 找它当前的工作目录（header.cwd ∪ session.cwd ∪ agent.cwd，取第一个非空）。 */
+function cwdOfSession(ctx, sessionId) {
+  try {
+    const agents = ctx && typeof ctx.get === 'function' ? ctx.get('agents') : undefined
+    const list = agents && typeof agents.list === 'function' ? agents.list() : []
+    const wanted = String(sessionId || '')
+    if (!wanted) return ''
+    for (const a of Array.isArray(list) ? list : []) {
+      try {
+        const s = a && a.session
+        if (String((s && s.id) || '') !== wanted) continue
+        const c1 = s && s.header && s.header.cwd
+        const c2 = s && s.cwd
+        const c3 = a && a.cwd
+        for (const c of [c1, c2, c3]) {
+          if (typeof c === 'string' && c.length > 0) return c
+        }
+      } catch { /* 单个异常跳过 */ }
+    }
+  } catch { /* 无 agents 服务 */ }
   return ''
 }
 
