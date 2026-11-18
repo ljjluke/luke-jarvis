@@ -1346,6 +1346,60 @@ function cardDshSubagents(snap){
       }),
       empty:t('dsh.sub.empty')}}
 }
+/**
+ * 贾维斯汇报卡：主屏第一张。
+ *
+ * 为什么这是第一张：贾维斯的工作方式是「你说想法 → 他去做 → 他回报结果」。
+ * 他从不让托尼看仪表盘，也从不报「有几个未纳管进程」。
+ * 主屏首先应该是一句**他做完并汇报的话**，而不是一堆需要解读的数字。
+ *
+ * 数据来源：优先用真实任务单；若工作区没有走任务单的活，
+ * 就从子会话转录里归纳——完成了几件、还在办几件、几件等你。
+ * 这些子会话是「绕过我直接开的」，但工作成果是真的，照样可以汇报。
+ */
+function cardJarvisBrief(snap){
+  const sub=snap.dshSubagents;
+  const items=((sub&&sub.items)||[]);
+  const doneRe=/完成|已交付|通过|finished|all done|done with/i;
+  const finished=items.filter(x=>doneRe.test(String(x.lastText||'')));
+  const running=items.filter(x=>!doneRe.test(String(x.lastText||'')));
+  const tk=snap.tickets||{};
+  const tkDone=(tk.done||[]).length, tkOpen=(tk.open||[]).length;
+  const blocked=(tk.open||[]).filter(x=>x&&(x.state==='blocked'||x.reportState==='blocked')).length;
+  const totalDone=finished.length+tkDone;
+  const totalBusy=running.length+tkOpen;
+  if(!totalDone&&!totalBusy)return null;
+
+  const clipRaw=(v,n)=>{const x=String(v||'').replace(/\s+/g,' ').trim();return x.length>n?x.slice(0,n)+'…':x};
+  const names=a=>a.slice(0,3).map(x=>clipRaw(x.label,26)).filter(Boolean).join('、')+(a.length>3?` 等 ${a.length} 件`:'');
+
+  // 汇报正文：先说做完的，再说在办的，最后说等你的。
+  const parts=[];
+  if(totalDone)parts.push(`做完 ${totalDone} 件${finished.length?`（${names(finished)}）`:''}`);
+  if(totalBusy)parts.push(`在办 ${totalBusy} 件${running.length?`（${names(running)}）`:''}`);
+  if(blocked)parts.push(`${blocked} 件卡住等你`);
+  const say=parts.join('，')+'。';
+
+  const rows=[
+    ...finished.slice(0,6).map(x=>({main:'✓ '+clipRaw(x.label,42),
+      chips:[{t:String(x.steps||0)+' 步',c:'mut'}],
+      sub:clipRaw(x.lastText,80)})),
+    ...running.slice(0,6).map(x=>({main:'· '+clipRaw(x.label,42),
+      chips:[{t:String(x.steps||0)+' 步',c:'mut'},...(x.lastTool?[{t:String(x.lastTool),c:'mut'}]:[])],
+      sub:clipRaw(x.lastText,80)})),
+  ];
+
+  return {id:'jarvis-brief',kind:'report',k:'汇报',st:'刚刚',rawText:true,
+    title:say,
+    copy:'',
+    data:String(totalDone),dataLabel:'件已做完',
+    detail:{kicker:'贾维斯汇报',title:say,rawText:true,
+      copy:'',
+      meta:[['做完',String(totalDone)],['在办',String(totalBusy)],['等你',String(blocked)]],
+      rows,
+      empty:''}}
+}
+
 /* 进行中的页面：每个页面一张卡，数量随任务动态变化 */
 function cardPageCards(){
   if(!LIVE.pages.length)return [];
@@ -1500,7 +1554,7 @@ function renderCards(snap){
   //   ② 正在做的事（交付进展 / 最近完成）—— 让你知道活没停
   //   ③ 登记的活（绕过我的那些）—— 需要知道，但不该占据视线焦点
   // 空状态放最后：只有在真的什么都没有时才出现。
-  const order=[cardBlocked,cardDecision,cardProposal,cardDeliverables,cardReport,cardDshSubagents,cardEmptyReason];
+  const order=[cardJarvisBrief,cardBlocked,cardDecision,cardProposal,cardDeliverables,cardReport,cardEmptyReason];
   const cards=order.flatMap(f=>{try{const r=f(snap);return Array.isArray(r)?r:(r?[r]:[])}catch(e){console.warn('card',e);return []}});
   const all=cards.filter(c=>c&&c.title);
   // 生命周期：满 5 分钟的卡片滚出主屏进历史（待拍板卡常驻）
@@ -1650,13 +1704,10 @@ function renderMain(snap){
   else if(doing)capText=`正在做：${taskText(doing.title,58)}。${reportText(doing.copy,55)}`;
   else if(done)capText=`刚做完：${taskText(done.title,58)}。${reportText(done.copy,55)}`;
   else {
-    // 没有任务单，但有子会话在跑：直接说它们各自在做什么（原始标题，不经术语清洗）。
-    const sub=snap.dshSubagents;
-    const live=((sub&&sub.items)||[]).filter(x=>!x.tracked&&String(x.label||'').trim());
-    if(live.length){
-      const names=live.slice(0,3).map(x=>clip(String(x.label).trim(),24));
-      capText=live.length+' 件活在推进：'+names.join('、')+(live.length>3?(' 等 '+live.length+' 件'):'')+'。需要我盯哪一件？';
-    }
+    // 没有任务单在跑：用汇报卡那句话当字幕，保证「画面与口播一致」。
+    // 贾维斯的字幕就是他嘴里说的那句汇报，不该是另一套措辞。
+    const brief=cards.find(c=>c&&c.id==='jarvis-brief');
+    if(brief&&brief.title)capText=String(brief.title);
   }
   capText=capText.replace(/。{2,}/g,'。').trim();
   // 需求收集/确认/待答问题期间不覆盖字幕（那些字幕由 say() 逐句播放，不能被状态轮询冲掉）

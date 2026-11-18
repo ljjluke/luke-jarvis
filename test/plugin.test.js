@@ -3730,8 +3730,8 @@ test('T9e Wings UI 面向老板：无技术术语、无写死的演示业务、�
   assert.ok(!/decision-actions'\)[^;]*innerHTML/.test(html) && !/acts\.innerHTML/.test(html), '决策按钮区不得被 innerHTML 重建（会丢点击监听）')
   // ⑦ 任务点卡片：一个任务点一张卡，不设 4 张人为上限
   assert.ok(/function cardTaskPoints/.test(html), '应有「每个任务点一张卡」的生成器')
-  // 主屏首卡改为「卡住/拍板」优先（指挥官先看阻塞），交付物卡仍须在主屏上。
-  assert.ok(/const order=\[cardBlocked|const order=\[cardDecision|const order=\[cardDeliverables/.test(html), '主屏首卡必须是需你处理的或交付进展')
+  // 主屏首卡是「贾维斯汇报」——先报结果，再报待办。交付物卡仍须在主屏上。
+  assert.ok(/const order=\[cardJarvisBrief|const order=\[cardBlocked|const order=\[cardDeliverables/.test(html), '主屏首卡必须是汇报/需你处理/交付进展')
   assert.ok(/cardDeliverables/.test(html.match(/const order=\[[^\]]+\]/)?.[0] || ''), '交付物卡必须仍在主屏')
   // B 方案后主屏只渲染交付物/空白/决策类——不再有「任务点全都要显示」的问题，
   // 但交付物卡本身有 4 张上限（老板不需要一屏几十个需求），这是有意为之。

@@ -89,10 +89,9 @@ test('前端：有未纳管子会话时必须展示提示卡，而不是显示�
   assert.ok(/function cardDshSubagents/.test(html), '应有 DSH 子会话提示卡')
   assert.ok(/const d=snap\.dshSubagents;/.test(html), '卡片必须读快照的 dshSubagents')
   assert.ok(/if\(!d\|\|!Number\(d\.untracked\|\|0\)\)return null;/.test(html), '没有未纳管的就不显示（不占位）')
-  assert.ok(/cardDshSubagents,/.test(html), '必须接入渲染顺序')
+  // 主屏改为「贾维斯汇报」优先：子会话卡不再单独占主屏（汇报道出在办几件、什么名字），
+  // 但「有子会话在跑」这件事必须能被看到——由 cardJarvisBrief 承担。
+  assert.ok(/cardJarvisBrief/.test(html), '必须有汇报卡把这些活说出来（取代子会话台账卡上主屏）')
   assert.ok(/dsh\.sub\.title/.test(html), '文案走 i18n')
-  // 必须说清「这些活没经我登记」这个事实，而不只是显示数字。
-  // 文案已从内部术语（「没走任务单」「未纳管」）改为指挥官口径（「没登记到我这儿」）——
-  // 断言检查的是「有没有说明这个事实」，不是某个具体措辞。
   assert.ok(/没走任务单|未纳管|没登记/.test(html), '文案要说明「这些活没经我登记」')
 })

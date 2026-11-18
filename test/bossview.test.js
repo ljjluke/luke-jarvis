@@ -149,12 +149,13 @@ test('B：主屏只渲染交付物/空白/决策/提案/阻塞/汇报，技术�
   const orderMatch = html.match(/const order=\[([^\]]+)\]/)
   assert.ok(orderMatch, '要有渲染顺序')
   const names = orderMatch[1].split(',').map((s) => s.trim())
-  // 主屏第一张从「交付物卡」改为「卡住/拍板」——指挥官先看阻塞项再看进展。
-  // 交付物卡仍必须在位（不能因为重排就丢掉它）。
+  // 主屏首卡是「贾维斯汇报」——他的工作方式是汇报结果，不是摆台账。
+  // 其后依次是需你处理的（卡住/拍板）、进展、其他。
   assert.ok(
-    names[0] === 'cardBlocked' || names[0] === 'cardDecision' || names[0] === 'cardDeliverables',
-    '主屏首卡必须是需你处理的（卡住/拍板）或交付进展'
+    names[0] === 'cardJarvisBrief' || names[0] === 'cardBlocked' || names[0] === 'cardDeliverables',
+    '主屏首卡必须是汇报、需你处理的、或交付进展三者之一'
   )
+  assert.ok(names.includes('cardJarvisBrief'), '贾维斯汇报卡必须接入主屏')
   assert.ok(names.includes('cardDeliverables'), '交付物卡必须仍在主屏')
   assert.ok(names.includes('cardEmptyReason'), '空白解释卡必须在位')
   for (const gone of ['cardTaskPoints', 'cardPageCards', 'cardTeam', 'cardGC', 'cardQueue']) {
