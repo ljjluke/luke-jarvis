@@ -417,9 +417,91 @@ function requestWorkspace(ctx, req) {
   // 不吃"最近一次工具 exec"：那是别的会话/别的时间点的事实，会把读接口带到别的项目。
   const live = firstSessionCwd(ctx)
   if (live) return live
+  // 磁盘兜底（用户实测 2026-11-19）：web 服务重启后 agents.list() 为空，
+  // 前端拿不到 workspace → 页面只剩空卡片，看起来像「详情页是空的」。
+  // 这里退一步信磁盘：取最近有活动的 DSH 会话工作区（只读会话头，不读全文）。
+  const disk = lastActiveSessionCwd()
+  if (disk) return disk
   // 不吃 apply 期缓存：它是 process.cwd()（systemd 下 '/'、测试里是插件仓库），拿它拼出的 .jarvis 必错。
   // 宁可明确说「没解析到工作区」，也不给一个看起来能用、实际读到空/别处的路径。
   return ''
+}
+
+/** 磁盘兜底：DSH 会话目录按 cwd 编码命名（--opt-work-luke-jarvis--）。
+ *  没有 live 会话时，用「最近写入的转录」推断工作区——这是重启后唯一可信的线索。
+ *  只 stat 会话文件，不解压全文；15 秒缓存（重启后大概率是同一个答案）。
+ *
+ *  ⚠️ 新鲜度门槛（为什么要有）：避免把几个月前废弃的目录当成「当前工作区」。
+ *    放宽到 7 天——用户重启服务后，即使今天还没开新会话也该看到手头的活；
+ *    测试隔离另由「只认宿主进程」判据保证，不靠这道门槛。 */
+const _diskWsCache = { at: 0, cwd: '' }
+const DISK_WS_RECENT_MS = 7 * 24 * 60 * 60 * 1000   // 7 天内有活动才算「当前」
+function lastActiveSessionCwd() {
+  const now = Date.now()
+  if (_diskWsCache.at && now - _diskWsCache.at < 15000) return _diskWsCache.cwd
+  let out = ''
+  try {
+    const fsMod = _require('node:fs')
+    const pathMod = _require('node:path')
+    const osMod = _require('node:os')
+    // 只在「真宿主进程」里做磁盘兜底：宿主的 argv[1] basename 恰好是 `dsh`
+    // （`node .../bin/dsh web ...`）。测试进程 argv[1] 是被测文件（plugin.test.js），
+    // 两者不会混淆——测试断言的是路由语义，不该被本机真实会话目录干扰。
+    const argv1 = String((process.argv && process.argv[1]) || '')
+    const base = argv1.replace(/\\/g, '/').split('/').pop() || ''
+    const inHost = base === 'dsh'
+    if (!inHost) { _diskWsCache.at = now; _diskWsCache.cwd = ''; return '' }
+    // 允许显式关闭（特殊部署）：JARVIS_DISK_WS=0
+    if (String(process.env.JARVIS_DISK_WS || '') === '0') { _diskWsCache.at = now; _diskWsCache.cwd = ''; return '' }
+    const sroot = pathMod.join(String(process.env.HOME || osMod.homedir() || '/root'), '.dsh', 'sessions')
+    if (!fsMod.existsSync(sroot)) return ''
+    // 收集所有会话转录的 mtime，按新到旧；跳过测试/临时目录。
+    const cands = []
+    for (const d of fsMod.readdirSync(sroot)) {
+      if (!d.startsWith('--') || !d.endsWith('--')) continue
+      const enc = d.slice(2, -2)                       // opt-work-luke-jarvis → 只是编码，不是路径
+      // 反解不可靠（路径本身含横线）。真实路径从会话头 cwd 读——那才是权威值。
+      let best = 0
+      try {
+        for (const n of fsMod.readdirSync(pathMod.join(sroot, d))) {
+          try { best = Math.max(best, fsMod.statSync(pathMod.join(sroot, d, n, 'session.v4.jsonl.zstd')).mtimeMs) } catch { /* 无转录 */ }
+        }
+      } catch { /* 目录读不了 */ }
+      if (best && now - best <= DISK_WS_RECENT_MS) cands.push({ enc, best })
+    }
+    if (!cands.length) { _diskWsCache.at = now; _diskWsCache.cwd = ''; return '' }
+    cands.sort((a, b) => b.best - a.best)
+    // 取最近 5 个候选，读会话头拿真实 cwd（zstdcat 首行即可，成本 ~1ms）
+    const cp = _require('node:child_process')
+    for (const c of cands.slice(0, 5)) {
+      let first = ''
+      try {
+        const all = fsMod.readdirSync(pathMod.join(sroot, '--' + c.enc + '--'))
+        // 主会话优先（它的 cwd 才是老板看的地方）；但只剩子会话时也得用——
+        // 老项目常常主会话删了、子会话转录还在（实测 jarvis 审计工作区就是这样）。
+        const mains = all.filter((n) => /^session-/.test(n))
+        const rest = all.filter((n) => !/^session-/.test(n))
+        const names = mains.length ? mains : rest
+        if (!names.length) continue
+        const f = pathMod.join(sroot, '--' + c.enc + '--', names[0], 'session.v4.jsonl.zstd')
+        if (!fsMod.existsSync(f)) continue
+        first = cp.execSync(`zstdcat "${f}" | head -n 1`, { encoding: 'utf8', timeout: 3000, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] })
+      } catch { continue }
+      try {
+        const head = JSON.parse(first.trim())
+        const cwd = String(head && head.cwd || '')
+        // 只认「存在、且含 .jarvis 或 .agent-teams」的目录——和 safeWorkspaceArg 同一把尺子
+        if (cwd && fsMod.existsSync(cwd) && fsMod.statSync(cwd).isDirectory()
+            && (fsMod.existsSync(pathMod.join(cwd, '.jarvis')) || fsMod.existsSync(pathMod.join(cwd, '.agent-teams')))) {
+          out = cwd
+          break
+        }
+      } catch { /* 头坏了看下一个 */ }
+    }
+  } catch { /* 磁盘兜底失败→返回空 */ }
+  _diskWsCache.at = now
+  _diskWsCache.cwd = out
+  return out
 }
 
 /** 按会话 id 找它当前的工作目录（header.cwd ∪ session.cwd ∪ agent.cwd，取第一个非空）。 */

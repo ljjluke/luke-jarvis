@@ -115,6 +115,98 @@ function listTeams(projectDir, fs, path) {
 /** 转录解析缓存：(文件路径|mtime|size) → digest。append-only 转录按此键失效即可。 */
 const _DIGEST_CACHE = new Map()
 
+/** 把一条 bash 命令压成人能读的一句话。
+ *  子 agent 的「做了什么」主要藏在命令里：`ls`/`grep` 是查、`python3 -c` 是算、
+ *  带重定向或 heredoc 的是写。老板不该看命令原文，该看「它在查什么/写什么」。
+ *  ⚠️ 只认「像文件路径」的目标（带扩展名或目录分隔符）——
+ *     否则会把 `2>&1`、`/dev/null`、`$1` 这类 shell 语法当成文件名。 */
+function describeCmd(cmd) {
+  const raw = String(cmd || '').replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!raw) return ''
+  const looksLikeFile = (p) => /[A-Za-z0-9_.-]+\.(md|json|mjs|sh|ts|js|txt|log|csv|ya?ml|html|py)$/.test(String(p || ''))
+  // 拆成指令段：`a; b && c | d` → [a, b, c, d]。每段只看「第一个词」，
+  // 避免 A 段的参数被 B 段的正则误当成动作（之前 `cat 证据/host-*.json` 被当成 `ls` 就是这种误判）。
+  const segs = raw.split(/[;]|&&|\|\||\|/).map((x) => x.trim()).filter(Boolean)
+  // 段内再剥掉 `cd X &&` 这类前缀：真正动作在 cd 之后
+  const pick = (seg) => {
+    const s = seg.trim()
+    if (/^cd\s+/.test(s)) return null                     // 切目录不算「做了什么」
+    const m = s.match(/^(\w+)\s*([^\s]*)/)
+    if (!m) return null
+    const verb = m[1]
+    const rest = s.slice(verb.length).trim()
+    // 剥掉选项（-x / --long）
+    const args = rest.split(/\s+/).filter((a) => a && !/^-/.test(a))
+    const firstArg = (args[0] || '').replace(/["']/g, '')
+    // 写文件
+    const wm = s.match(/(?:>>?|tee\s+)\s*["']?([^\s"'|;&]+)/)
+    if (wm && looksLikeFile(wm[1])) return '写入 ' + (wm[1].split('/').pop() || '')
+    if (/^(cat|zstdcat|head|tail|less|more)$/.test(verb)) {
+      if (looksLikeFile(firstArg)) return '翻阅 ' + (firstArg.split('/').pop() || '')
+      return null
+    }
+    // sed/awk 在这里基本只做「按行取一段看看」——语义上是翻阅，不是计算。
+    if (/^(sed|awk)$/.test(verb)) {
+      const file = args.find((a) => looksLikeFile(a))
+      return file ? '翻阅 ' + (String(file).split('/').pop() || '') : null
+    }
+    if (/^(ls|find|tree|du)$/.test(verb)) {
+      if (!firstArg || /^[-&$]/.test(firstArg)) return null
+      // 多个路径时取第一个（`ls a/ b/`）；通配符/文件名不算
+      const dirs = args.filter((a) => {
+        const t = a.replace(/["']/g, '')
+        return !/[*?]/.test(t) && !looksLikeFile(t)
+          && !/^(null|undefined|\/dev\/null|NUL|CON)$/.test(t)
+          && !/[&$<>|()]/.test(t) && !/^\d+$/.test(t)       // 排除 2>&1 / $1 / 重定向残留
+      })
+      const d = (dirs[0] || '').replace(/["']/g, '')
+      const seg = d.split('/').filter(Boolean).pop()
+      return seg && /[A-Za-z0-9_\-一-鿿]/.test(seg) ? '清点 ' + seg : null
+    }
+    if (/^(grep|rg|ag|egrep)$/.test(verb)) {
+      const pat = firstArg.replace(/[|]"'/g, '')
+      if (!pat || /[\^\\\[\]{}()*+?$|]/.test(pat)) return null
+      return '检索 ' + pat.slice(0, 20)
+    }
+    if (/^(python3?|perl|jq)$/.test(verb)) return '计算/核对数据'
+    if (/^(git|svn)$/.test(verb)) return '查版本库'
+    if (/^(npm|pnpm|yarn|npx)$/.test(verb)) return /\btest\b/.test(rest) ? '跑测试' : '跑命令'
+    // node 要分「跑测试脚本」和「用 node 算东西」——`node --test` 是测试，`node -e` 是计算。
+    if (/^(node|bash|sh|zsh)$/.test(verb)) {
+      if (/\btest\b/.test(rest)) return '跑测试'
+      if (looksLikeFile(firstArg)) return '执行 ' + (firstArg.split('/').pop() || '')
+      return '计算/核对数据'
+    }
+    if (/^(mkdir|touch|cp|mv|rm)$/.test(verb)) {
+      const tag = verb === 'rm' ? '清理' : verb === 'cp' || verb === 'mv' ? '整理' : '新建'
+      const t = args.filter((a) => !looksLikeFile(a))[0] || firstArg
+      return t ? tag + ' ' + (String(t).split('/').filter(Boolean).pop() || '') : tag
+    }
+    return null
+  }
+  const out = []
+  for (const seg of segs) {
+    const r = pick(seg)
+    if (r && !out.includes(r)) out.push(r)
+    if (out.length >= 2) break                             // 一句话里最多说两件事
+  }
+  return out.join('，')
+}
+
+/** write/edit/read 等工具的参数 → 一句话（只取文件名，路径太长没意义）。 */
+function describeArg(name, data) {
+  try {
+    const a = JSON.parse(String((data || {}).arguments || '{}'))
+    const p = String(a.file_path || a.path || a.filePath || '')
+    const base = p.split(/[/\\]/).pop() || ''
+    if (!base) return ''
+    if (/write|create|save|edit|patch|replace/i.test(name)) return '改 ' + base
+    if (/read|view|cat/i.test(name)) return '读 ' + base
+    if (/search|grep|find|glob/i.test(name)) return '查 ' + (String(a.pattern || a.query || '').slice(0, 30) || base)
+    return base
+  } catch { return '' }
+}
+
 /**
  * 从一段解压后的会话转录（JSONL 文本）里提取「它在做什么」。
  *
@@ -130,7 +222,7 @@ const _DIGEST_CACHE = new Map()
  * 一条坏数据不该让整个面板空白。
  */
 function sessionDigest(text) {
-  const out = { meta: null, label: '', model: '', lastText: '', lastTool: '', steps: 0, lastAt: 0 }
+  const out = { meta: null, label: '', model: '', lastText: '', lastTool: '', steps: 0, lastAt: 0, outputs: [], toolCounts: {}, firstText: '', brief: '', texts: [], dirs: [], reads: [], trail: [] }
   const lines = String(text || '').split('\n')
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i]
@@ -142,6 +234,25 @@ function sessionDigest(text) {
     const at = Number(e.time || 0)
     if (at > out.lastAt) out.lastAt = at
     if (type === 'session' && !out.meta) { out.meta = e; continue }
+    // 派活原文：真正的任务书在 agent/inbox/spliced 的 next-turn 里。
+    // 这是「这个角色被交代了什么」最准确的证据——比开场白可靠，
+    // 老板看详情时先看需求、再看产出，才判断得出做没做对。
+    if (type === 'agent/inbox/spliced' && !out.brief) {
+      const d = e.data || {}
+      if (String(d.target || '') === 'next-turn') {
+        const ins = Array.isArray(d.inserted) ? d.inserted : []
+        const body = ins.map((m) => (Array.isArray(m && m.content) ? m.content : [])
+          .map((c) => String((c && c.text) || '')).join(' ')).join('\n').trim()
+        if (body) out.brief = body.slice(0, 600)
+      }
+      continue
+    }
+    // 工作目录变更：会话建在 A，实际活干在 B（CEO 常这样切到审计工作区）。
+    if (type === 'working-directory/change') {
+      const cwd = String((e.data || {}).cwd || '')
+      if (cwd && !out.dirs.includes(cwd)) out.dirs.push(cwd)
+      continue
+    }
     if (type === 'subagent/descriptor') {
       const d = e.data || {}
       if (!out.label && d.label) out.label = String(d.label)
@@ -153,16 +264,89 @@ function sessionDigest(text) {
       const body = Array.isArray(parts)
         ? parts.filter((p) => p && p.type === 'text').map((p) => String(p.text || '')).join(' ').trim()
         : ''
-      if (body) out.lastText = body.slice(0, 240)
+      if (body) {
+        // 挑「最像收尾汇报」的那句：完成/交付/产物/总结/## 标题这类信号，
+        // 并且长度够（碎话不算）。取分最高的，不是取最后一条——
+        // 最后一条常是"让我再看看"这种过渡语，而真正的交付说明通常在中间。
+        const sig = [
+          /完成|已交付|全部|收尾|汇报|总结|结论|交付物|产物|通过/
+          , /finished|done|delivered|complete|summary|report/
+          , /##|####|✅|\\|\\s*-\\s*/
+        ].reduce((acc, re) => acc + (re.test(body) ? 1 : 0), 0)
+        const score = sig * 100 + Math.min(body.length, 500)
+        if (!out.firstText) out.firstText = body.slice(0, 240)
+        const cur = (out._best && out._best.score) || -1
+        if (score > cur) out._best = { score, text: body.slice(0, 500) }
+        if (!out.lastText) out.lastText = body.slice(0, 240)
+        // 保留一条「有信息量的叙述轨」：详情页要能看清它分几步做了什么，
+        // 而不是只留一句开场白。丢掉两类噪音：
+        //   ① 开场套话（"I'll start by reading…"「让我先看看」）——老板看不出做了什么；
+        //   ② 极短碎话（<60 字，通常是过渡语）。
+        // 英文的过程叙述也丢：这个面板是给中文老板看的，混排英文反而难读。
+        const isChatter = /^(I'?ll|I'?m|Let me|Now I'?ll|Now let|Next,|让我|我先|我这就|接下来)/.test(body)
+        const isEnglish = !/[一-鿿]/.test(body)
+        if (body.length >= 60 && !isChatter && !isEnglish) {
+          if (out.texts.length >= 6) out.texts.shift()
+          out.texts.push(body.slice(0, 400))
+        }
+      }
       continue
     }
     if (type === 'tool/call') {
       const name = String((e.data || {}).name || '')
-      if (name) out.lastTool = name
+      if (name) {
+        out.lastTool = name
+        out.toolCounts[name] = (out.toolCounts[name] || 0) + 1
+        // 行动轨迹：每条工具调用压成一句话（最多留 40 条）。
+        // 这是「到底干了什么」最可靠的证据——子 agent 的文本常是英文开场白，
+        // 但命令/文件操作是它们真实做过的事，跟语言无关。
+        let argRead = ''
+        try { argRead = describeArg(name, e.data) } catch { argRead = '' }
+        let argBash = ''
+        if (/bash|shell|exec/.test(name)) {
+          try { argBash = describeCmd(String(JSON.parse(String((e.data || {}).arguments || '{}')).command || '')) } catch { argBash = '' }
+        }
+        const trailArg = argBash || argRead
+        if (trailArg) {
+          if (out.trail.length >= 40) out.trail.shift()
+          out.trail.push({ tool: name, arg: trailArg })
+        }
+        // 从写类工具的参数里挖出产物路径——这是"我做出了什么"最硬的证据。
+        // 注意：这些子 agent 多数用 bash（heredoc/重定向）写文件，而不是 write 工具，
+        // 所以 bash 的 command 里也要扫（只认形如 /xx/yy 的绝对路径，且带常见产物后缀）。
+        if (out.outputs.length < 8) {
+          try {
+            const a = JSON.parse(String((e.data || {}).arguments || '{}'))
+            const direct = String(a.file_path || a.path || a.filePath || '')
+            if (direct && !out.outputs.includes(direct)) out.outputs.push(direct)
+          } catch { /* 非法 JSON 跳过 */ }
+          // 读过的文件也是证据：能说明它核对了哪些材料（不是凭空写的）。
+          try {
+            const a = JSON.parse(String((e.data || {}).arguments || '{}'))
+            const readPath = String(a.file_path || a.path || a.filePath || '')
+            if (readPath && /read|view|cat/i.test(name) && out.reads.length < 12
+                && !out.reads.includes(readPath)) out.reads.push(readPath)
+          } catch { /* 非法 JSON 跳过 */ }
+          if (/bash|shell|exec/.test(name)) {
+            let cmd = ''
+            try { cmd = String(JSON.parse(String((e.data || {}).arguments || '{}')).command || '') } catch { cmd = '' }
+            // 只取「看起来是交付物」的路径：报告/清单/文档/脚本
+            const hit = cmd.match(/(?:\/|~)[^\s"'`;|&<>()]*(?:报告|清单|审计|设计|文档|规格|剧本|\.md|\.json|\.mjs|\.sh|\.ts)/g)
+            if (hit) {
+              for (const p of hit.slice(0, 3)) {
+                const clean = p.replace(/[，,。；;]+$/, '')
+                if (clean && !out.outputs.includes(clean) && out.outputs.length < 8) out.outputs.push(clean)
+              }
+            }
+          }
+        }
+      }
       continue
     }
     if (type === 'step/end') out.steps += 1
   }
+  delete out._bestScore
+  if (out._best) { out.lastText = out._best.text; delete out._best }
   return out
 }
 
@@ -245,7 +429,7 @@ function dshSubagents(dir, fs, path) {
         if (tracked) out.tracked++; else out.untracked++
         out.items.push({
           id: sid,
-          cwd: String(meta.cwd || ''),
+          cwd: String((digest.dirs && digest.dirs.length ? digest.dirs[digest.dirs.length - 1] : '') || meta.cwd || ''),
           parent: String(meta.parentSession || ''),
           createdAt: meta.createdAt ? new Date(Number(meta.createdAt)).toISOString() : '',
           tracked,
@@ -256,6 +440,16 @@ function dshSubagents(dir, fs, path) {
           lastTool: String(digest.lastTool || ''),     // 最近一次 tool/call 的工具名
           steps: Number(digest.steps || 0),            // step/end 次数 ≈ 完成的推理步数
           lastActivityAt: digest.lastAt ? new Date(Number(digest.lastAt)).toISOString() : '',
+          // ── 更多可展示的细节（详情页用；主屏只用 title/lastText）──
+          outputs: Array.isArray(digest.outputs) ? digest.outputs : [],   // 写出的产物路径（"做出了什么"的硬证据）
+          toolCounts: digest.toolCounts || {},                            // 工具构成，如 {bash:94, write:11, read:9}
+          firstText: String(digest.firstText || ''),                      // 开场白（可看它怎么理解任务）
+          // ── 详情页素材（用户要「看得懂到底干了什么」）──
+          brief: String(digest.brief || ''),                              // 派活原文：它接到的任务书
+          texts: Array.isArray(digest.texts) ? digest.texts : [],         // 过程中的叙述（分步做了什么）
+          reads: Array.isArray(digest.reads) ? digest.reads : [],         // 读过哪些材料
+          dirs: Array.isArray(digest.dirs) ? digest.dirs : [],            // 实际干活的工作目录（可能切换过）
+          trail: Array.isArray(digest.trail) ? digest.trail : [],         // 行动轨迹：每步做了什么（工具+对象）
         })
       }
     }

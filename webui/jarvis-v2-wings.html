@@ -44,6 +44,10 @@
 .detail-row{padding:13px 16px;background:linear-gradient(115deg,rgba(7,28,43,.5),rgba(3,13,21,.24));border:1px solid rgba(112,234,255,.12);clip-path:polygon(0 0,96% 0,100% 10%,100% 100%,4% 100%,0 92%)}
 .detail-row-main{font-size:13px;line-height:1.6}
 .detail-row-sub{margin-top:5px;font-size:10px;color:#6f92a4}
+.detail-deep{margin-top:10px;padding:10px 12px;border-left:1px solid rgba(112,234,255,.18);display:flex;flex-direction:column;gap:9px}
+.detail-deep-item{display:flex;flex-direction:column;gap:3px}
+.detail-deep-item span{font-size:10px;letter-spacing:.06em;color:#7fd4ea;text-transform:uppercase}
+.detail-deep-item div{font-size:11px;line-height:1.75;color:#a8c4d2;word-break:break-word}
 .detail-row-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
 .chip{font-size:9px;line-height:1.7;padding:1px 8px;border-radius:9px;border:1px solid rgba(112,234,255,.3);color:#7fd4ea;white-space:nowrap}
 .chip.ok{color:var(--green);border-color:rgba(61,220,151,.4)}
@@ -1371,30 +1375,166 @@ function cardJarvisBrief(snap){
   if(!totalDone&&!totalBusy)return null;
 
   const clipRaw=(v,n)=>{const x=String(v||'').replace(/\s+/g,' ').trim();return x.length>n?x.slice(0,n)+'…':x};
-  const names=a=>a.slice(0,3).map(x=>clipRaw(x.label,26)).filter(Boolean).join('、')+(a.length>3?` 等 ${a.length} 件`:'');
+  // 挑「最值得说出口」的一两件具体事，而不是列清单。
+  // 人汇报不会说「做完 6 件（A、B、C 等 6 件）」——那是统计报表。
+  // 他会说「CEO 那套规格写完了，测试审计也过了；现在还在收尾合并报告」。
+  const pickName=(arr)=>arr.map(x=>clipRaw(x.label,22)).filter(Boolean);
+  const lead=pickName(finished)[0] || '';
+  const lead2=pickName(finished)[1] || '';
+  const doing0=pickName(running)[0] || '';
+  const doing1=pickName(running)[1] || '';
 
-  // 汇报正文：先说做完的，再说在办的，最后说等你的。
-  const parts=[];
-  if(totalDone)parts.push(`做完 ${totalDone} 件${finished.length?`（${names(finished)}）`:''}`);
-  if(totalBusy)parts.push(`在办 ${totalBusy} 件${running.length?`（${names(running)}）`:''}`);
-  if(blocked)parts.push(`${blocked} 件卡住等你`);
-  const say=parts.join('，')+'。';
+  // 汇报正文：像人一样先给结论、再说具体、需要时问一句。
+  let say='';
+  if(totalDone && totalBusy){
+    say = lead
+      ? `「${lead}」已经交到您手上了${lead2?`，「${lead2}」也收了尾`:''}。` +
+        `眼下还有 ${totalBusy} 摊在办${doing0?`，最要紧的是「${doing0}」${doing1?'那一摊':''}`:''}。`
+      : `手上已有 ${totalDone} 件办妥，还有 ${totalBusy} 件在推。`;
+  } else if(totalDone){
+    say = lead
+      ? `「${lead}」${lead2?`和「${lead2}」`:''}都办完了，您过目。`
+      : `${totalDone} 件都办妥了，您过目。`;
+  } else if(totalBusy){
+    say = doing0
+      ? `还在推「${doing0}」${doing1?`、`+`「${doing1}」`:''}${totalBusy>2?` 等 ${totalBusy} 项`:''}，好了我立刻回您。`
+      : `还有 ${totalBusy} 件在推，好了我立刻回您。`;
+  }
+  if(blocked) say += `另有 ${blocked} 件卡着，得您一句话才能往下走。`;
 
+  // 详情条目：每条带「做了什么 · 产出什么 · 用了哪些工具」——
+  // 主屏只说一句结论，点进来才看得见细活。数据不够时不编，如实留空。
+  const toolSummary=(x)=>{
+    const tc=x.toolCounts||{}
+    const parts=Object.entries(tc).filter(([,n])=>n>0).sort((a,b)=>b[1]-a[1]).slice(0,4)
+    return parts.length?parts.map(([k,n])=>`${k}×${n}`).join('  '):''
+  }
+  const outNames=(x)=>{
+    const outs=(x.outputs||[])
+    if(!outs.length)return ''
+    const names=outs.map(p=>{
+      const base=String(p).split(/[/\\]/).pop()||p
+      return base.length>30?base.slice(0,28)+'…':base
+    })
+    return `产出 ${names.slice(0,4).join('、')}${outs.length>4?` 等 ${outs.length} 个`:''}`
+  }
+  // 描述一行字：优先用「像汇报的正文」；没有汇报（还在跑/被打断）就用
+  // 「产出 + 工具构成」说清它做出了什么——不硬套开场白（那句 "I'll start by…"
+  // 对老板毫无信息量）。
+  const outNameList=(x)=>{
+    const outs=(x.outputs||[])
+    // 兜底：早期会话的 outputs 是空的（那时还没扫产物路径），但轨迹里留下了
+    // 「写入 X」「改 X」——从那里把名字捞回来，别让「交出的东西」整栏消失。
+    const fromText=((x.texts||[]).join(' ').match(/`?[^\s`/]*(?:报告|清单|审计|修复|规格|实施记录)[^\s`/]*?(?:\.md|\.json)/g)||[])
+    // trail 里的「改 X」是真实的写操作对象；「写入 X」同理。
+    // 但要从这些句子里再滤一遍：只留像文件名的（带扩展名、不含通配符/动词）。
+    const cleanTrail=(x.trail||[])
+      .map(g=>String(g.arg||''))
+      .filter(a=>/^(写入|改)\s/.test(a))
+      .map(a=>a.replace(/^(写入|改)\s*/,'').trim())
+      .filter(n=>/^[\w.-]+\.\w{2,5}$/.test(n))          // 必须是「名字.扩展名」，排除 *.d.ts / 翻阅 se…
+    const merged=[...new Set([
+      ...outs.map(p=>String(p).split(/[/\\]/).pop()||p).filter(p=>p&&!/\*/.test(p)),
+      ...cleanTrail,
+      ...fromText.filter(Boolean),
+    ])].filter(Boolean)
+    return merged.map(n=>String(n).length>26?String(n).slice(0,24)+'…':String(n)).filter(Boolean)
+  }
+  // 需求原文：详情页要先说清「让它干什么」，老板才能判断做得对不对。
+  // 派活原文开头常是「你是「CEO」（卡：/x/CEO.md，先读）。任务：…」——
+  // 角色/角色卡/路径这些是内部协议，去掉，只留真正的任务描述。
+  // ⚠️ 有些派活单没有「任务：」段（只有角色 + 输入 + 文件域）——
+  //    那种情况返回空，让「做了什么」顶上，不要拿约束条件冒充任务。
+  const briefLine=(x)=>{
+    let b=String(x.brief||'').replace(/\s+/g,' ').trim()
+    if(!b)return ''
+    // 先看有没有明确的「任务：/你的任务：」锚点，有就只取那一段
+    const tm=b.match(/(?:你的)?(?:任务|要做的事)[:：]\s*([^#]{1,400})/)
+    if(tm&&tm[1].trim().length>15){
+      return clipRaw(tm[1].replace(/^你是[^。]{0,200}。\s*/,'').trim().slice(0,300),240)
+    }
+    // 角色句剥除：结构是「你是…（角色卡：…，先读…）。」——括号内可能有句号/分号，
+    // 所以按「角色卡…」起点 + 第一个收尾括号 + 可选的句号 来剥，不能按句号剥。
+    b=b.replace(/^你是[^（]{0,120}（[^）]{0,400}）[。：:]?\s*/,'')
+    b=b.replace(/^你是[「『][^」』]{1,40}[」』][^。]{0,300}?。\s*/,'')
+    // 到第一个小标题/清单行为止（输入清单/纪律属于执行细节）
+    const cut=b.search(/[#\-]\s*(输入|产出|纪律|要求|范围|你的文件域)/)
+    if(cut>0) b=b.slice(0,cut)
+    b=b.trim()
+    // 剥完只剩一句约束（「你只改指定文件域。」）→ 没有任务信息，不显示
+    if(b.length<15||/^(你只|只改|不要|禁止)[^。]{0,80}。?$/.test(b)) return ''
+    return clipRaw(b,240)
+  }
+  const describe=(x)=>{
+    const txt=String(x.lastText||'').replace(/\s+/g,' ').trim()
+    const looksLikeReport=/完成|已交付|全部|收尾|汇报|总结|结论|交付物|产物|通过/.test(txt)
+    if(looksLikeReport) return clipRaw(txt,220)
+    const outs=outNameList(x)
+    if(outs.length) return `产出 ${outs.slice(0,3).join('、')}${outs.length>3?` 等 ${outs.length} 个`:''}${toolSummary(x)?`（${toolSummary(x)}）`:''}`
+    if(toolSummary(x)) return `动用了 ${toolSummary(x)}${txt?`：${clipRaw(txt,80)}`:''}`
+    return clipRaw(txt,160)
+  }
+  // 核对过的材料：去掉「既是输入又是产出」的那些文件（同一个文件在两栏重复没有意义），
+  // 剩下的才是它真正翻过的参考资料。
+  const readsLine=(x)=>{
+    const outs=new Set((x.outputs||[]).map(p=>String(p)))
+    return (x.reads||[]).filter(p=>!outs.has(String(p)))
+      .map(p=>String(p).split(/[/\\]/).pop()).filter(Boolean).slice(0,6)
+  }
+  // 详情行：主行是任务名，下面依次是「接的活 → 做了什么 → 交了什么」。
+  // 用户原话（2026-11-19）：「看不明白到底干了什么，无法判断有用无用」。
+  // 「做的过程」优先用行动轨迹（trail）——它是工具调用还原出来的硬事实，
+  // 不受模型用什么语言写字影响；文本叙述（texts）只作为补充。
+  const trailLine=(x)=>{
+    const t=(x.trail||[]).filter(g=>g&&g.arg)
+    if(!t.length)return []
+    // 按动作类型聚合，避免「读 A、读 B、读 C…」铺满一屏：同类合并、计数保留。
+    const groups=new Map()
+    for(const g of t){
+      const key=g.arg.replace(/(^| )(读|改|清点|检索|写入|翻阅|跑测试|计算\/核对数据)/,'$1').trim()
+      const kind=/读/.test(g.arg)?'读':/改|写入/.test(g.arg)?'写':/检索|清点|翻阅|查/.test(g.arg)?'查':/跑测试|计算/.test(g.arg)?'算':'做'
+      const k=kind+'|'+key
+      if(!groups.has(k))groups.set(k,{kind,arg:g.arg,n:0})
+      groups.get(k).n++
+    }
+    return [...groups.values()].slice(0,8).map(g=>g.n>1?`${g.arg}（×${g.n}）`:g.arg)
+  }
+  const detailRows=(x)=>{
+    const trail=trailLine(x)
+    return [
+      briefLine(x)?{main:'接的活',sub:briefLine(x)}:null,
+      trail.length?{main:'做了什么',sub:trail.join(' · ')}:null,
+      ...(x.texts||[]).slice(-2).map((t,i)=>({main:`阶段说明 · ${i+1}`,sub:clipRaw(t,300)})),
+      outNameList(x).length?{main:'交出的东西',sub:outNameList(x).slice(0,6).join('、')+(outNameList(x).length>6?` 等 ${outNameList(x).length} 个`:'' )}:null,
+      readsLine(x).length?{main:'核对过的材料',sub:readsLine(x).join('、')}:null,
+      toolSummary(x)?{main:'动用的手段',sub:toolSummary(x)+` · ${String(x.steps||0)} 步`}:null,
+    ].filter(Boolean)
+  }
   const rows=[
-    ...finished.slice(0,6).map(x=>({main:'✓ '+clipRaw(x.label,42),
+    ...finished.slice(0,8).map(x=>({main:'✓ '+clipRaw(x.label,50),
       chips:[{t:String(x.steps||0)+' 步',c:'mut'}],
-      sub:clipRaw(x.lastText,80)})),
-    ...running.slice(0,6).map(x=>({main:'· '+clipRaw(x.label,42),
-      chips:[{t:String(x.steps||0)+' 步',c:'mut'},...(x.lastTool?[{t:String(x.lastTool),c:'mut'}]:[])],childId:x.id,
-      sub:clipRaw(x.lastText,80)})),
+      sub:describe(x),deep:detailRows(x)})),
+    ...running.slice(0,8).map(x=>({main:'· '+clipRaw(x.label,50),
+      chips:[{t:String(x.steps||0)+' 步',c:'mut'}],
+      childId:x.id,
+      sub:describe(x)})),
   ];
 
+  // 卡片正文：用同一条 describe 逻辑（优先汇报正文，没有就用产出说话），
+  // 保证「卡片上看到的」和「点进详情看到的」是同一套信息，不会一个说数量一个说细节。
+  const headline = (() => {
+    const f = finished[0]
+    if (f) return describe(f).slice(0, 150)
+    const r0 = running[0]
+    if (r0) return describe(r0).slice(0, 150)
+    return ''
+  })()
   return {id:'jarvis-brief',kind:'report',k:'汇报',st:'刚刚',rawText:true,
     title:say,
-    copy:'',
+    copy:headline,
     data:String(totalDone),dataLabel:'件已做完',
     detail:{kicker:'贾维斯汇报',title:say,rawText:true,
-      copy:'',
+      copy:headline,
       meta:[['做完',String(totalDone)],['在办',String(totalBusy)],['等你',String(blocked)]],
       rows,
       empty:''}}
@@ -1685,7 +1825,7 @@ function showDetail(c){
   if(d.brief)html+=`<div class="detail-mandate"><b style="color:#7fd4ea">任务要求 · </b>${esc(d.brief)}</div>`;
   if(d.meta&&d.meta.length)html+=`<div class="report-metrics" style="margin-top:0;margin-bottom:18px">${d.meta.map(([k,v])=>`<div class="report-metric"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>`;
   const rows=[...(d.rows||[]),...(d.extra||[])];
-  if(rows.length)html+=`<div class="detail-rows">${rows.slice(0,20).map(r=>`<div class="detail-row"><div class="detail-row-main">${esc(r.main)}</div>${r.chips&&r.chips.length?`<div class="detail-row-chips">${r.chips.map(ch=>`<span class="chip ${ch.c||''}">${esc(ch.t)}</span>`).join('')}</div>`:''}${r.sub?`<div class="detail-row-sub">${esc(r.sub)}</div>`:''}</div>`).join('')}</div>`;
+  if(rows.length)html+=`<div class="detail-rows">${rows.slice(0,20).map(r=>`<div class="detail-row"><div class="detail-row-main">${esc(r.main)}</div>${r.chips&&r.chips.length?`<div class="detail-row-chips">${r.chips.map(ch=>`<span class="chip ${ch.c||''}">${esc(ch.t)}</span>`).join('')}</div>`:''}${r.sub?`<div class="detail-row-sub">${esc(r.sub)}</div>`:''}${r.deep&&r.deep.length?`<div class="detail-deep">${r.deep.map(g=>`<div class="detail-deep-item"><span>${esc(g.main)}</span><div>${esc(g.sub)}</div></div>`).join('')}</div>`:''}</div>`).join('')}</div>`;
   else html+=`<div class="detail-rows"><div class="board-meta" style="padding:12px">${esc(d.empty||t('empty.generic'))}</div></div>`;
   body.innerHTML=html||`<p class="detail-copy">${esc(t('empty.more'))}</p>`;
   activateView(detailView,'#detail');
@@ -1710,12 +1850,14 @@ function renderMain(snap){
   renderCards(snap);
   const cap=$('#captionText');
   // 默认字幕说「事实」而不是口号。JARVIS 从不催人给目标，它报告态势。
-  let capText='团队待命。有新的事随时说。';
+  let capText='我在。有事随时吩咐。';
   const cards=LIVE.cards||[],decision=cards.find(c=>c.kind==='decision'),blocked=cards.find(c=>c.kind==='blocked'),doing=cards.find(c=>c.kind==='doing'),done=cards.find(c=>c.kind==='done');
-  if(decision)capText=`有件事等你拍板：${taskText(decision.title,58)}。点卡片选，或者直接告诉我。`;
-  else if(blocked)capText=`有件事卡住了：${taskText(blocked.title,58)}。${reportText(blocked.copy,55)}`;
-  else if(doing)capText=`正在做：${taskText(doing.title,58)}。${reportText(doing.copy,55)}`;
-  else if(done)capText=`刚做完：${taskText(done.title,58)}。${reportText(done.copy,55)}`;
+  // 字幕都要像「人回话」，不是「状态标签」。所以不用「正在做：X」这种冒号句式，
+  // 改成「X 还在推进，好了我叫您」这种自然句。
+  if(decision)capText=`「${taskText(decision.title,50)}」得您拿个主意，点卡片选或者直接说。`;
+  else if(blocked)capText=`「${taskText(blocked.title,50)}」卡住了，得您一句话。${reportText(blocked.copy,45)}`;
+  else if(doing)capText=`「${taskText(doing.title,50)}」还在推进，好了我叫您。`;
+  else if(done)capText=`「${taskText(done.title,50)}」办妥了，您过目。${reportText(done.copy,45)}`;
   else {
     // 没有任务单在跑：用汇报卡那句话当字幕，保证「画面与口播一致」。
     // 贾维斯的字幕就是他嘴里说的那句汇报，不该是另一套措辞。
