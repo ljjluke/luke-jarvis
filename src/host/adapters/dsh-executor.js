@@ -20,7 +20,7 @@ import { createRequire } from 'node:module'
 import { appendEvent } from '../state/events.js'
 import { getRuntimeContext, getLatestExec, getFsService } from '../runtime.js'
 import { readCompanyState } from '../state/company-io.js'
-import { MEMBER_DELIBERATION, STAGE_DELIBERATION, STUCK_MEETING } from '../protocol/deliberation.js'
+import { MEMBER_DELIBERATION, STAGE_DELIBERATION, STUCK_MEETING, ponderTierOf, tierGuidance, tierRequiresPonder } from '../protocol/deliberation.js'
 
 const _require = createRequire(import.meta.url)
 function nodeFs() { return _require('node:fs') }
@@ -106,6 +106,10 @@ function pickProvider(runtime) {
 function memberBrief(ticket, assignment, employee, projectDir) {
   const mandate = ticket.mandate || {}
   const name = employee && employee.name ? String(employee.name) : `成员（${assignment.role}）`
+  // ponder 分档（v0.16）：档位在派活时由任务单定死，成员只能按给定档执行。
+  // 旧版固定注入轻量四步、完全不提 ponder → 全公司事实上没人在跑十阶段
+  // （因为执行器根本没接过「高赌注要跑 ponder」这条路）。现在按档注入。
+  const tier = ponderTierOf(ticket)
   const lines = [
     `你是数字公司的成员「${name}」，承接角色：${assignment.role}。`,
     ``,
@@ -114,6 +118,8 @@ function memberBrief(ticket, assignment, employee, projectDir) {
     `工作区：${projectDir}`,
     ``,
     `工作要求：`,
+    `0. ${tierGuidance(tier).split('\n')[0]}`,
+    ...tierGuidance(tier).split('\n').slice(1).map((l) => `   ${l}`),
     `1. ${MEMBER_DELIBERATION.split('\n')[0]}`,
     ...MEMBER_DELIBERATION.split('\n').slice(1).map((l) => `   ${l}`),
     `2. ${STAGE_DELIBERATION.split('\n')[0]}`,
@@ -295,11 +301,19 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
    *  （长会话保活第 ④ 层：成员是独立会话，压缩同样致命，而它没有主会话那套续接注入） */
   function memberResumeHint(ticket, assignment, projectDir) {
     const statusPath = statusRelPath(ticket, assignment)
+    const tier = ponderTierOf(ticket)
+    const needsPonder = tierRequiresPonder(tier)
     return [
       '【续接线索 · 上下文若已被压缩，以下是你该记住的最小事实】',
       `- 任务单：${ticket && ticket.id || '?'}（${ticket && ticket.stage || '?'} 阶段）：${ticket && ticket.title || '?'}`,
       `- 你的角色：${assignment && assignment.role || '?'}；assignmentId=${assignment && assignment.id || '?'}`,
       `- 工作区：${projectDir}`,
+      `- 思考档位：${tier}${needsPonder ? '（必须真跑 ponder 十阶段，收口时逐单核验）' : '（免跑 ponder，自检三条即可）'}`,
+      ...(needsPonder ? [
+        `- 若本单已开始跑 ponder：run_id 与 PONDER_DATA_DIR 应记在 ${statusPath} 里`,
+        `  （压缩后忘了就查 STATUS.md；核验时 captain 要 run_id + dataDir + taskId 三样）`,
+        `- 成员会话必须 export PONDER_SOLO=1（depth-1 子 agent 起不了孙 agent）`,
+      ] : []),
       `- 你的进度应写在：${statusPath}（若中断过，先读这个文件恢复上下文）`,
       `- 交付物目录：.jarvis/outputs/${ticket && ticket.id || '?'}/`,
     ].join('\n')
@@ -322,15 +336,19 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
       const title = String((ticket && ticket.title) || '')
       const role = String((assignment && assignment.role) || '')
       const aid = String((assignment && assignment.id) || '')
+      // 档位写进自动段：成员失忆后，从 STATUS.md 就能看出这单要不要跑 ponder，
+      // 以及 ponder 的锚点该记在哪里（否则压缩后连"我该跑 ponder"都忘了）。
+      const tier = ponderTierOf(ticket)
       const block = [
         STATUS_MARK,
         `# 任务进度（插件自动维护，请不要删除本段）`,
         `- 任务单：${(ticket && ticket.id) || '?'}（${stage} 阶段）：${title}`,
         `- 我的角色：${role}；assignmentId=${aid}`,
+        `- 思考档位：${tier}${tierRequiresPonder(tier) ? '（必须跑 ponder 十阶段；run_id/PONDER_DATA_DIR 请记在本段下方）' : '（免跑 ponder，自检三条即可）'}`,
         `- 更新时间：${new Date().toISOString()}`,
         `- 交付物目录：.jarvis/outputs/${(ticket && ticket.id) || '?'}/`,
         '',
-        '<!-- 以下由你（成员）自己维护：现在做到哪 / 下一步 / 卡在哪 -->',
+        '<!-- 以下由你（成员）自己维护：现在做到哪 / 下一步 / 卡在哪 / ponder run_id -->',
       ].join('\n')
       let existing = ''
       try { existing = fsM.readFileSync(abs, 'utf8') } catch { existing = '' }

@@ -416,15 +416,35 @@ function requestWorkspace(ctx, req) {
   // HTTP 路由的工作区：只信本服务的 live 会话（或显式 ?workspace=/?session=）。
   // 不吃"最近一次工具 exec"：那是别的会话/别的时间点的事实，会把读接口带到别的项目。
   const live = firstSessionCwd(ctx)
+  // live 会话存在但工作区是空壳（没有 .jarvis / .agent-teams）——常见于：
+  // 用户新开了个空会话试水、或上次的临时目录。此时优先给 live 是对的（用户眼前
+  // 就是这个目录），但若磁盘上另有真正有活的会话，给空壳会让页面整个空白
+  // （用户实测："页面空白/详情页是空的"）。所以：live 空壳时尝试磁盘兜底，
+  // 磁盘兜底也没有目标才回到 live。live 有实际内容则永远优先。
+  if (live && !isBareWorkspace(live)) return live
+  const disk = lastActiveSessionCwd()
+  if (disk && disk !== live && !isBareWorkspace(disk)) return disk
   if (live) return live
   // 磁盘兜底（用户实测 2026-11-19）：web 服务重启后 agents.list() 为空，
   // 前端拿不到 workspace → 页面只剩空卡片，看起来像「详情页是空的」。
   // 这里退一步信磁盘：取最近有活动的 DSH 会话工作区（只读会话头，不读全文）。
-  const disk = lastActiveSessionCwd()
   if (disk) return disk
   // 不吃 apply 期缓存：它是 process.cwd()（systemd 下 '/'、测试里是插件仓库），拿它拼出的 .jarvis 必错。
   // 宁可明确说「没解析到工作区」，也不给一个看起来能用、实际读到空/别处的路径。
   return ''
+}
+
+/** 工作区是不是「空壳」：有目录但没有 jarvis 状态根（.jarvis / .agent-teams）。
+ *  空壳工作区的页面必然是空白，不该拿它顶替真正有活的目录。
+ *  读不到（权限/不存在）一律按"空壳"处理——宁可回退，也不要给页面喂空数据。 */
+function isBareWorkspace(dir) {
+  try {
+    const fsMod = _require('node:fs')
+    const pathMod = _require('node:path')
+    const d = String(dir || '')
+    if (!d || !fsMod.existsSync(d)) return true
+    return !fsMod.existsSync(pathMod.join(d, '.jarvis')) && !fsMod.existsSync(pathMod.join(d, '.agent-teams'))
+  } catch { return true }
 }
 
 /** 磁盘兜底：DSH 会话目录按 cwd 编码命名（--opt-work-luke-jarvis--）。

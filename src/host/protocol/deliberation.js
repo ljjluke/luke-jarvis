@@ -7,12 +7,19 @@
 //   ③ 协议正文（protocol/index.js，captain 盯控口径）。
 // 三处引用同一份文本 = 单一事实源，改一处全生效。
 //
-// 设计边界：
-//   • 这是**脑内动作**，不要求调用 ponder 工具/子 agent——满血十阶段留给 complex
-//     高赌注；本推演四步不分赌注档人人必做（此前"执行已定方案不需要 ponder"的
-//     口径是漏洞：成员把一切归为执行已定方案 → 全公司只有 CEO 在思考）。
-//   • 可机械核验：回报里必须能看到「方案对比 + 择优理由」；看不到 = 打回。
-//     审计标记 DELIBERATION_MARK 供 jarvis_member_brief audit 模式复用。
+// 设计边界（v0.16 反转·用户定调 2026-11-19）：
+//   • 旧口径「不要求调用 ponder，满血十阶段留给 complex」已被证伪——执行器从未
+//     接过高赌注那条路，结果所有成员一律走轻量四步，ponder 事实上全公司没人跑。
+//   • 新口径是三档分级（见 PONDER_TIER / ponderTierOf）：档位在**派活时**由任务单
+//     定死，成员不能自评降档（模型一定会把自己归为"简单"，这是分级失效的根因）。
+//       - easy-direct：免 ponder，用本推演四步 + 30 秒自检替代（成本优先，且可核验）
+//       - standard  ：必跑 ponder 十阶段（各阶段 agent 数可精简，但阶段一个不能少）
+//       - complex   ：必跑 ponder 满血十阶段 + synthesis 含可谬自评
+//     轻量四步（MEMBER_DELIBERATION）**不分档位人人必做**；ponder 是在此之上的深度层。
+//   • 可机械核验：回报里必须能看到「方案对比 + 择优理由」；standard/complex 另需
+//     .jarvis/docs/ponder-verify/<taskId>-*.json 且 verdict=PASS（见 gates/audit.js
+//     的 checkPonderVerify，已接回 close 收口闸）。easy 档凭任务单 route 字段豁免。
+//   • 审计标记 DELIBERATION_MARK 供 jarvis_member_brief audit 模式复用。
 
 export const MEMBER_DELIBERATION = [
   '⚡ 开工推演（动手前必做，像人脑：先想后做）——',
@@ -55,3 +62,75 @@ export const STUCK_MEETING = [
 
 /** 审计标记：卡点开会特征。 */
 export const STUCK_MARK = /卡点开会|开会|jarvis_meeting|会议纪要|minutes|cycle/i
+
+// ── ponder 三档分级（v0.16）——用户定调：每个员工思考时必须用 ponder。
+//
+// 为什么必须分档而不是一刀切：
+//   十阶段管线对「改一行文案」是灾难（十几个子 agent、几分钟、几万 token），
+//   而且会诱导成员跑空管线应付差事——形式主义比不跑更糟。
+//   所以：成本优先的单免跑，其余必跑，高赌注加码。
+//
+// 为什么档位由任务单决定而不是成员自评：
+//   模型看自己的任务一定觉得"这个很简单"——这是分级失效的根因（旧口径翻车的实证）。
+//   档位在派活时写进 ticket.meta.route（或 ticket.stakes），成员只能按给定档执行。
+export const PONDER_TIER = {
+  EASY: 'easy-direct',      // 免 ponder，轻量四步 + 自检三条
+  STANDARD: 'standard',     // 必跑十阶段，阶段数不可减
+  COMPLEX: 'complex',       // 满血十阶段 + 可谬自评
+}
+
+/** 从任务单推断档位。缺省 standard（宁可多跑一次深度思考，也不要"应该思考时没思考"）。
+ *  兼容存量单：没有 route/stakes 字段时按 standard 处理，不因缺字段卡死。 */
+export function ponderTierOf(ticket) {
+  const t = ticket || {}
+  const meta = t.meta || {}
+  const route = String(meta.route || meta.difficulty || '').trim().toLowerCase()
+  if (route === PONDER_TIER.EASY || route === 'easy') return PONDER_TIER.EASY
+  if (route === PONDER_TIER.COMPLEX || route === 'complex') return PONDER_TIER.COMPLEX
+  if (route === PONDER_TIER.STANDARD || route === 'standard') return PONDER_TIER.STANDARD
+  const stakes = String(meta.stakes || t.stakes || '').trim().toLowerCase()
+  if (stakes === 'high') return PONDER_TIER.COMPLEX
+  if (stakes === 'low') return PONDER_TIER.STANDARD   // 低赌注也跑标准档：阶段可精简但不可少
+  return PONDER_TIER.STANDARD
+}
+
+/** 该档位是否要求真跑 ponder（免跑档返回 false → 收口闸凭此豁免）。 */
+export function tierRequiresPonder(tier) {
+  return String(tier || '') !== PONDER_TIER.EASY
+}
+
+/** 按档位生成「思考要求」正文，注入成员简报与续接线索。
+ *  三档文本各自完整可执行——成员不需要知道别的档位存在。 */
+export function tierGuidance(tier) {
+  const t = String(tier || PONDER_TIER.STANDARD)
+  if (t === PONDER_TIER.EASY) {
+    return [
+      '🎚 本单档位：easy-direct（免跑 ponder，成本优先）——',
+      '本单是模式化/可逆/有现成做法的活，不值得十阶段深思考。直接按角色卡方法论与任务描述执行。',
+      '但仍必须做「30 秒自检三条」并写进回报：① 前提有没有没验证的？② 最可能错在哪？③ 谁会受影响？',
+      '⚠️ 升级路径：动手后发现新颖/不可逆/多方耦合/牵一发动全身 → 立即停下，用 jarvis_ticket action=report state=blocked 上报「本单需要升级为 standard 档，理由：…」，等 captain 重派。',
+      '  **升级不算返工，硬撑着不升级才是返工。**',
+    ].join('\n')
+  }
+  const full = t === PONDER_TIER.COMPLEX
+  return [
+    `🎚 本单档位：${t}（必须真跑 ponder 十阶段，留可核验记录）——`,
+    '这是必须做的硬要求，不是建议：本单完成前必须在 .jarvis/docs/ponder-verify/ 留下 PASS 核验记录，收口时会逐单核查。',
+    '执行方式（成员是 depth-1 子 agent，起不了孙 agent，必须走 SOLO 自模拟）：',
+    '  1) export PONDER_DATA_DIR="<工作区>/.jarvis/ponder-runs/<你的 run_id>/"   （per-run 隔离，禁止多人共用一份 step-guard.json）',
+    '  2) export PONDER_SOLO=1                                                    （成员会话必加；否则 8 维/5 方案起不来）',
+    '  3) node <ponder技能>/scripts/step-guard.cjs init "<本次问题>"',
+    '  4) 十阶段顺序执行，每阶段 before/after 记录：',
+    '     interview → shensi → divergence → bagua → plans → converge → score → simulate → debate → synthesis',
+    '     （严格按序，不得乱序、不得合并、一个阶段都不能少；SOLO 模式下按 stages/<阶段>.json 逐维度自模拟成文）',
+    '  5) node <ponder技能>/scripts/step-guard.cjs verify <run_id> --evidence "$PONDER_DATA_DIR"',
+    '     只有 verdict=PASS 才允许上报「ponder 已完成」；FAIL 先补齐再交。',
+    full ? '  6) complex 档额外要求：synthesis 必须含可谬自评（本结论最可能因为什么错？若错改走什么方向？）' : '',
+    '回报时必须带回三样：run_id、PONDER_DATA_DIR（数据目录绝对路径）、阶段产出目录——',
+    ' captain 会用 jarvis_ponder_check(runId=…, dataDir=…, taskId=本单) 核验；核验 PASS 才落 ponder-verify 记录。',
+    '⚠️ 降级唯一合法路径：ponder 技能确实不可用 → 在回报里写 skipReason 并标 blocked，由 captain 裁定；禁止静默跳过。',
+  ].filter(Boolean).join('\n')
+}
+
+/** 审计标记：所有档位文本里都出现的共同特征（用来判断成员简报是否带了思考要求）。 */
+export const TIER_MARK = /本单档位|easy-direct|standard 档|ponder 十阶段|PONDER_SOLO|ponder-verify/

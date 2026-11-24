@@ -2812,7 +2812,7 @@ test('jarvisFlowGuard：jarvis 模式（调过 jarvis_*）+ 无卡片 → 建队
   assert.ok(typeof r === 'string' && r.includes('蒸馏角色卡'), `应拦并提示蒸馏：${r}`)
 })
 
-test('jarvisFlowGuard：派活不再校验「描述里有没有开工须知」（固化改成 jarvis_dispatch_task 一步拼装，不考核步骤）', async () => {
+test('jarvisFlowGuard：派活不按「描述里有没有开工须知」执法（须知由 jarvis_dispatch_task 自动拼装）', async () => {
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jf6-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
@@ -2932,7 +2932,7 @@ test('jarvis_member_brief：须知必含「企业文化·领域专家深度思�
 
 // ── v0.7.5：成员交活必须过 ponder 核验（scan 实证：成员 3002 次调用 jarvis_* 为 0）──
 
-test('jarvisFlowGuard：交活不要求 ponder 核验记录（ponder 是推荐思考方式，不是通行证）', async () => {
+test('jarvisFlowGuard：交活这一步不校验 ponder（核验放在 close 收口闸，不在派单/交活时）', async () => {
   const os = await import('node:os')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptg-'))
   fs.mkdirSync(path.join(dir, '.jarvis/docs'), { recursive: true })
@@ -4751,13 +4751,18 @@ test('角色卡：jarvis_dispatch_task 一步完成「卡+须知+建任务」（
 })
 
 
-test('成员须知：交付格式要求「反方攻击/失效边界/置信度」——用产物证明思考（不查步骤）', async () => {
+test('成员须知：交付格式要求「反方攻击/失效边界/置信度」——用产物证明思考', async () => {
   const def = TOOLS.find((t) => t.name === 'jarvis_member_brief')
   const r = await def.execute({ roleName: '产品增长' })
   for (const k of ['反方攻击', '失效边界', '置信度']) {
     assert.ok(r.brief.includes(k), `回报格式必须要求「${k}」——这是 ponder 级思考在产物里的痕迹`)
   }
-  assert.ok(/不是必填门槛|可溯源/.test(r.brief), 'ponder run_id 应标注为可选溯源，不是门槛（与「不考核步骤」一致）')
+  // v0.16 反转（用户定调 2026-11-19「每个员工思考时必须用 ponder」）：
+  // 旧断言「run_id 是可选的、不是门槛」已作废。现在 standard/complex 档必须带回 run_id；
+  // 只有 easy-direct 档豁免（那时 skipReason 写明 difficulty=easy）。member_brief 的
+  // 缺省档位是 standard → 文案里必须出现 PONDER_SOLO / ponder-verify 这类硬要求标记。
+  assert.ok(/PONDER_SOLO|ponder-verify|step-guard/.test(r.brief),
+    '缺省 standard 档必须给出可执行的 ponder 执行路径（PONDER_SOLO/step-guard/ponder-verify）')
 })
 
 // ── 会议判定（不是摆设：从事实算该不该开会）──────────────────────────────────

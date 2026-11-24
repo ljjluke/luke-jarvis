@@ -112,12 +112,22 @@
 # 管线：interview→shensi→divergence→bagua→plans→converge→score→simulate→debate→
 # synthesis，十阶段资源全部在 ponder 技能包内随 luke-jarvis 安装自带：
 # stages/*.json + engine/*.md + scripts/step-guard.cjs + scripts/_lib/（技能自包含单目录）。
-# 【铁律】每个角色的独立思考必须用 ponder 满血版：任何关键决策
-# （选型/定价/风控规则/对外承诺/高赌注方案/分歧裁决）先跑 ponder 完整十阶段
-# （step-guard.cjs init → 十阶段全量 → 产出带 run_id），把角色卡六段式作为"人物视角"
-# 注入画像，产出按衔接契约喂 jarvis_review。禁止阉割（只跑 interview+converge 两段
-# = 没达到思考效果）；web_search 受限时查证类阶段（bagua 引源/divergence 查资料）
-# 降级为成员知识库推演但必须标注"受限环境推演"，不得静默冒充已查证。
+#
+# ⚠️ 下面这段说明的是「能力怎么接入」，不是「要求怎么执行」。
+#    要求本身由代码执法，不靠这份 YAML——YAML 注释没有任何程序读取，写在这里只是文档。
+#    真实执法位置（改要求请改这些地方，不要改注释）：
+#      · 分档定义：src/host/protocol/deliberation.js  PONDER_TIER / ponderTierOf / tierGuidance
+#      · 派活注入：src/host/adapters/dsh-executor.js  memberBrief（按任务单档位生成简报）
+#      · 收口核验：src/host/gates/audit.js  checkPonderVerify（已接回 close 闸）
+#      · 档位来源：src/host/tools/deliver.js  jarvis_ticket action=open 的 route/stakes 参数
+#
+# 三档（v0.16，用户定调 2026-11-19「每个员工思考时必须用 ponder」）：
+#   easy-direct：模式化/可逆/有现成做法的活——免跑，用 30 秒自检三条替代
+#   standard（缺省）：必跑十阶段，各阶段 agent 数可精简，阶段一个不能少
+#   complex：high 赌注/显式指定——满血十阶段 + synthesis 含可谬自评
+# 成员是 depth-1 子 agent，跑 ponder 必须 export PONDER_SOLO=1（否则 8 维/5 方案起不来）。
+# 降级唯一合法路径：ponder 技能确实不可用 → 回报 skipReason 并标 blocked，
+# 由 captain 裁定；禁止静默降级，也不得把"受限环境推演"冒充成"已查证"。
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
 

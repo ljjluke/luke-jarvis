@@ -248,27 +248,44 @@ export async function auditStaleTasks(fsSvc, projectDir, path, owned) {
 // ── 基线/覆盖矩阵硬闸：改造/替换类任务防"覆盖面丢失"（webui 换皮丢页面教训）──
 const BASELINE_FILE_RE = /^基线清单[-_](.+)\.json$/
 /**
- * ponder 核验校验能力：检查团队成员任务是否都有 ponder 真核验记录
- * （.jarvis/docs/ponder-verify/<taskId>-*.json，verdict=PASS）。
+ * ponder 核验校验——**已接回 close 收口闸**（v0.16 恢复，见 deliver.js 收口段）。
  *
- * ⚠️ 本函数**当前未接入任何闸**——不要被函数名和"收口闸"的历史说法误导。
- * 用户定调（docs/执行流程.md §八、CHANGELOG 0.15.x 四处记录、提交 a924bb7）：
- * 固化流程但**不考核步骤**，ponder 是可选的深度思考方式，不是通行证。
+ * 用户定调反转（2026-11-19）：「每个员工思考时必须用 ponder」。
+ * 旧口径（docs/执行流程.md §八、提交 a924bb7）是「固化流程但不考核步骤」，
+ * 把这个闸撤了；撤闸的后果是执行器根本不再向成员提 ponder（adapters/dsh-executor.js
+ * 只固定注入轻量四步），成员事实上全员裸干——scan 实证 6/6 会话
+ * jarvis_ponder_check 从未调用。旧口径已作废，本函数重新成为收口硬闸。
  *
- * 保留原因：
- *   · review.js 的 jarvis_ponder_check 在 PASS 时仍会写 ponder-verify 记录——记录本身
- *     有价值（可追溯"这个任务当时做过哪些推演"），只是不作为放行条件；
- *   · 能力留着：将来若要把"成员必须 ponder 核验"重新变成机械要求，接一行即可；
- *   · 行为由 test/plugin.test.js「checkPonderVerify：成员已完成任务无 ponder 核验 → 拦；
- *     有 PASS 记录 → 放行」覆盖（四组断言），删除会红测试并丢失能力。
- *
- * 背景（scan 实证，供将来权衡）：6/6 会话 jarvis_distill=0、成员会话 jarvis 工具 0~1 次、
- * jarvis_ponder_check 从未调用，成员"裸干"交付——当时据此把它做成闸，后被用户定调撤下。
+ * 分档（protocol/deliberation.js PONDER_TIER）：
+ *   · easy-direct 档豁免——本单是模式化/可逆/有现成做法的活，跑十阶段是浪费；
+ *     豁免凭据写在该任务单的 meta.route（缺省视为 standard，即"默认要核验"）。
+ *   · standard / complex 档必须拿到 verdict=PASS 的核验记录。
+ *   · 缺省 standard 是有意的：宁可为存量的老单多要求一次核验（ captain 补一条
+ *     记录即可），也不要让"本该深度思考的单"悄悄漏过。
  */
 export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
   const missing = []
   if (!fsSvc) return missing
   try {
+    // 档位豁免名单：从 .jarvis/tickets 的任务单里读 route/stakes。
+    // 读不到（老单/异常）→ 当 standard 处理，不豁免。
+    const exempt = new Set()
+    try {
+      const tdir = path.join(projectDir, '.jarvis/tickets')
+      const names = (await listNames(fsSvc, tdir)) || []
+      for (const n of names) {
+        if (!/^ticket-.*\.json$/.test(String(n))) continue
+        try {
+          const t = JSON.parse((await readTextSafe(fsSvc, path.join(tdir, String(n)))) || '{}')
+          const meta = (t && t.meta) || {}
+          const route = String(meta.route || meta.difficulty || '').trim().toLowerCase()
+          const stakes = String(meta.stakes || '').trim().toLowerCase()
+          if (route === 'easy' || route === 'easy-direct') exempt.add(String(t.id || ''))
+          // stakes=low 仍要核验（standard 档），只有显式 easy 档才豁免
+          void stakes
+        } catch { /* 坏单跳过 = 不豁免 */ }
+      }
+    } catch { /* 无任务单目录 = 无豁免 */ }
     const teamsDir = path.join(projectDir, '.agent-teams')
     const teamsRaw = await listNames(fsSvc, teamsDir)
     if (teamsRaw === null) return missing
@@ -284,7 +301,9 @@ export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
           const who = String(task.assignee || '')
           if (st !== 'completed') continue
           if (!who || who === 'captain' || who === 'CEO') continue
-          completedMemberTasks.push(String(task.id || ''))
+          const id = String(task.id || '')
+          if (exempt.has(id)) continue        // easy 档：凭任务单写明豁免
+          completedMemberTasks.push(id)
         }
       } catch {}
     }
@@ -302,7 +321,7 @@ export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
     }
     const unverified = completedMemberTasks.filter((id) => !passed.has(id))
     if (unverified.length > 0) {
-      missing.push(`ponder 核验缺失：${unverified.length}/${completedMemberTasks.length} 个成员任务没有 ponder 核验记录（${unverified.slice(0, 5).join('、')}）——成员任务完成后必须用 jarvis_ponder_check(runId=…, dataDir=…, taskId=该任务) 核验 PASS，否则不许收口（scan 教训：成员裸干交付）`)
+      missing.push(`ponder 核验缺失：${unverified.length}/${completedMemberTasks.length} 个成员任务没有 PASS 核验记录（${unverified.slice(0, 5).join('、')}）——这些单是 standard/complex 档，必须真跑 ponder 十阶段并留下核验。下一步：jarvis_ponder_check(runId=<成员回报的 run_id>, dataDir=<PONDER_DATA_DIR>, taskId=<该任务>, projectDir=${projectDir}) —— PASS 才会落 .jarvis/docs/ponder-verify/ 放行。若这单其实属于免跑档，请在任务单 meta.route 标 "easy-direct" 后重跑收口。`)
     }
   } catch {}
   return missing

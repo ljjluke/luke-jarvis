@@ -867,7 +867,15 @@ export const DELIVER_TOOLS = [
             } catch {}
             // 会议：任务全交完却没开收口会 → 必开（逐项验收 + 遗留项分级）
             missing.push(...meetingGaps(projectDir, 'close', path, { teams: [...ownedSet] }))
-            // ponder 核验：不再是收口硬闸（用户定调：流程固化，不考核步骤）——核验记录仍可用 jarvis_ponder_check 生成并查
+            // ponder 核验（v0.16 恢复·用户定调 2026-11-19「每个员工思考时必须用 ponder」）：
+            // 收口时逐单核查——standard/complex 档的成员任务必须有 PASS 核验记录。
+            // easy-direct 档豁免（凭任务单 route/stakes 字段，见 protocol/deliberation.js ponderTierOf）。
+            // 为什么恢复：旧口径"不考核步骤"导致执行器根本没接过 ponder 指引，成员事实上全员裸干
+            // （scan 实证：6/6 会话 jarvis_ponder_check 从未调用）。
+            try {
+              const ponderGaps = await checkPonderVerify(fsSvc, projectDir, path, ownedSet)
+              missing.push(...ponderGaps)
+            } catch { /* 核验失败不阻断收口，但要留痕 */ }
           },
           next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',
         },
@@ -1031,6 +1039,8 @@ export const DELIVER_TOOLS = [
         summary: { type: 'string', description: '汇报摘要' },
         mandate: { type: 'string', description: '授权 JSON：{strength:"explicit"|"inferred", basis, by, gate}' },
         brief: { type: 'string', description: '成员须知原文（可选；jarvis_dispatch_task 自动生成。经 meta.brief 直达成员简报，含角色卡/协同段/ponder 指引）' },
+        route: { type: 'string', description: '思考档位（v0.16）：easy-direct=免跑 ponder（模式化/可逆/有现成做法的活，用自检三条替代）/ standard=必跑十阶段（缺省）/ complex=满血十阶段+可谬自评。写进任务单 meta.route，收口时据此核验或豁免。档位由派活方定，成员不能自评降档。' },
+        stakes: { type: 'string', description: '赌注档（可选）：high=按 complex 处理；low=按 standard 处理（仍要跑，阶段可精简）。与 route 二选一，route 优先。' },
         reason: { type: 'string', description: 'stop 原因' },
       },
       required: ['action'],
@@ -1136,7 +1146,16 @@ export const DELIVER_TOOLS = [
           }
           // 成员须知透传：brief（如 jarvis_dispatch_task 生成的角色卡须知）经 meta.brief 直达成员简报
           const briefArg = String(args?.brief ?? '').trim()
-          if (briefArg) input.meta = { brief: briefArg }
+          // 思考档位（v0.16）：route/stakes 写进 meta，派活时即定死，成员不能自评降档。
+          // 收口时 gates/audit.js checkPonderVerify 读同一字段做核验/豁免。
+          const routeArg = String(args?.route ?? '').trim().toLowerCase()
+          const stakesArg = String(args?.stakes ?? '').trim().toLowerCase()
+          if (briefArg || routeArg || stakesArg) {
+            input.meta = {}
+            if (briefArg) input.meta.brief = briefArg
+            if (routeArg) input.meta.route = routeArg
+            if (stakesArg) input.meta.stakes = stakesArg
+          }
           // 成员提案消化：open 带 proposalId 时把提案内容作为兜底（title/mandate），开单成功后标记 consumed
           const proposalId = String(args?.proposalId ?? '').trim()
           const proposals = _readProposals(projectDir)

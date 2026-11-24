@@ -35,7 +35,10 @@ export function jarvisFlowGuard(exec) {
       const memIssue = checkMemoryFresh(String(cwd), { force: name === 'agent_teams_create' || name === 'jarvis_dispatch_task' })
       if (memIssue) return memIssue
     }
-    // 交活：不再校验「有没有跑 ponder」——ponder 是推荐思考方式，不是通行证（用户定调：固化流程，不考核步骤）
+    // ponder 核验：不在**派单时**校验（成员还没干活，核验必然是空的），而是放到
+    // close 收口闸里逐单核查（deliver.js → gates/audit.js checkPonderVerify）。
+    // v0.16 反转（用户定调 2026-11-19）：旧口径"不考核步骤"已作废——现在 standard/complex
+    // 档的成员任务必须有 PASS 核验记录，easy-direct 档凭任务单 meta.route 豁免。
     if (!isCaptain && name !== 'agent_teams_create') return undefined
     // ① 建队/派活前必须有需求规格或基线清单
     if (!st.hasReq && st.baseline === 0) {
