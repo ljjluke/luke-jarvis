@@ -1354,6 +1354,114 @@ export function apply(ctx, config) {
             },
           })
 
+        // 0.5) 语音识别（ASR）代理——解决「国内网络下 webkitSpeechRecognition 不可用」。
+        //   POST /api/jarvis/asr  { audio: <base64>, mime: 'audio/webm;codecs=opus', lang?: 'zh' }
+        //   → { ok, text } | { ok:false, code:'MODEL_NOT_OPEN'|..., error, hint, fallback:'text' }
+        //
+        //   为什么走这个通道：浏览器的 webkitSpeechRecognition 依赖 Google 语音服务，
+        //   国内网络访问不到 → 立刻 network 错误，而代码里 no-speech/aborted 被静默吞掉，
+        //   用户看到的就是「对着麦克风说话没反应」。
+        //   服务端 ASR 不依赖浏览器与网络环境，只要 API key 有效就能用。
+        //
+        //   供应商：火山方舟（Ark）的多模态模型，走标准 chat/completions 传 base64 音频。
+        //   ⚠️ 账号必须先在方舟控制台开通对应模型，否则返回 ModelNotOpen——
+        //     这种错误要如实告诉用户「去控制台开通」，不能静默降级成"没听清"。
+        //   模型 id 可用环境变量 JARVIS_ASR_MODEL 覆盖，开通后无需改代码。
+        apiRoute({
+            kind: 'exact',
+            path: '/api/jarvis/asr',
+            handler: async (req, res) => {
+              if (String(req.method || 'GET').toUpperCase() !== 'POST') {
+                return sendJsonLocal(res, 405, { ok: false, error: '只接受 POST' })
+              }
+              if (crossSiteWrite(req)) return sendJsonLocal(res, 403, { ok: false, error: '跨站请求已拒绝（仅同源页面可调用）' })
+              // 音频 base64 体积大：单独放宽请求体上限（20MB ≈ 约 1 分钟 opus）
+              const body = await readJsonBody(req, 20 * 1024 * 1024).catch((e) => ({ __err: e }))
+              if (!body || body.__err) return sendJsonLocal(res, 400, { ok: false, error: '请求体解析失败：' + String((body && body.__err && body.__err.message) || '') })
+              const b64 = String((body && body.audio) || '').replace(/^data:[^,]*,/, '')
+              if (!b64) return sendJsonLocal(res, 400, { ok: false, error: '缺少 audio（base64）' })
+              if (b64.length > 18 * 1024 * 1024) return sendJsonLocal(res, 400, { ok: false, error: '音频过大（>18M base64），请缩短录音时长' })
+              const mime = String((body && body.mime) || 'audio/webm').split(';')[0] || 'audio/webm'
+              const fmt = /wav/.test(mime) ? 'wav' : /mp3|mpeg/.test(mime) ? 'mp3' : /ogg/.test(mime) ? 'ogg' : /mp4|m4a|aac/.test(mime) ? 'm4a' : 'webm'
+
+              // key 来源：优先 voice.json 里配的 Ark provider，其次进程环境的 ARK_API_KEY
+              //（DSH 的 .credentials.yaml 会在启动时注入）。都没有就明确报"没配 key"。
+              let apiKey = String(process.env.ARK_API_KEY || '').trim()
+              let baseUrl = 'https://ark.cn-beijing.volces.com/api/v3'
+              let model = String(process.env.JARVIS_ASR_MODEL || 'doubao-seed-2-0-lite-260428').trim()
+              try {
+                const cfg = effectiveVoiceConfig(readVoiceConfigRaw())
+                if (!apiKey && cfg && cfg.provider === 'ark' && cfg.apiKey) {
+                  apiKey = String(cfg.apiKey)
+                  if (cfg.baseUrl) baseUrl = String(cfg.baseUrl).replace(/\/+$/, '')
+                  if (cfg.model) model = String(cfg.model)
+                }
+              } catch { /* 配置读不到就用环境变量 */ }
+              if (!apiKey) {
+                return sendJsonLocal(res, 400, {
+                  ok: false, code: 'NO_KEY', fallback: 'text',
+                  error: '未配置语音识别服务：找不到 ARK_API_KEY',
+                  hint: '在 /root/.dsh/.credentials.yaml 配 ARK_API_KEY，或在「语音设置」里配置方舟 provider；没有 key 时语音不可用，请用文字输入',
+                })
+              }
+              try {
+                // Ark 走 OpenAI 兼容 chat/completions；音频按 OpenAI 的 input_audio 形状传。
+                // 音频格式字段与字段名都放在请求体里，便于开通后用自验脚本确认。
+                const upstreamBody = {
+                  model,
+                  messages: [{
+                    role: 'user',
+                    content: [
+                      { type: 'input_audio', input_audio: { data: b64, format: fmt } },
+                      { type: 'text', text: String((body && body.prompt) || '请把这这段语音逐字转写成文字，只输出转写结果，不要任何解释、不要标点以外的修饰。') },
+                    ],
+                  }],
+                  max_tokens: 1024,
+                  temperature: 0,
+                }
+                const upstream = await fetch(baseUrl.replace(/\/+$/, '') + '/chat/completions', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+                  body: JSON.stringify(upstreamBody),
+                  signal: AbortSignal.timeout(60000),
+                })
+                const txt = await upstream.text().catch(() => '')
+                let j = null
+                try { j = JSON.parse(txt) } catch { j = null }
+                if (!upstream.ok) {
+                  const code = String((j && j.error && j.error.code) || '')
+                  // 模型没开通：这是账号权限问题，必须点明"去控制台开通"，不能伪装成"没听清"
+                  if (/ModelNotOpen|not activated|InvalidEndpointOrModel/i.test(code + ' ' + txt)) {
+                    return sendJsonLocal(res, 503, {
+                      ok: false, code: 'MODEL_NOT_OPEN', fallback: 'text',
+                      error: `语音识别模型未开通：${model}`,
+                      hint: '登录火山方舟控制台 → 开通管理 → 激活该模型（或设置环境变量 JARVIS_ASR_MODEL 换成已开通的模型），之后无需改代码即可使用',
+                      model,
+                    })
+                  }
+                  return sendJsonLocal(res, 502, {
+                    ok: false, code: 'UPSTREAM_ERROR', fallback: 'text',
+                    error: `语音识别上游 ${upstream.status}`,
+                    detail: txt.slice(0, 300), model,
+                  })
+                }
+                const out = String((j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').trim()
+                if (!out) {
+                  return sendJsonLocal(res, 200, { ok: false, code: 'EMPTY', fallback: 'text', error: '没有识别出内容（可能是静音或说话太轻）', model })
+                }
+                return sendJsonLocal(res, 200, { ok: true, text: out.slice(0, 2000), model })
+              } catch (e) {
+                const msg = String((e && e.message) || e)
+                const timedOut = /timeout|aborted/i.test(msg)
+                return sendJsonLocal(res, 502, {
+                  ok: false, code: timedOut ? 'TIMEOUT' : 'CALL_FAILED', fallback: 'text',
+                  error: timedOut ? '语音识别超时' : '语音识别调用失败',
+                  detail: msg.slice(0, 300), model,
+                })
+              }
+            },
+          })
+
         // 0) 官方 UI 入口（T8/T9）：GET /jarvis-ui → 302 跳 /jarvis-office/jarvis.html。
         //    T9 起指向「本公司数据适配页」（左侧实时数据面板 + PixOffice 场景 iframe）；
         //    Wings 起默认进全息 Wings UI（/jarvis-wings）；?ui=legacy 回退 v2 数据适配页。

@@ -222,6 +222,16 @@ const I18N={
 'mic.err.denied':['麦克风权限被拒绝。请在浏览器地址栏中重新允许。','Microphone permission denied. Re-allow it in the address bar.'],
 'mic.err.nodev':['未检测到可用麦克风，请检查设备连接。','No microphone found. Check the device connection.'],
 'mic.err.textonly':['你可以继续使用文字点击操作','You can continue with text and clicks'],'mic.err.nosr':['麦克风已连接，但当前浏览器不支持语音识别','Mic connected, but this browser does not support speech recognition'],
+// ── 服务端语音识别（ASR）兜底文案 ──
+// 为什么需要：webkitSpeechRecognition 依赖 Google 语音服务，国内网络下必然失败，
+// 且它把 no-speech/aborted 静默吞掉 → 用户看到「说话没反应」。改用服务端 ASR 后，
+// 所有失败都必须**说出来**，不能再静默。
+'mic.srv.listening':['我在听…（说完会自动识别）','Listening… (auto-transcribes when you stop)'],
+'mic.srv.thinking':['正在识别…','Transcribing…'],
+'mic.srv.ok':['已识别','Recognized'],
+'mic.srv.notopen':['语音识别模型未开通','Speech model not activated'],
+'mic.srv.notopen.hint':['去火山方舟控制台「开通管理」激活模型；开通前请用文字输入。','Activate the model in Volcengine Ark console; use text input until done.'],
+
 'mic.off':['麦克风已断开。','Microphone disconnected.'],'mic.off.detail':['麦克风已断开，音频不会继续采集。','Microphone disconnected; audio capture stopped.'],'mic.reconnect':['点击可重新连接麦克风','Click to reconnect the microphone'],
 'voice.off.hint':['语音沟通模式未开启：可在 DSH 设置面板打开「语音沟通模式」','Voice mode is off: enable "Voice mode" in DSH settings'],
 'listen':['正在聆听：','Listening: '],'chat.you':['你：','You: '],
@@ -893,7 +903,183 @@ function stripWake(text){let s=String(text);for(const a of wakeAliases()){const 
 function armSleep(){if(wakeTimer)clearTimeout(wakeTimer);const wait=(reqState||pendingQuestion)?(reqState&&reqState.stage==='confirming'?CONFIRM_WAIT_MS:60000):18000;wakeTimer=setTimeout(()=>{if(micActive&&micMode==='live')backToWake()},wait)}
 function backToWake(){if(!micActive)return;micMode='wake';setMicUI('wake');voiceTranscript.textContent=t('wake.wait')}
 function enterLive(fromWake){micMode='live';armSleep();setMicUI('live',t('mic.st.live')+' · '+t('mic.title.live'));if(fromWake){voiceTranscript.textContent=t('wake.here');speak(t('wake.here'),true)}}
-function startRecognition(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){voiceTranscript.textContent=t('mic.err.nosr');return}recognition=new SR();recognition.lang=window.JARVIS_LANG==='en'?'en-US':'zh-CN';recognition.continuous=true;recognition.interimResults=true;recognition.onresult=e=>{let interim='',final='';for(let i=e.resultIndex;i<e.results.length;i++){const text=e.results[i][0].transcript;if(e.results[i].isFinal)final+=text;else interim+=text}if(interim&&!speakingNow)voiceTranscript.textContent=t('listen')+interim;if(!final)return;if(micMode==='wake'){if(speakingNow)return;if(heardWake(final)){const rest=stripWake(final);enterLive(true);if(rest)handleVoiceCommand(rest)}else{voiceTranscript.textContent=t('wake.miss').replace('{t}',final)}}else{if(speakingNow){if(/停止播报|静音|闭嘴|别说了|mute|stop/i.test(final.replace(/[\s，。！？]/g,''))){voiceEnabled=false;updateSpeakerUI();speechSynthesis.cancel();voiceEngineLabel.textContent=t('voice.muted.cmd')}else if(reqState&&(confirmIntent(final)||noMoreIntent(final))&&reqState.stage==='confirming'){try{speechSynthesis.cancel()}catch{};speakingNow=false;handleVoiceCommand(final)}else if(reqState&&noMoreIntent(final)){try{speechSynthesis.cancel()}catch{};speakingNow=false;handleVoiceCommand(final)}return}handleVoiceCommand(final)}};recognition.onerror=e=>{if(!['no-speech','aborted'].includes(e.error))voiceTranscript.textContent=`${t('mic.st.error')}: ${e.error}`};recognition.onend=()=>{if(micActive&&recognition)setTimeout(()=>{try{recognition.start()}catch{}},350)};try{recognition.start()}catch{}}
+// ── 识别结果处理（两个引擎共用，避免两套逻辑漂移）──
+// 内置识别（webkitSpeechRecognition）与服务端 ASR（/api/jarvis/asr）产出的都是「一句最终文字」，
+// 后续分支完全一致：待命态判唤醒词、对话态判是否在播报中打断、否则交给 handleVoiceCommand。
+function onHeardText(final){
+  if(!final)return;
+  if(micMode==='wake'){
+    if(speakingNow)return;
+    if(heardWake(final)){
+      const rest=stripWake(final);
+      enterLive(true);
+      if(rest)handleVoiceCommand(rest);
+    }else{
+      voiceTranscript.textContent=t('wake.miss').replace('{t}',final);
+    }
+    return;
+  }
+  if(speakingNow){
+    if(/停止播报|静音|闭嘴|别说了|mute|stop/i.test(final.replace(/[\s，。！？]/g,''))){
+      voiceEnabled=false;updateSpeakerUI();speechSynthesis.cancel();voiceEngineLabel.textContent=t('voice.muted.cmd');
+    }else if(reqState&&(confirmIntent(final)||noMoreIntent(final))&&reqState.stage==='confirming'){
+      try{speechSynthesis.cancel()}catch{};speakingNow=false;handleVoiceCommand(final);
+    }else if(reqState&&noMoreIntent(final)){
+      try{speechSynthesis.cancel()}catch{};speakingNow=false;handleVoiceCommand(final);
+    }
+    return;
+  }
+  handleVoiceCommand(final);
+}
+
+// ── 服务端 ASR 兜底引擎 ──
+// 为什么必须有这一层：内置识别在国内网络下拿不到 Google 语音服务，必然 network 错误；
+// 而它把 no-speech/aborted 静默吞掉，用户看到的就是「对着麦克风说话没反应」。
+// 服务端 ASR 不依赖浏览器与网络环境。
+//
+// 录音策略：VAD 式——检测到音量后开始录，静音超过 1.2 秒自动停止并上传。
+// 不用固定时长，因为用户说话长短差异很大。
+const SRV_ASR = {
+  recorder:null, chunks:[], active:false, startedAt:0, silenceSince:0, raf:0,
+  MAX_MS:30000,      // 单次上限 30 秒（防超大 base64）
+  SILENCE_MS:1200,   // 静音多久算说完了
+  MIN_MS:400,        // 太短的不传（防误触）
+};
+function srvAsrSupported(){
+  return typeof window.MediaRecorder!=='undefined'
+    && typeof navigator.mediaDevices?.getUserMedia==='function';
+}
+function srvAsrStopAndSend(rawMicStream){
+  const S=SRV_ASR;
+  if(!S.active)return;
+  S.active=false;
+  if(S.raf)cancelAnimationFrame(S.raf);
+  const rec=S.recorder;
+  S.recorder=null;
+  const elapsed=Date.now()-S.startedAt;
+  const finish=(blob)=>{
+    if(elapsed<SRV_ASR.MIN_MS||!blob||blob.size<2000){ // 太短/太小：视为没说话
+      setMicUI(micMode==='wake'?'wake':'live');
+      if(micMode==='wake')voiceTranscript.textContent=t('wake.wait');
+      return;
+    }
+    sendAudioToAsr(blob);
+  };
+  try{
+    if(rec&&rec.state!=='inactive'){
+      rec.onstop=()=>{try{const b=new Blob(S.chunks,{type:rec.mimeType||'audio/webm'});S.chunks=[];finish(b)}catch{finish(null)}};
+      rec.stop();
+    }else{
+      try{const b=new Blob(S.chunks,{type:(rec&&rec.mimeType)||'audio/webm'});S.chunks=[];finish(b)}catch{finish(null)}
+    }
+  }catch{finish(null)}
+}
+async function sendAudioToAsr(blob){
+  voiceTranscript.textContent=t('mic.srv.thinking');
+  try{
+    const b64=await new Promise((res,rej)=>{
+      const fr=new FileReader();
+      fr.onload=()=>res(String(fr.result||'').replace(/^data:[^,]*,/,''));
+      fr.onerror=rej;
+      fr.readAsDataURL(blob);
+    });
+    const r=await fetch('/api/jarvis/asr',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({audio:b64,mime:blob.type||'audio/webm',lang:window.JARVIS_LANG==='en'?'en':'zh'}),
+    });
+    const out=await r.json().catch(()=>null);
+    if(!out){voiceTranscript.textContent=t('mic.st.error')+': 响应解析失败';return}
+    if(out.ok&&out.text){
+      onHeardText(String(out.text).trim());
+      return;
+    }
+    // 失败必须说出来，不能静默（这正是旧版最坏的地方）
+    const code=String(out.code||'');
+    if(code==='MODEL_NOT_OPEN'){
+      setMicUI('error',t('mic.srv.notopen'));
+      voiceTranscript.textContent=t('mic.srv.notopen')+' — '+t('mic.srv.notopen.hint');
+    }else if(code==='NO_KEY'){
+      setMicUI('error',t('mic.srv.notopen'));
+      voiceTranscript.textContent=String(out.hint||t('mic.srv.notopen.hint'));
+    }else{
+      voiceTranscript.textContent=`${t('mic.st.error')}: ${String(out.error||code||'未知')}`;
+    }
+  }catch(e){
+    voiceTranscript.textContent=`${t('mic.st.error')}: ${String((e&&e.message)||e).slice(0,60)}`;
+  }
+}
+// 启动一轮 VAD 录音（与内置识别并行运行；任一引擎出结果都会走 onHeardText）
+function srvAsrArm(rawMicStream,analyserNode){
+  if(!srvAsrSupported()||!rawMicStream||!analyserNode)return;
+  const S=SRV_ASR;
+  let mr;
+  try{ mr=new MediaRecorder(rawMicStream); }catch{ return }
+  S.recorder=mr; S.chunks=[]; S.active=true; S.startedAt=Date.now(); S.silenceSince=0;
+  mr.ondataavailable=e=>{ if(e.data&&e.data.size) S.chunks.push(e.data) };
+  try{ mr.start(250) }catch{ S.active=false; return }
+  const buf=new Uint8Array(analyserNode.fftSize);
+  const loop=()=>{
+    if(!S.active)return;
+    try{
+      analyserNode.getByteTimeDomainData(buf);
+      let peak=0;
+      for(let i=0;i<buf.length;i++){const v=Math.abs(buf[i]-128);if(v>peak)peak=v}
+      const now=Date.now();
+      if(peak>12){ S.silenceSince=0 }           // 有人在说话
+      else if(!S.silenceSince){ S.silenceSince=now }
+      const quietFor=S.silenceSince?now-S.silenceSince:0;
+      if((quietFor>SRV_ASR.SILENCE_MS&&now-S.startedAt>SRV_ASR.MIN_MS)||now-S.startedAt>SRV_ASR.MAX_MS){
+        srvAsrStopAndSend(rawMicStream);
+        return;
+      }
+    }catch{ /* 采不到就继续 */ }
+    S.raf=requestAnimationFrame(loop);
+  };
+  S.raf=requestAnimationFrame(loop);
+}
+function srvAsrCancel(){
+  const S=SRV_ASR;
+  S.active=false;
+  if(S.raf){cancelAnimationFrame(S.raf);S.raf=0}
+  try{ if(S.recorder&&S.recorder.state!=='inactive')S.recorder.stop() }catch{}
+  S.recorder=null; S.chunks=[];
+}
+
+// ── 内置识别：优先（若可用且不报错），失败则静默停用，交给服务端 ASR ──
+// 判断"可用"不能只看构造函数存在（Chrome 也有构造函数但国内网络跑不通）——
+// 必须在收到一次 network/service-not-allowed 错误后才真正判死。
+let builtinAsrDead=false;
+function markBuiltinDead(reason){
+  if(builtinAsrDead)return;
+  builtinAsrDead=true;
+  try{ if(recognition){const r=recognition;recognition=null;r.abort()} }catch{}
+  // 不弹错误框：服务端 ASR 会接管，用户只需继续说话
+  voiceTranscript.textContent=t('mic.srv.listening');
+  if(micActive) srvAsrArm(micStream,analyser);
+  void reason;
+}
+function startRecognition(){
+  if(builtinAsrDead){ if(micActive&&micStream) srvAsrArm(micStream,analyser); return }
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){
+    // 浏览器没有内置识别 → 直接走服务端 ASR（不再报"不支持"
+    voiceTranscript.textContent=srvAsrSupported()?t('mic.srv.listening'):t('mic.err.nosr');
+    if(micActive&&micStream&&analyser)srvAsrArm(micStream,analyser);
+    return;
+  }
+  try{ recognition=new SR() }catch{ markBuiltinDead('ctor'); return }
+  recognition.lang=window.JARVIS_LANG==='en'?'en-US':'zh-CN';recognition.continuous=true;recognition.interimResults=true;
+  recognition.onresult=e=>{let interim='',final='';for(let i=e.resultIndex;i<e.results.length;i++){const text=e.results[i][0].transcript;if(e.results[i].isFinal)final+=text;else interim+=text}if(interim&&!speakingNow)voiceTranscript.textContent=t('listen')+interim;if(final)onHeardText(final)};
+  recognition.onerror=e=>{
+    const err=String(e.error||'');
+    // network / service-not-allowed / language-not-supported：内置识别在本环境下不可能工作
+    // （国内网络访问不到 Google 语音服务是最常见原因）。判死后永久改用服务端 ASR。
+    if(/^(network|service-not-allowed|language-not-supported|not-allowed)$/i.test(err)){markBuiltinDead(err);return}
+    if(!['no-speech','aborted'].includes(err))voiceTranscript.textContent=`${t('mic.st.error')}: ${err}`;
+  };
+  recognition.onend=()=>{if(micActive&&recognition&&!builtinAsrDead)setTimeout(()=>{try{recognition.start()}catch{}},350)};
+  try{recognition.start()}catch(e){markBuiltinDead('start')}
+}
 async function startMic(announce=true){if(window.JARVIS_VOICE_ON===false){setMicUI('offline',t('voice.off.hint'));voiceTranscript.textContent=t('voice.off.hint');return}
 // 关键诊断：麦克风 API 在**非安全上下文**里根本不存在（navigator.mediaDevices === undefined）。
 // 常见触发：http 访问、或 https 但证书不被信任（自签证书、IP 直连）。
@@ -906,7 +1092,7 @@ if(!navigator.mediaDevices?.getUserMedia){
     setMicUI('error',t('mic.err.nosupport'));
   }
   return}setMicUI('waiting',t('mic.title.waiting'));try{micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});audioContext=new(window.AudioContext||window.webkitAudioContext)();const source=audioContext.createMediaStreamSource(micStream);analyser=audioContext.createAnalyser();analyser.fftSize=256;analyser.smoothingTimeConstant=.82;source.connect(analyser);micData=new Uint8Array(analyser.fftSize);micActive=true;micMode='wake';setMicUI('wake');voiceTranscript.textContent=t('wake.wait');drawMicWave();startRecognition();selectJarvisVoice();if(announce&&voiceEnabled)speak(t('wake.announce'),true)}catch(error){micActive=false;micMode='off';setMicUI('error',error?.name==='NotAllowedError'?t('mic.err.denied'):t('mic.err.nodev'));voiceTranscript.textContent=t('mic.err.textonly');clearMicWave()}}
-function stopMic(announce=true){micActive=false;micMode='off';if(wakeTimer)clearTimeout(wakeTimer);if(recognition){const r=recognition;recognition=null;try{r.stop()}catch{}}if(micStream){micStream.getTracks().forEach(track=>track.stop());micStream=null}if(audioContext){audioContext.close().catch(()=>{});audioContext=null}analyser=null;clearMicWave();setMicUI('offline',t('mic.off.detail'));voiceTranscript.textContent=t('mic.reconnect');if(announce&&voiceEnabled)speak(t('mic.off'),true)}
+function stopMic(announce=true){micActive=false;micMode='off';if(wakeTimer)clearTimeout(wakeTimer);srvAsrCancel();if(recognition){const r=recognition;recognition=null;try{r.stop()}catch{}}if(micStream){micStream.getTracks().forEach(track=>track.stop());micStream=null}if(audioContext){audioContext.close().catch(()=>{});audioContext=null}analyser=null;clearMicWave();setMicUI('offline',t('mic.off.detail'));voiceTranscript.textContent=t('mic.reconnect');if(announce&&voiceEnabled)speak(t('mic.off'),true)}
 function toggleMic(){if(micActive)stopMic();else startMic(true)}
 voiceNode.addEventListener('click',toggleMic);voiceNode.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggleMic()}});clearMicWave();addEventListener('pagehide',()=>{stopMic(false);document.body.classList.remove('jarvis-speaking');if('speechSynthesis'in window)speechSynthesis.cancel()});
 // 自动待命：麦克风权限已授权过的浏览器，进页面直接进入唤醒监听，无需手动点「连接麦克风」。
