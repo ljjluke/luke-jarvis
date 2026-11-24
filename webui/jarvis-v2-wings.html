@@ -239,6 +239,11 @@ const I18N={
 'intent.fromhistory':['「{t}」已经收进历史看板，正在打开它的详情。','"{t}" is archived; opening its detail.'],
 'intent.status.cards':['主屏有 {n} 张卡，都在这儿了。','{n} cards on screen.'],
 'intent.status.empty':['现在主屏没有卡片——团队还没开工。','No cards yet — the team has not started.'],
+// ── 发声通道状态（v0.18）──
+'voice.ch.server':['发声：服务端语音','Voice: server TTS'],
+'voice.ch.browser':['发声：浏览器内置','Voice: browser speech'],
+'voice.ch.muted':['发声：已静音','Voice: muted'],
+
 
 
 'mic.off':['麦克风已断开。','Microphone disconnected.'],'mic.off.detail':['麦克风已断开，音频不会继续采集。','Microphone disconnected; audio capture stopped.'],'mic.reconnect':['点击可重新连接麦克风','Click to reconnect the microphone'],
@@ -563,16 +568,90 @@ let voiceEnabled=false,preferredVoice=null;
 const voiceEngineLabel=document.getElementById('voiceEngineLabel');
 const preferredNames=['Microsoft Xiaoxiao Online (Natural)','Microsoft Xiaoyi Online (Natural)','Microsoft Xiaohan Online (Natural)','Microsoft Xiaomeng Online (Natural)','Microsoft Huihui','Microsoft Yaoyao'];
 function selectJarvisVoice(){if(!('speechSynthesis'in window))return null;const isEn=window.JARVIS_LANG==='en';const voices=speechSynthesis.getVoices();let match=null;if(isEn){match=voices.find(v=>/^en(-|_|$)/i.test(v.lang)&&/natural|aria|zira|samantha|google uk english female|google us english/i.test(v.name))||voices.find(v=>/^en/i.test(v.lang))||null}else{for(const name of preferredNames){const m=voices.find(v=>v.name.includes(name)&&/zh|Chinese|中文/i.test(`${v.lang} ${v.name}`));if(m){match=m;break}}if(!match)match=voices.find(v=>/zh-CN/i.test(v.lang)&&/xiaoxiao|xiaoyi|xiaohan|xiaomeng|huihui|yaoyao|female|女/i.test(v.name))||voices.find(v=>/zh-CN/i.test(v.lang))||null}preferredVoice=match;return match}
-function updateSpeakerUI(){}
+function updateSpeakerUI(){
+  // 语音状态区如实显示当前发声通道——用户不该猜「为什么声音不好听/为什么没声音」。
+  // 三种可能：服务端 TTS（音质好）/ 浏览器内置（音质一般）/ 静音（用户关了）。
+  try{
+    const el=document.getElementById('voiceStatus');
+    const label=document.getElementById('voiceEngineLabel');
+    const mode=window.__JARVIS_TTS_MODE__;
+    const text=!voiceEnabled
+      ? t('voice.ch.muted')
+      : mode==='server' ? t('voice.ch.server')
+      : t('voice.ch.browser');
+    if(label)label.textContent=text;
+    else if(el&&!el.textContent)el.textContent=text;
+  }catch{/* UI 不在也不影响播报 */}
+}
 let speakQueue=[],speakingNow=false,lastSpokenText='',capGreeted=false;
 function splitSentences(t){return String(t||'').replace(/\s+/g,' ').split(/(?<=[。！？!?；;])/).map(s=>s.trim()).filter(Boolean)}
 /* P0-3：语音配置（多供应商卡）本地缓存；拿不到就只用 text（浏览器语音兜底） */
 window.__JARVIS_TTS_CFG__=window.__JARVIS_TTS_CFG__||null;
+// ── 服务端 TTS 可用性（v0.18）──
+// 为什么需要：未配置 TTS 时 /api/jarvis/tts 每句都返回 400，浏览器照样兜底发声，
+// 但每句话都白发一次请求（一句话一次失败往返，播报越频繁越浪费）。
+// 做法：页面加载探一次并缓存；不可用时直接走浏览器，不再试探。
+// 三种状态：
+//   'unknown' 还没探过 → 先试服务端（首次调用时更新结论）
+//   'server'  服务端可用 → 优先服务端（音质更好）
+//   'browser' 服务端不可用 → 直接浏览器，不浪费请求
+window.__JARVIS_TTS_MODE__ = 'unknown';
+(async function probeTts(){
+  try{
+    const r=await fetch('/api/jarvis/voice',{cache:'no-store'});
+    const b=await r.json();
+    const c=b&&b.config||{};
+    const active=String(c.active||'');
+    const providers=Array.isArray(c.providers)?c.providers:[];
+    // 有 active 且该 provider 有 apiKey（掩码过的也算配了）= 服务端可用
+    const card=providers.find(p=>p&&p.name===active);
+    const usable=!!(active&&card&&(card.apiKey||card.configured||card.hasKey));
+    window.__JARVIS_TTS_MODE__=usable?'server':'browser';
+  }catch(e){window.__JARVIS_TTS_MODE__='browser'}
+  // 探测有结论后刷新状态显示（此时 updateSpeakerUI 已定义）
+  try{if(typeof updateSpeakerUI==='function')updateSpeakerUI()}catch{}
+})();
 (async function loadTtsCfg(){try{const r=await fetch('/api/jarvis/voice',{cache:'no-store'});const b=await r.json();if(!b||!b.ok||!b.config)return;const c=b.config;const card=Array.isArray(c.providers)?c.providers.find(p=>p&&p.name===c.active):null;window.__JARVIS_TTS_CFG__=card||null}catch(e){}})();
 function ttsBody(s){const card=window.__JARVIS_TTS_CFG__||{};const body={text:s};if(card.voice)body.voice=card.voice;if(card.speed)body.speed=card.speed;if(card.instructions)body.instructions=card.instructions;if(card.emotion)body.emotion=card.emotion;if(card.style)body.style=card.style;return JSON.stringify(body)}
 function speakServer(s){return fetch('/api/jarvis/tts',{method:'POST',headers:{'content-type':'application/json'},body:ttsBody(s)}).then(async r=>{if(!r.ok)return false;const blob=await r.blob();const url=URL.createObjectURL(blob);const audio=new Audio(url);await new Promise(res=>{audio.onended=res;audio.onerror=res;audio.play().catch(res)});URL.revokeObjectURL(url);return true}).catch(()=>false)}
-function speakBrowser(s){return new Promise(resolve=>{if(!('speechSynthesis'in window))return resolve();const u=new SpeechSynthesisUtterance(s);u.lang='zh-CN';u.rate=.9;u.pitch=.86;u.volume=1;if(preferredVoice)u.voice=preferredVoice;u.onend=()=>resolve();u.onerror=()=>resolve();speechSynthesis.speak(u)})}
-async function speakNext(){if(!speakQueue.length){speakingNow=false;document.body.classList.remove('jarvis-speaking');return}const s=speakQueue.shift();const cap=document.getElementById('captionText');if(cap)cap.textContent=s+' ';document.body.classList.add('jarvis-speaking');const used=await speakServer(s);if(!used)await speakBrowser(s);document.body.classList.remove('jarvis-speaking');if(speakQueue.length)setTimeout(speakNext,160)}
+function speakBrowser(s){
+  return new Promise(resolve=>{
+    if(!('speechSynthesis'in window))return resolve();
+    // 音色可能还没加载完（Chrome 的 getVoices 是异步的）——这里再取一次，
+    // 不依赖页面初始化那次是否成功。
+    if(!preferredVoice){try{selectJarvisVoice()}catch{}}
+    const u=new SpeechSynthesisUtterance(s);
+    u.lang=window.JARVIS_LANG==='en'?'en-US':'zh-CN';
+    u.rate=.9;u.pitch=.86;u.volume=1;
+    if(preferredVoice)u.voice=preferredVoice;
+    // ⚠️ 必须有超时兜底：Chrome 有已知问题——标签页失焦/长文本时 onend 不触发，
+    //    那样整条播报队列会永久卡死，之后 JARVIS 再也不出声（而且用户看不出为什么）。
+    //    估算时长 = 字数 × 220ms，至少 3 秒，最多 30 秒。
+    const budgetMs=Math.min(30000,Math.max(3000,String(s).length*220));
+    let done=false;
+    const finish=()=>{if(done)return;done=true;clearTimeout(timer);try{speechSynthesis.cancel()}catch{};resolve()};
+    const timer=setTimeout(finish,budgetMs);
+    u.onend=finish;
+    u.onerror=finish;
+    try{speechSynthesis.speak(u)}catch{finish()}
+  })
+}
+async function speakNext(){
+  if(!speakQueue.length){speakingNow=false;document.body.classList.remove('jarvis-speaking');return}
+  const s=speakQueue.shift();
+  const cap=document.getElementById('captionText');if(cap)cap.textContent=s+' ';
+  document.body.classList.add('jarvis-speaking');
+  // v0.18：已知服务端不可用 → 直接走浏览器，不再每句白发一次失败请求。
+  // 未知时试服务端；一旦服务端失败就把结论改为 browser 并缓存（首句试一次即够）。
+  let used=false;
+  if(window.__JARVIS_TTS_MODE__!=='browser'){
+    used=await speakServer(s);
+    if(!used && window.__JARVIS_TTS_MODE__==='unknown')window.__JARVIS_TTS_MODE__='browser';
+  }
+  if(!used)await speakBrowser(s);
+  document.body.classList.remove('jarvis-speaking');
+  if(speakQueue.length)setTimeout(speakNext,160)
+}
 function speak(text,force=false){if(!voiceEnabled&&!force)return;const clean=String(text||'').replace(/\s+/g,' ').trim();if(!clean)return;if(clean===lastSpokenText&&!force)return;lastSpokenText=clean;if('speechSynthesis'in window)speechSynthesis.cancel();speakQueue=splitSentences(clean).slice(0,8);if(!speakQueue.length)return;speakingNow=true;speakNext()}
 /* ── 电影式字幕播放器 ────────────────────────────────────────────────
    主屏底部字幕：无论语音播报开没开，都按句逐句替换（读完一句换下一句），
