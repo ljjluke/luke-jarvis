@@ -41,6 +41,9 @@
 #detailTitle{margin:0 0 10px;font-size:24px;font-weight:300;letter-spacing:.5px}
 .detail-copy{margin:0 0 18px;font-size:12px;color:#91b7c8;line-height:1.8;max-width:900px}
 .detail-rows{display:flex;flex-direction:column;gap:10px;max-width:900px}.vlog-row.me{border-color:rgba(60,242,165,.3);background:linear-gradient(115deg,rgba(9,45,38,.5),rgba(3,20,16,.24))}.vlog-text{font-size:12px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+/* 用户点名要看某张卡时的高亮（v0.17 意图层）：2.6 秒后自动消退，不干扰后续阅读 */
+.hud-node.node-spotlight{box-shadow:0 0 0 1px rgba(112,234,255,.65),0 0 28px rgba(112,234,255,.35),0 0 60px rgba(112,234,255,.16);z-index:9;animation:spotIn .45s cubic-bezier(.16,1,.3,1)}
+@keyframes spotIn{from{transform:scale(.97)}to{transform:scale(1)}}
 .detail-row{padding:13px 16px;background:linear-gradient(115deg,rgba(7,28,43,.5),rgba(3,13,21,.24));border:1px solid rgba(112,234,255,.12);clip-path:polygon(0 0,96% 0,100% 10%,100% 100%,4% 100%,0 92%)}
 .detail-row-main{font-size:13px;line-height:1.6}
 .detail-row-sub{margin-top:5px;font-size:10px;color:#6f92a4}
@@ -231,6 +234,12 @@ const I18N={
 'mic.srv.ok':['已识别','Recognized'],
 'mic.srv.notopen':['语音识别模型未开通','Speech model not activated'],
 'mic.srv.notopen.hint':['去火山方舟控制台「开通管理」激活模型；开通前请用文字输入。','Activate the model in Volcengine Ark console; use text input until done.'],
+// ── 意图层（v0.17）：读意图的反馈文案 ──
+'intent.found':['找到了：','Found: '],
+'intent.fromhistory':['「{t}」已经收进历史看板，正在打开它的详情。','"{t}" is archived; opening its detail.'],
+'intent.status.cards':['主屏有 {n} 张卡，都在这儿了。','{n} cards on screen.'],
+'intent.status.empty':['现在主屏没有卡片——团队还没开工。','No cards yet — the team has not started.'],
+
 
 'mic.off':['麦克风已断开。','Microphone disconnected.'],'mic.off.detail':['麦克风已断开，音频不会继续采集。','Microphone disconnected; audio capture stopped.'],'mic.reconnect':['点击可重新连接麦克风','Click to reconnect the microphone'],
 'voice.off.hint':['语音沟通模式未开启：可在 DSH 设置面板打开「语音沟通模式」','Voice mode is off: enable "Voice mode" in DSH settings'],
@@ -839,8 +848,185 @@ async function dispatchTask(text,opts){
     return {ok:false,error:msg};
   }
 }
-function handleVoiceCommand(text){const command=text.replace(/[，。！？\s]/g,'');voiceTranscript.textContent=t('chat.you')+text;armSleep();logVoice('me',text)
+// ══ 意图分层（v0.17）══
+// 为什么需要：用户原话「我直接麦克风跟主页面沟通，他会按我说的做吗？」——
+// 现实是语音只会 5 个硬编码导航词，其余全部当成「新需求」派给 CEO。
+// 你说「看看那张卡？」→ 被当成要开新单，白派一张单；你说「你好」→ 开始追问你要做什么。
+//
+// 本层的原则：**读意图优先，误判代价最小化**。
+//   · 把读意图误判成需求 = 白派一张单（贵，且用户看到"记下了"却没卡片，最迷惑）
+//   · 把需求误判成读意图 = 只是回了句现状，用户再说一遍即可（便宜）
+// 所以分类时宁可把模棱两可的判成读意图。
+//
+// 分类按「特征词 + 目标名」打分，不靠穷举正则——用户说法无限变体。
+const INTENT_PAT = {
+  // 读：想"看"某种信息（看/查/怎么样/什么情况/有没有...）
+  read: /看|瞧|查|瞅|显示|列出|给我|拿给我|show|看看|what|how is|status of|什么情况|怎么了|咋样|咋回事/i,
+  // 导航：明确的页面名
+  navProgress: /进度|进展|做到哪|干到哪|progress|到哪一步/,
+  navReport: /汇报|报告|结果|产出|report|summary|结论/,
+  navTeam: /员工|团队|协作|谁在|成员|team|人员/,
+  navHistory: /历史|之前|以前|记录|归档|回收站|history|archive|刚才说|刚才(我|你)/,
+  navMain: /返回|回到|主屏|总览|主页|overview|back|退出|home/,
+  // 动作：想"让"它做某件具体的事（催/停/改/加/删/重试）
+  action: /催|停止|暂停|取消|重试|重启|改一下|改成|删掉|加上|换成|继续干|开始干|加快|优先/i,
+  // 问候：不是需求
+  greeting: /^(你好|您好|嗨|哈啰|哈喽|您好呀|在吗|在不在|hi|hello|hey)+$/i,
+  // 否定/收尾
+  noMore: /没有了|没了|就这些|说完|就这样|没有了|没别的|够了/,
+};
+
+/** 分类一句用户输入。返回 {kind, reason}。
+ *  kind ∈ 'greeting' | 'read' | 'action' | 'need'
+ *  注意：read 与 action 同时命中时**以 read 为准**（先给用户看，再谈做不做）。 */
+function classifyIntent(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return { kind: 'need', reason: 'empty' };
+  const s = raw.replace(/[，。！？、\s]/g, '');
+  if (INTENT_PAT.greeting.test(s) || (s.length <= 3 && INTENT_PAT.greeting.test(s))) {
+    return { kind: 'greeting', reason: 'greeting' };
+  }
+  const hasRead = INTENT_PAT.read.test(s);
+  const hasAction = INTENT_PAT.action.test(s);
+  // 明确指向某个页面 → 读
+  const pages = []
+  if (INTENT_PAT.navProgress.test(s)) pages.push('progress');
+  if (INTENT_PAT.navTeam.test(s)) pages.push('team');
+  if (INTENT_PAT.navHistory.test(s)) pages.push('history');
+  if (INTENT_PAT.navReport.test(s)) pages.push('report');
+  if (INTENT_PAT.navMain.test(s)) pages.push('main');
+  if (pages.length) return { kind: 'read', reason: 'page:' + pages[0], page: pages[0] };
+  if (hasRead && !hasAction) return { kind: 'read', reason: 'read-verb' };
+  if (hasRead && hasAction) return { kind: 'read', reason: 'read-before-action' };   // 先看再说
+  if (hasAction) return { kind: 'action', reason: 'action-verb' };
+  // 短句 + 无动作词 + 无读词：可能是导航简称（"进度"两字）
+  if (s.length <= 4 && /^(进度|报告|团队|历史|主页)$/.test(s)) {
+    return { kind: 'read', reason: 'short-nav' };
+  }
+  return { kind: 'need', reason: 'fallthrough' };
+}
+
+/** 按名字/关键词在当前卡片里找一张。返回 { card, index } 或 null。
+ *  只在已渲染的 LIVE.cards 与 LIVE.cardHistory 里找——**不造新卡**（造卡=假数据）。 */
+function findCardByHint(text) {
+  const q = String(text || '').replace(/[，。！？、\s]/g, '').toLowerCase();
+  if (!q) return null;
+  const pool = [
+    ...(LIVE.cards || []).map((c, i) => ({ c, i, alive: true })),
+    ...(((LIVE.cardHistory) || []).map((c) => ({ c, i: -1, alive: false }))),
+  ];
+  // 目标词：从用户话里剥掉读动词和虚词，剩下的当关键词。
+  // 剥得越干净越好找——否则「刚才说的那个审计报告」会因为残留"刚才说的"而命中不足。
+  const core = q.replace(/我想|我要看|我要|给我看|给我|看看|看一下|看下|瞧瞧|查查|查一下|那个|这张|那张|这|卡片|刚才|之前|说过的|说的|的|吗|呢|怎么样|什么情况|还有|现在|一下|一个|有/g, '');
+  if (!core) return null;
+  let best = null, bestScore = 0;
+  for (const p of pool) {
+    const c = p.c || {};
+    const hay = (String(c.title || '') + ' ' + String(c.k || '') + ' ' + String(c.copy || '')).toLowerCase().replace(/\s+/g, '');
+    if (!hay) continue;
+    // 逐字包含打分：核心词整体命中 > 单字命中。
+    // 单字命中门槛必须够严——否则「我要看财务报表」会因为命中了「报」字
+    // 而误匹配到「报告」类卡片，用户会看到一张完全不相关的卡（比找不到更糟）。
+    // 但门槛太高会把真目标漏掉（「审计报告」vs「测试覆盖与假通过审计」只共享 2 字），
+    // 所以按核心词长度分两档：短词（≤3 字）要 3 字全中，长词允许部分命中但覆盖率过半。
+    let score = 0;
+    if (core.length >= 2 && hay.includes(core)) score = core.length * 2;   // 整体命中：最强信号
+    else {
+      // 最长公共子串（LCS）判定：比"散落单字"可靠得多。
+      //   「审计报告」 vs「测试覆盖与假通过审计」 → 「审计」= 2 字连续 → 认
+      //   「财务报表」 vs「合并缺陷总报告」     → 散字「报/务」，连续仅 1 字 → 不认
+      // 这就是「找不到比找错好」的落地：宁可说"没有这张"，也不给用户看一张无关的卡。
+      let best2 = 0;
+      const a2 = core, b2 = hay;
+      const dp = new Array(a2.length + 1).fill(0);
+      for (let ii = 1; ii <= a2.length; ii += 1) {
+        let prevDiag = 0;
+        for (let jj = 1; jj <= b2.length; jj += 1) {
+          const cur = dp[jj];
+          if (a2[ii - 1] === b2[jj - 1]) { dp[jj] = prevDiag + 1; if (dp[jj] > best2) best2 = dp[jj]; }
+          else dp[jj] = 0;
+          prevDiag = cur;
+        }
+      }
+      const need = core.length <= 2 ? core.length : 2;
+      if (best2 < need) continue;
+      score = best2 * 3;      // 连续词块比散字更可信，给更高分
+    }
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  return best;
+}
+
+/** 聚焦一张已渲染的卡：滚到它、高亮、可选打开详情。 */
+function focusCard(cardId) {
+  const node = document.querySelector(`.hud-node[data-card-id="${String(cardId).replace(/"/g, '\\"')}"]`);
+  if (!node) return false;
+  try {
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    node.classList.add('node-spotlight');
+    setTimeout(() => node.classList.remove('node-spotlight'), 2600);
+    node.focus?.({ preventScroll: true });
+  } catch { /* 定位失败不影响主流程 */ }
+  return true;
+}
+
+/** 执行读意图：只做「切页/聚焦/取回/报现状」，全只读，不改后端状态。
+ *  @returns {boolean} 是否处理了（false → 调用方回退到需求收集） */
+function runReadIntent(intent, text) {
+  const seat = String((intent && intent.page) || '');
+  // ① 页面型：直接切到对应视图
+  if (seat === 'progress') { showProgress(false); return true }
+  if (seat === 'report') { showProgress(true); return true }
+  if (seat === 'team') { showTeam(); return true }
+  if (seat === 'history') { showHistory(); return true }
+  if (seat === 'main') { showMain(); return true }
+  // ② 指名卡片型：在现有卡片里找
+  const hit = findCardByHint(text);
+  if (hit) {
+    showMain();
+    if (hit.alive) {
+      const ok = focusCard(hit.c.id);
+      if (ok) { voiceTranscript.textContent = `${t('intent.found')}「${clip(String(hit.c.title || ''), 40)}」`; return true }
+    }
+    // 已滚出主屏（在历史里）→ 打开它的详情
+    if (!hit.alive && hit.c) {
+      showDetail(hit.c);
+      voiceTranscript.textContent = t('intent.fromhistory').replace('{t}', clip(String(hit.c.title || ''), 40));
+      return true;
+    }
+    focusCard(hit.c.id);
+    return true;
+  }
+  // ③ 泛指「看现状/显示卡片」：主屏 + 报一句实际态势（不编内容）
+  if (intent && intent.reason === 'read-verb') {
+    showMain();
+    const n = (LIVE.cards || []).length;
+    voiceTranscript.textContent = n
+      ? t('intent.status.cards').replace('{n}', String(n))
+      : t('intent.status.empty');
+    return true;
+  }
+  return false;   // 没找到、也不是页面型 → 交给调用方当需求处理
+}
+
+/** 问候：直接应答，不要进需求收集（旧行为会把「你好」当需求追问，很蠢）。 */
+function runGreeting() {
+  const line = personaLineText('greeting');
+  voiceTranscript.textContent = line;
+  say(line, { speak: true });
+  logVoice('jarvis', line);
+}
+function personaLineText() {
+  // 复用页面已有的问候语来源；拿不到就用固定句。
+  try { return t('wake.here') } catch { return '在，我在听。' }
+}
+
+function handleVoiceCommand(text){
+  const command=text.replace(/[，。！？\s]/g,'');
+  voiceTranscript.textContent=t('chat.you')+text;
+  armSleep();logVoice('me',text);
   const NAV=/查看进度|任务进度|执行进度|progress|完成汇报|汇报结果|查看报告|report|员工|协作空间|团队空间|team|返回总览|回到主屏|返回主页面|overview|back|停止播报|静音|关闭声音|mute|stop talking|开启声音|开始播报|恢复播报|unmute|speak up|历史看板|历史记录|查看历史|history/i
+  const cIntent=classifyIntent(text);
   // ① 收集阶段（含追问后）：用户还在说需求
   if(reqState&&(reqState.stage==='collecting'||reqState.stage==='collecting_asked')){
     if(noMoreIntent(text)){
@@ -848,11 +1034,11 @@ function handleVoiceCommand(text){const command=text.replace(/[，。！？\s]/g
       goConfirm(reqState);
       return;
     }
-    if(NAV.test(command)&&!noMoreIntent(text)&&String(text).replace(/[，。！？\s]/g,'').length<=12){
-      // 短导航词（如「查看进度」）允许先打断收集，避免把导航当成需求
+    // 短导航/读意图允许先打断收集（避免把「我要看进度」当需求继续累积）
+    if((NAV.test(command)||cIntent.kind==='read')&&!noMoreIntent(text)&&String(text).replace(/[，。！？\s]/g,'').length<=14){
       const msg=t('req.discarded');
       clearReqState();say(msg);voiceTranscript.textContent=msg;
-      // 落到下面继续执行导航
+      // 落到下面继续执行
     }else{
       // 继续补充需求（可能是追问后的回答，也可能是主动补充）
       collectRequirement(text);
@@ -892,6 +1078,11 @@ function handleVoiceCommand(text){const command=text.replace(/[，。！？\s]/g
     answerQuestion(q,text);
     return;
   }
+  // ② 意图层（v0.17）：先判读意图 / 问候 / 动作，再落到需求收集。
+  //    旧行为是「没命中 5 个导航词就当新需求」，导致「看看那张卡」被白派一张单。
+  if(cIntent.kind==='greeting'){runGreeting();return}
+  if(cIntent.kind==='read'&&runReadIntent(cIntent,text))return
+  // ②b 原有导航词（保留：语音引擎常吐简写，正则比意图分类更宽松）
   if(/查看进度|任务进度|执行进度|progress/i.test(command)){showProgress();return}if(/完成汇报|汇报结果|查看报告|report/i.test(command)){showProgress(true);return}if(/员工|协作空间|团队空间|team/i.test(command)){showTeam();return}if(/返回总览|回到主屏|返回主页面|overview|back/i.test(command)){showMain();return}if(/停止播报|静音|关闭声音|mute|stop talking/i.test(command)){voiceEnabled=false;updateSpeakerUI();speechSynthesis.cancel();voiceEngineLabel.textContent=t('voice.muted.cmd');clearReqState();return}if(/开启声音|开始播报|恢复播报|unmute|speak up/i.test(command)){voiceEnabled=true;updateSpeakerUI();speak(mainSpeech,true);return}if(/历史看板|历史记录|查看历史|history/i.test(command)){showHistory();return}if(window.__jarvisDecisionReply&&window.__jarvisDecisionReply(text)){voiceTranscript.textContent=t('dispatch.deciding');return}
   // ③ 以上都不是：按新需求开始收集（不立刻问确认，先听用户说完/等他补一句）
   collectRequirement(text);voiceStatus.textContent=t('dispatch.voice')}
@@ -1110,7 +1301,16 @@ const teamChatLog=document.getElementById('teamChatLog'),teamChatInput=document.
 function addTeamMessage(author,text){const jn=String(window.JARVIS_NAME||'Jarvis');const item=document.createElement('div');item.className=`chat-message${author===jn?' jarvis':''}`;const head=document.createElement('div');head.className='chat-author';const name=document.createElement('span');name.textContent=author;const time=document.createElement('time');time.textContent=new Date().toLocaleTimeString(window.JARVIS_LANG==='en'?'en-US':'zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});const body=document.createElement('p');body.textContent=text;head.append(name,time);item.append(head,body);
   const empty=document.getElementById('teamChatEmpty');if(empty)empty.remove();
   teamChatLog.appendChild(item);teamChatLog.scrollTop=teamChatLog.scrollHeight}
-document.getElementById('teamChatForm').addEventListener('submit',async e=>{e.preventDefault();const text=teamChatInput.value.trim();if(!text)return;addTeamMessage('你',text);teamChatInput.value='';if(voiceEnabled)speak(t('chat.sent'),true);const out=await dispatchTask(text,{say:false});if(!out.ok&&out.error)addTeamMessage(window.JARVIS_NAME||'Jarvis',t('dispatch.fail').replace('{e}',clip(out.error,60)))});
+document.getElementById('teamChatForm').addEventListener('submit',async e=>{
+  e.preventDefault();const text=teamChatInput.value.trim();if(!text)return;
+  addTeamMessage('你',text);teamChatInput.value='';
+  // v0.17 意图层：文字与语音同一入口（否则打「查看进度」会被当需求派给 CEO）
+  const cIntent=classifyIntent(text);
+  if(cIntent.kind==='greeting'){runGreeting();addTeamMessage(window.JARVIS_NAME||'Jarvis',t('wake.here'));return}
+  if(cIntent.kind==='read'&&runReadIntent(cIntent,text)){addTeamMessage(window.JARVIS_NAME||'Jarvis',voiceTranscript.textContent||t('intent.found'));return}
+  if(voiceEnabled)speak(t('chat.sent'),true);
+  const out=await dispatchTask(text,{say:false});
+  if(!out.ok&&out.error)addTeamMessage(window.JARVIS_NAME||'Jarvis',t('dispatch.fail').replace('{e}',clip(out.error,60)))});
 document.querySelectorAll('[data-decision]').forEach(button=>button.addEventListener('click',()=>{const approved=button.dataset.decision==='approve';const result=approved?t('decision.approved'):t('decision.test');const bar=document.getElementById('decisionBar');bar.querySelector('.decision-copy b').textContent=approved?t('decision.ok1'):t('decision.ok2');bar.querySelector('.decision-copy span').textContent=result;bar.querySelector('.decision-actions').textContent=approved?t('decision.approved.short'):t('decision.test.short');addTeamMessage(window.JARVIS_NAME||'Jarvis',result);if(voiceEnabled)speak(result,true)}));
 const root=document.documentElement;addEventListener('pointermove',e=>{if(matchMedia('(pointer:fine)').matches){root.style.setProperty('--mx',`${(e.clientX/innerWidth-.5)*18}px`);root.style.setProperty('--my',`${(e.clientY/innerHeight-.5)*12}px`);root.style.setProperty('--ry',`${(e.clientX/innerWidth-.5)*14}deg`);root.style.setProperty('--rx',`${(.5-e.clientY/innerHeight)*10}deg`)}},{passive:true});
 const canvas=document.getElementById('particles'),ctx=canvas.getContext('2d');let dots=[],raf=0;function resize(){const dpr=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*dpr;canvas.height=innerHeight*dpr;canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';ctx.setTransform(dpr,0,0,dpr,0,0);const count=Math.min(110,Math.floor(innerWidth/14));dots=Array.from({length:count},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-.5)*.1,vy:(Math.random()-.5)*.1,r:Math.random()*1.1+.2,a:Math.random()*.45+.06}))}function draw(){ctx.clearRect(0,0,innerWidth,innerHeight);for(const p of dots){p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=innerWidth;if(p.x>innerWidth)p.x=0;if(p.y<0)p.y=innerHeight;if(p.y>innerHeight)p.y=0;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=`rgba(112,234,255,${p.a})`;ctx.fill()}raf=requestAnimationFrame(draw)}resize();addEventListener('resize',resize);if(!matchMedia('(prefers-reduced-motion: reduce)').matches)draw();else{draw();cancelAnimationFrame(raf)}
