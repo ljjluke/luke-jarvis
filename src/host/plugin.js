@@ -39,6 +39,7 @@ import { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPr
 import { MEMORY_MAX_AGE_MS, checkMemoryFresh, _readGates, _memoryState, recordGate, _flowState } from './gates/store.js'
 import { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from './gates/stage.js'
 import { TEAM_TOOLS, jarvisFlowGuard } from './gates/flow.js'
+import { jarvisPrecheck } from './gates/precheck.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from './pixoffice/index.js'
 // 保持对外导入面不变（test/plugin.test.js 等直接 import 这些名字）
 export { checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry } from './distill/index.js'
@@ -2025,6 +2026,7 @@ export function apply(ctx, config) {
     //      阶段网关在前，是为了让「你走错阶段」的指引先于具体前置条件到达模型（方案设计 §2.3）。
     try {
       if (toolsSvc && typeof toolsSvc.guard === 'function') {
+        ctx.effect(() => toolsSvc.guard(jarvisPrecheck))
         ctx.effect(() => toolsSvc.guard(captainExecutionGuard))
         ctx.effect(() => toolsSvc.guard(jarvisStageGate))
         ctx.effect(() => toolsSvc.guard(jarvisFlowGuard))
