@@ -309,6 +309,7 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
       `- 你的角色：${assignment && assignment.role || '?'}；assignmentId=${assignment && assignment.id || '?'}`,
       `- 工作区：${projectDir}`,
       `- 思考档位：${tier}${needsPonder ? '（必须真跑 ponder 十阶段，收口时逐单核验）' : '（免跑 ponder，自检三条即可）'}`,
+      `- 外部查证：结论要有外部来源，不能拿模型记忆当查证；查不了就在回报里标「受限环境推演」`,
       ...(needsPonder ? [
         `- 若本单已开始跑 ponder：run_id 与 PONDER_DATA_DIR 应记在 ${statusPath} 里`,
         `  （压缩后忘了就查 STATUS.md；核验时 captain 要 run_id + dataDir + taskId 三样）`,
@@ -345,6 +346,7 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
         `- 任务单：${(ticket && ticket.id) || '?'}（${stage} 阶段）：${title}`,
         `- 我的角色：${role}；assignmentId=${aid}`,
         `- 思考档位：${tier}${tierRequiresPonder(tier) ? '（必须跑 ponder 十阶段；run_id/PONDER_DATA_DIR 请记在本段下方）' : '（免跑 ponder，自检三条即可）'}`,
+        `- 外部查证：结论要有外部来源；查不了标「受限环境推演」，不许拿记忆冒充查证`,
         `- 更新时间：${new Date().toISOString()}`,
         `- 交付物目录：.jarvis/outputs/${(ticket && ticket.id) || '?'}/`,
         '',

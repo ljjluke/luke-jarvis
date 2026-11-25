@@ -79,6 +79,49 @@ export const PONDER_TIER = {
   COMPLEX: 'complex',       // 满血十阶段 + 可谬自评
 }
 
+// ── 外部检索纪律（v0.19）——用户定调 2026-11-25：
+//   「jarvis 一定要少用模型内的资料，需要去互联网上查资料得结论」
+//   「不要固定死用哪些工具，万一后面有更好的呢？」
+//
+// 这两条合起来的意思是：**要求是"必须外部查证"，但不许绑定具体工具名**。
+// 因为工具会变（DSH 可能换搜索 provider、团队可能装别的检索插件、将来可能有更好的），
+// 写死 "必须调用 web_search" 会在工具换代后变成一句永远满足不了的空话。
+//
+// 所以这里只写「能力判据 + 降级纪律」：
+//   ① 先探测：当前环境有哪些能访问外网的手段（不预设名字）
+//   ② 有就用，用时在回报里写清"用了什么、查到什么、来源在哪"
+//   ③ 没有 → 明确标注「受限环境推演」，禁止把模型记忆当查证结果
+//
+// 为什么这条必须存在：模型默认倾向用训练数据里的记忆作答，而且说得头头是道。
+// 对一个数字员工公司来说这是致命的——客户要的是"查过的事实"，不是"模型觉得"。
+// ⚠️ 必须在 tierGuidance 之前定义（后者引用它，const 有 TDZ 约束）。
+export const EXTERNAL_RESEARCH = [
+  '🔎 外部查证纪律（硬要求，不是建议）——',
+  '本公司的结论必须建立在**外部可核实的事实**上，不能只靠模型记忆。下面的规则对所有档位生效：',
+  '',
+  'A. 先探测能力，再决定手段（**不要预设工具名**）：',
+  '   环境里可能提供不止一种联网方式——可能是某个检索工具，可能是抓取工具，',
+  '   也可能只是命令行里的 curl/wget。工具会变，所以要按**能力**找，不要按名字找。',
+  '   探测顺序建议：① 列出当前会话可用的工具，看有没有访问外网的检索/抓取能力；',
+  '   ② 没有的话，用命令行直接访问公开网页/接口（存在 curl/wget 即可）；',
+  '   ③ 两者都没有，才进入降级（见 D）。',
+  '   ⚠️ 注意区分：**本地文件搜索**（在工作区/代码库里找东西）不算外部查证，那是内部检索，不能用来证明外部事实。',
+  '',
+  'B. 查到什么，就报什么（可核验）：',
+  '   回报里必须写清三样：用的是什么手段、查到的事实是什么、来源在哪（URL/文档名/版本号）。',
+  '   只写结论不写来源 = 视为没查（派活方会按"未外部查证"打回）。',
+  '',
+  'C. 冲突时以外部为准：',
+  '   模型记忆与查到的资料冲突时，**以查到的为准**，并在结论里更正自己的旧认知。',
+  '   （模型记忆有过时风险：价格、版本、接口、政策这类尤其容易过时。）',
+  '',
+  'D. 查不了必须说出来（禁止编造）：',
+  '   如果环境确实无法访问外网：在回报里明确标注「受限环境推演 · 未外部查证」，',
+  '   并说明哪些结论属于**推演**而非**核实**。',
+  '   ⛔ 绝对禁止：把模型记忆包装成"我查过了"；用模糊表述蒙混（"据资料显示"却不给来源）。',
+  '   降级不丢人，编造才丢人——客户按"是否标了受限"来判断可信度，标了就还能用。',
+].join('\n')
+
 /** 从任务单推断档位。缺省 standard（宁可多跑一次深度思考，也不要"应该思考时没思考"）。
  *  兼容存量单：没有 route/stakes 字段时按 standard 处理，不因缺字段卡死。 */
 export function ponderTierOf(ticket) {
@@ -100,7 +143,8 @@ export function tierRequiresPonder(tier) {
 }
 
 /** 按档位生成「思考要求」正文，注入成员简报与续接线索。
- *  三档文本各自完整可执行——成员不需要知道别的档位存在。 */
+ *  三档文本各自完整可执行——成员不需要知道别的档位存在。
+ *  外部查证纪律（EXTERNAL_RESEARCH）对所有档位都追加——查证不分赌注高低。 */
 export function tierGuidance(tier) {
   const t = String(tier || PONDER_TIER.STANDARD)
   if (t === PONDER_TIER.EASY) {
@@ -110,6 +154,8 @@ export function tierGuidance(tier) {
       '但仍必须做「30 秒自检三条」并写进回报：① 前提有没有没验证的？② 最可能错在哪？③ 谁会受影响？',
       '⚠️ 升级路径：动手后发现新颖/不可逆/多方耦合/牵一发动全身 → 立即停下，用 jarvis_ticket action=report state=blocked 上报「本单需要升级为 standard 档，理由：…」，等 captain 重派。',
       '  **升级不算返工，硬撑着不升级才是返工。**',
+      '',
+      EXTERNAL_RESEARCH,
     ].join('\n')
   }
   const full = t === PONDER_TIER.COMPLEX
@@ -129,8 +175,50 @@ export function tierGuidance(tier) {
     '回报时必须带回三样：run_id、PONDER_DATA_DIR（数据目录绝对路径）、阶段产出目录——',
     ' captain 会用 jarvis_ponder_check(runId=…, dataDir=…, taskId=本单) 核验；核验 PASS 才落 ponder-verify 记录。',
     '⚠️ 降级唯一合法路径：ponder 技能确实不可用 → 在回报里写 skipReason 并标 blocked，由 captain 裁定；禁止静默跳过。',
+    // 外部查证纪律：ponder 的 bagua/divergence 等阶段本来就要"查资料"，
+    // 这条说明"用什么查、查不到怎么办"，避免成员在受限环境里凭空造结论。
+    '',
+    EXTERNAL_RESEARCH,
   ].filter(Boolean).join('\n')
 }
 
 /** 审计标记：所有档位文本里都出现的共同特征（用来判断成员简报是否带了思考要求）。 */
 export const TIER_MARK = /本单档位|easy-direct|standard 档|ponder 十阶段|PONDER_SOLO|ponder-verify/
+
+// ── 外部检索纪律（v0.19）——用户定调 2026-11-25：
+//   「jarvis 一定要少用模型内的资料，需要去互联网上查资料得结论」
+//   「不要固定死用哪些工具，万一后面有更好的呢？」
+//
+// 这两条合起来的意思是：**要求是"必须外部查证"，但不许绑定具体工具名**。
+// 因为工具会变（DSH 可能换搜索 provider、团队可能装别的检索插件、将来可能有更好的），
+// 写死 "必须调用 web_search" 会在工具换代后变成一句永远满足不了的空话。
+//
+// 所以这里只写「能力判据 + 降级纪律」：
+//   ① 先探测：当前环境有哪些能访问外网的手段（不预设名字）
+//   ② 有就用，用时在回报里写清"用了什么、查到什么、来源在哪"
+//   ③ 没有 → 明确标注「受限环境推演」，禁止把模型记忆当查证结果
+//
+// 为什么这条必须存在：模型默认倾向用训练数据里的记忆作答，而且说得头头是道。
+// 对一个数字员工公司来说这是致命的——客户要的是"查过的事实"，不是"模型觉得"。
+export const EXTERNAL_RESEARCH_MARK = /外部查证|外部检索|受限环境推演|不要预设工具名|来源在哪/
+
+/** 能力判据：判断某次工具调用是否属于「外部查证」。
+ *  关键——用**能力特征**而非工具名：工具改名/换代后这套判据依然成立。
+ *  覆盖三类：
+ *    · 检索类：名字或描述含 search/检索/查询 且面向外网
+ *    · 抓取类：名字或描述含 fetch/抓取/访问/ur 且是 http(s)
+ *    · 命令行联网：bash/shell 里出现 curl/wget/http 请求
+ *  明确排除本地文件搜索（那是内部检索）。 */
+export function isExternalResearchCall(toolName, argsText) {
+  const name = String(toolName || '').toLowerCase()
+  const args = String(argsText || '').toLowerCase()
+  // 本地搜索不算外部查证（用户明确区分过）
+  if (/fs[-_]?search|glob|grep/.test(name) && !/https?:\/\//.test(args)) return false
+  // 检索类
+  if (/web[-_]?search|search[-_]?web|^search$|search_knowledge|检索|联网搜索/.test(name)) return true
+  // 抓取类
+  if (/web[-_]?fetch|fetch[-_]?web|^fetch$|crawl|browse|抓取/.test(name)) return true
+  // 命令行联网：命令里出现对 http(s) 的访问
+  if (/bash|shell|exec|terminal|pwsh/.test(name) && /curl|wget|https?:\/\//.test(args)) return true
+  return false
+}
