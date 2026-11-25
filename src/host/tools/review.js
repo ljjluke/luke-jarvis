@@ -179,6 +179,18 @@ export const REVIEW_TOOLS = [
           cardPath: { type: 'string', description: '已注入的角色卡文件（.jarvis/cards/ 下）；空=没找到卡' },
           cardMissing: { type: 'boolean', description: 'true=该角色还没有卡 → 须先蒸馏再派活（否则成员会用通用思路干）' },
           sendsBack: { type: 'array', items: { type: 'string' }, description: '成员回报必须带的字段' },
+          // ⚠️ 必须声明：output.schema 是 additionalProperties:false，未声明的字段会被 DSH
+          // 判成 invalid output（"value.executionPrompt is not a declared property"），
+          // 工具调用直接失败——而 execute 明明正常返回了。这是"声明与实际返回不一致"的经典坑。
+          executionPrompt: { type: 'string', description: '成员系统 prompt 版本（add_member 时注入；成员出生即带协议，不依赖派活消息是否附带须知）' },
+          protocolRefresh: { type: 'string', description: 'mode=broadcast 时的协议刷新消息（升级新版后推送给已有成员）' },
+          // broadcast / audit 模式也会返回这些——不声明就会被 DSH 判 invalid output。
+          members: { type: 'array', items: { type: 'string' }, description: 'mode=broadcast 的目标成员名单' },
+          broadcast: { type: 'string', description: 'mode=broadcast 的完整广播文本' },
+          hint: { type: 'string', description: '下一步操作提示（broadcast 宣贯方式 / audit 修复建议）' },
+          ok: { type: 'boolean', description: 'mode=audit 的审计结论（true=所有任务都已附须知）' },
+          total: { type: 'number', description: 'mode=audit 的任务总数' },
+          relPath: { type: 'string', description: '角色卡相对路径（cardPath 的别名，保留兼容）' },
           verdict: { type: 'string' },
         },
         required: ['brief', 'verdict'],

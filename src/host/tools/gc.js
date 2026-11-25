@@ -191,6 +191,10 @@ export const GC_TOOLS = [
           collected: { type: 'number' },
           purged: { type: 'number' },
           skipped: { type: 'number' },
+          // 以下三字段实际会返回——不声明会被 DSH 判 invalid output（工具调用直接失败）
+          skippedReason: { type: 'string', description: '跳过清理的原因（如保护期内/无可清理项）' },
+          at: { type: 'string', description: '本次执行时间（ISO）' },
+          error: { type: 'string', description: '执行失败时的错误信息' },
         },
       },
       render: (r) =>
