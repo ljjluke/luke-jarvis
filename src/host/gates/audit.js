@@ -327,6 +327,63 @@ export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
   return missing
 }
 
+/** 成员绩效评估闸（v0.21）——收口时必须证明「CEO 评估过员工」，不是"有 jarvis_perf 工具就算有"。
+ *
+ *  用户质疑（2026-11-25）：「CEO 有绩效评估员工吗？如果不合格有通知猎头重新蒸馏吗？」
+ *  排查结论：jarvis_perf 工具实现完整（六维信号/strikes 累计/perf-<role>.json 落盘/
+ *  连续 2 次不达标或需求偏离 → 换人），但**没有任何闸强制 CEO 调用它**——
+ *  四道流程闸只管建队前，close 闸只管 ponder 核验。所以 CEO 可以完全不评估就收口。
+ *
+ *  本函数补的就是这个触发点：有成员交付过任务、却没有对应的绩效评估记录 → 拦。
+ *
+ *  判据（刻意宽松，避免误拦）：
+ *    · 只看「成员已完成任务」（captain 的任务不算——它是调度者，不自我评估）
+ *    · 该角色有 .jarvis/perf-<role>.json 就算已评估（不校验内容质量——评估是 CEO 判断）
+ *    · verdict 为"待考核"也算已评估（阶段未到，属正常）
+ *    · 一个成员任务都没有 → 不要求（空项目/刚建队不误拦）
+ */
+export async function checkMemberPerf(fsSvc, projectDir, path, owned) {
+  const missing = []
+  if (!fsSvc) return missing
+  try {
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    const teamsRaw = await listNames(fsSvc, teamsDir)
+    if (teamsRaw === null) return missing
+    const teams = owned && owned.size ? teamsRaw.filter((n) => owned.has(String(n))) : teamsRaw
+    // 收集「有交付的成员角色」
+    const rolesWithWork = new Set()
+    for (const t of teams) {
+      try {
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(t), 'team.json'))
+        if (!txt) continue
+        const d = JSON.parse(txt)
+        for (const task of d.tasks || []) {
+          if (String(task.status || '') !== 'completed') continue
+          const who = String(task.assignee || '')
+          if (!who || who === 'captain' || who === 'CEO' || who === '贾维斯') continue
+          rolesWithWork.add(who)
+        }
+      } catch {}
+    }
+    if (rolesWithWork.size === 0) return missing
+    // 查这些角色有没有绩效评估记录
+    const unevaluated = []
+    for (const role of rolesWithWork) {
+      const safe = role.replace(/[\\/:*?"<>|]/g, '_')
+      try {
+        const txt = await readTextSafe(fsSvc, path.join(projectDir, '.jarvis', `perf-${safe}.json`))
+        const data = txt ? JSON.parse(txt) : null
+        const history = (data && Array.isArray(data.history)) ? data.history : []
+        if (history.length === 0) unevaluated.push(role)
+      } catch { unevaluated.push(role) }
+    }
+    if (unevaluated.length > 0) {
+      missing.push(`绩效评估缺失：${unevaluated.length} 个已交付的成员从未被评估（${unevaluated.slice(0, 4).join('、')}）——收口前 CEO 必须用 jarvis_perf 逐个评估（六维：需求对齐/成果质量/完成度/上行健康度/角色契合/蒸馏深度），评估记录落 .jarvis/perf-<role>.json。判据：需求对齐度=0（产出偏离客户需求）→ 立即换人，不等 2 次；连续 2 次不达标 → 换人（jarvis_ticket action=retire），走离任→重蒸馏补位。不评估就收口 = 不知道谁合格谁不合格 = 换人机制永远不触发。`)
+    }
+  } catch {}
+  return missing
+}
+
 export async function checkCoverageGate(fsSvc, projectDir, path) {
   const missing = []
   if (!fsSvc) return missing

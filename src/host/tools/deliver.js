@@ -18,7 +18,7 @@ import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
 import { meetingGaps } from '../state/meetings.js'
 import { appendEvent } from '../state/events.js'
 import { harvestFromReport } from '../state/mind.js'
-import { auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
+import { auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkMemberPerf, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
@@ -876,6 +876,13 @@ export const DELIVER_TOOLS = [
               const ponderGaps = await checkPonderVerify(fsSvc, projectDir, path, ownedSet)
               missing.push(...ponderGaps)
             } catch { /* 核验失败不阻断收口，但要留痕 */ }
+            // 绩效评估（v0.21 补触发点·用户质疑 2026-11-25「CEO 有绩效评估员工吗？」）：
+            // jarvis_perf 工具实现完整但**没有任何闸强制调用**——不评估就收口，等于不知道
+            // 谁合格谁不合格，换人机制永远不触发。这里补上：有成员交付过任务就必须有评估记录。
+            try {
+              const perfGaps = await checkMemberPerf(fsSvc, projectDir, path, ownedSet)
+              missing.push(...perfGaps)
+            } catch { /* 检查异常不阻断收口 */ }
           },
           next: '三产物闭环（需求→方案→测试）+ 防迎合收口总闸 9 条 → 交付报告',
         },
