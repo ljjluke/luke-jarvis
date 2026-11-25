@@ -61,24 +61,44 @@ export const MEMORY_TOOLS = [
     },
     execute: async (args, exec) => {
       const mode = String(args.mode ?? 'scaffold').trim()
-      const projectDir = String(args.projectDir ?? '<workspace>/.jarvis/').trim()
+      const path = _require('node:path')   // v0.23：路径规范化需要，提前取（原本在 save 分支内才定义）
+      // ⚠️ 路径规范化（v0.23 修）：原实现把 projectDir 直接拼字符串（`${projectDir}cards/`），
+      //    缺省值 `<workspace>/.jarvis/` 带尾斜杠所以看不出问题；但调用方传
+      //    `/opt/work/test`（不带斜杠）时就拼成 `/opt/work/testcards/` —— 模型照着
+      //    这个错误路径去落盘，直接失败，流程卡死在第一步。
+      //    修法：统一按 path.join 构造绝对路径，无论传入带不带斜杠都正确。
+      const rawDir = String(args.projectDir ?? '').trim()
+      const baseDir = rawDir || '<workspace>/.jarvis'
+      // 保留 `<workspace>` 占位符（那种情况下无法解析成真实路径，只输出示意结构）
+      const isPlaceholder = baseDir.includes('<workspace>')
+      // 参数语义陷阱修复（v0.23）：projectDir 的本意是「记忆库根目录 = <workspace>/.jarvis」，
+      // 但调用方常按直觉传「项目根」（如 /opt/work/test），结果卡被写到 <项目根>/cards/，
+      // 而 findRoleCard 查的是 <项目根>/.jarvis/cards/ —— 两边对不上，卡"写了但找不到"。
+      // 修法：传入的路径若不含 `.jarvis`，视为项目根，自动补上；已含则原样用。
+      let normDir
+      if (isPlaceholder) normDir = baseDir.replace(/\/+$/, '')
+      else {
+        const abs = path.join(baseDir || '.')
+        normDir = /\.jarvis([\\/]|$)/.test(abs) ? abs : path.join(abs, '.jarvis')
+      }
+      const j = (rel) => (isPlaceholder ? `${normDir}/${rel}` : path.join(normDir, rel))
       const itemType = String(args.itemType ?? '').trim()
       const name = String(args.name ?? '').trim()
       const existingCards = String(args.existingCards ?? '').trim()
       const existingDirs = String(args.existingDirs ?? '').trim() // 已有沉淀目录清单 JSON（check 用）
       const structure = [
-        `${projectDir}README.md        —— 本目录规范说明（每个子目录放什么/怎么命名/怎么归档）——先读它再读写 .jarvis`,
-        `${projectDir}prototypes/      —— 真实人物信息资料（原型）：每个真实大佬的原始素材（访谈/著作/决策记录/URL），是蒸馏的证据源，AI 识别到本项目直接读取`,
-        `${projectDir}cards/           —— 虚拟人物卡（工作能力细节）：蒸馏出的六段式角色卡（思维模型/方法论/红线/协同），含深度分；历史版本放 cards/history/`,
-        `${projectDir}process-*.json   —— 领域流程：CEO 定稿的阶段/闸门/红线/必须角色/会议触点（命名 process-<需求关键词>.json）`,
-        `${projectDir}components.json  —— 组件清单：能力补足自研/引入的组件（名字/功能/用法/维护者）`,
-        `${projectDir}board.json       —— 统一黑板：会议驱动协作的状态/未决项/决议`,
-        `${projectDir}project.md       —— 项目细节快照：需求本质/验收标准/接口契约/进度/关键决策——AI 读到即可继续，不用重分析源码`,
-        `${projectDir}lessons.md       —— 当前项目进度经验总结：踩坑/教训/适配度记录，防重复`,
-        `${projectDir}reports/         —— 审计/复盘报告：单次专项的产出（如 t1 审计报告），命名 <主题>.md`,
-        `${projectDir}designs/         —— 设计稿：方案未实施前的设计文档（供方案评审），实施后归档或并入 docs/`,
-        `${projectDir}scripts/         —— 验收/验证脚本：本项目的可执行验证（如判别实验），命名 <用途>.mjs`,
-        `${projectDir}docs/            —— 交付文档与索引：方案定稿/交付清单/历史需求索引`,
+        `${j('README.md')}        —— 本目录规范说明（每个子目录放什么/怎么命名/怎么归档）——先读它再读写 .jarvis`,
+        `${j('prototypes/')}      —— 真实人物信息资料（原型）：每个真实大佬的原始素材（访谈/著作/决策记录/URL），是蒸馏的证据源，AI 识别到本项目直接读取`,
+        `${j('cards/')}           —— 虚拟人物卡（工作能力细节）：蒸馏出的六段式角色卡（思维模型/方法论/红线/协同），含深度分；历史版本放 cards/history/`,
+        `${j('process-*.json')}   —— 领域流程：CEO 定稿的阶段/闸门/红线/必须角色/会议触点（命名 process-<需求关键词>.json）`,
+        `${j('components.json')}  —— 组件清单：能力补足自研/引入的组件（名字/功能/用法/维护者）`,
+        `${j('board.json')}       —— 统一黑板：会议驱动协作的状态/未决项/决议`,
+        `${j('project.md')}       —— 项目细节快照：需求本质/验收标准/接口契约/进度/关键决策——AI 读到即可继续，不用重分析源码`,
+        `${j('lessons.md')}       —— 当前项目进度经验总结：踩坑/教训/适配度记录，防重复`,
+        `${j('reports/')}         —— 审计/复盘报告：单次专项的产出（如 t1 审计报告），命名 <主题>.md`,
+        `${j('designs/')}         —— 设计稿：方案未实施前的设计文档（供方案评审），实施后归档或并入 docs/`,
+        `${j('scripts/')}         —— 验收/验证脚本：本项目的可执行验证（如判别实验），命名 <用途>.mjs`,
+        `${j('docs/')}            —— 交付文档与索引：方案定稿/交付清单/历史需求索引`,
       ]
       let reuseRule = ''
       let verdict = ''
@@ -158,7 +178,10 @@ export const MEMORY_TOOLS = [
           process: '', component: '', project: '', lesson: '',
         }
         const dir = DIR[itemType] ?? ''
-        savePath = `${projectDir}${dir}${(name || itemType || 'item').replace(/[\\/:*?"<>|]/g, '_')}${ext}`
+        // v0.23 修：原来 `${projectDir}${dir}...` 在 projectDir 无尾斜杠时会拼成
+        // `/opt/work/testcards/研发.md`。用 path.join 保证任何输入都正确。
+        const fileName = `${(name || itemType || 'item').replace(/[\\/:*?"<>|]/g, '_')}${ext}`
+        savePath = isPlaceholder ? `${normDir}/${dir}${fileName}` : path.join(normDir, dir, fileName)
         reuseRule =
           '写入后即成为本项目记忆库：后续本项目需求直接读取复用（卡须过 jarvis_distill 校验+按新需求修订）；跨项目不共享。'
         verdict = `写入 ${savePath}（项目记忆库，非插件资产；按类型归档到对应子目录，不散在 .jarvis/ 根）——AI 识别到本项目直接读它继续，不用重分析源码。`
@@ -168,7 +191,7 @@ export const MEMORY_TOOLS = [
       } else {
         reuseRule =
           '插件无静态卡/无领域模板（领域无关）。角色卡与流程只能来自：① 本项目 .jarvis/ 沉淀（可复用起点）；② 现场 web 蒸馏（新需求/跨项目必走）。'
-        verdict = `项目沉淀结构就绪：${projectDir} 已初始化（CEO 按结构落盘即可，文件由 CEO/成员在工作区管理）。`
+        verdict = `项目沉淀结构就绪：${normDir} 已初始化（CEO 按结构落盘即可，文件由 CEO/成员在工作区管理）。`
       }
       const storeOut = { structure, reuseRule, verdict }
       if (savePath) storeOut.savePath = savePath
