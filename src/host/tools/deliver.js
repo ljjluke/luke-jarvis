@@ -1041,6 +1041,7 @@ export const DELIVER_TOOLS = [
         brief: { type: 'string', description: '成员须知原文（可选；jarvis_dispatch_task 自动生成。经 meta.brief 直达成员简报，含角色卡/协同段/ponder 指引）' },
         route: { type: 'string', description: '思考档位（v0.16）：easy-direct=免跑 ponder（模式化/可逆/有现成做法的活，用自检三条替代）/ standard=必跑十阶段（缺省）/ complex=满血十阶段+可谬自评。写进任务单 meta.route，收口时据此核验或豁免。档位由派活方定，成员不能自评降档。' },
         stakes: { type: 'string', description: '赌注档（可选）：high=按 complex 处理；low=按 standard 处理（仍要跑，阶段可精简）。与 route 二选一，route 优先。' },
+        allowNoCard: { type: 'boolean', description: '（v0.20）跳过「角色必须有蒸馏卡」的闸。默认 false——缺卡会被拒绝派活并指路。仅在"确实要先干活后补卡"时显式传 true，会在回报里留痕。' },
         reason: { type: 'string', description: 'stop 原因' },
       },
       required: ['action'],
@@ -1156,6 +1157,35 @@ export const DELIVER_TOOLS = [
             if (routeArg) input.meta.route = routeArg
             if (stakesArg) input.meta.stakes = stakesArg
           }
+          // 🎴 缺卡拦截（v0.20，用户实测 2026-11-25：「看不到子任务的蒸馏角色」）：
+          // 原实现缺卡也照样派活，成员拿到的是通用模板——看起来有人干活，实际没有角色视角。
+          // 根因是"缺卡"只在 jarvis_member_brief 的返回字段里标了一下，brief 正文里那句警告
+          // 埋在 6000 字中间，没人看得到。这里做成机械拦截：
+          //   · 派给非 captain 角色时，该角色必须有卡（.jarvis/cards/<role>.md）
+          //   · 缺卡 → 拒绝开单，并给出可执行的蒸馏三步
+          //   · 显式 allowNoCard=true 可跳过（留痕），用于"先干活后补卡"的极端场景
+          // captain 自己接活不需要卡（它是调度者，不是被蒸馏的岗位）。
+          try {
+            const targetRole = String(input.role || '').trim()
+            if (targetRole && targetRole !== 'captain' && !Boolean(args?.allowNoCard)) {
+              const fsp = _require('node:fs')
+              const cardsDir = path.join(projectDir, '.jarvis', 'cards')
+              let hasCard = false
+              try {
+                const names = fsp.readdirSync(cardsDir)
+                hasCard = names.some((n) => {
+                  const base = String(n).replace(/\.md$/i, '')
+                  return base === targetRole || base.includes(targetRole) || targetRole.includes(base)
+                })
+              } catch { hasCard = false }
+              if (!hasCard) {
+                return {
+                  ok: false, action,
+                  verdict: `⛔ 角色「${targetRole}」没有蒸馏角色卡，拒绝派活（.jarvis/cards/ 里找不到匹配的卡）。\n原因：没有卡的成员只能凭模型默认思路干，等于「名义蒸馏、实际没按这个人的方式工作」——这正是"看不到蒸馏角色"的原因。\n下一步（三件套）：\n  1) jarvis_distill_guide(role="${targetRole}", material=真实素材)  ← 提炼该领域真实权威的方法论\n  2) jarvis_distill(role="${targetRole}", card=六段式)             ← 过结构校验\n  3) jarvis_store(action=save, itemType=card, ...)                ← 落到 .jarvis/cards/${targetRole}.md\n  然后重新 action=open 开单。\n（确实要先干活后补卡：加 allowNoCard=true 跳过本闸，会在回报里留痕。）`,
+                }
+              }
+            }
+          } catch { /* 卡片检查异常不阻断开单（宁可放过也不要让流程死锁） */ }
           // 成员提案消化：open 带 proposalId 时把提案内容作为兜底（title/mandate），开单成功后标记 consumed
           const proposalId = String(args?.proposalId ?? '').trim()
           const proposals = _readProposals(projectDir)

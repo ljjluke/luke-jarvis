@@ -144,14 +144,23 @@ test('jarvis_ticket 工具：普通项目 open/list/report 全程可用并落盘
   assert.ok(def, 'jarvis_ticket 工具存在')
 
   const opened = await def.execute({ action: 'open', projectDir: dir, title: '接支付', stage: 'build', role: '研发' })
-  assert.equal(opened.ok, true)
-  assert.ok(fs.existsSync(path.join(dir, '.jarvis/tickets', `${opened.ticket.id}.json`)), '任务单应落盘')
+  // v0.20：缺蒸馏角色卡的角色会被拒绝派活（防"名义蒸馏、实际按通用思路干"）。
+  // 这个测试原本断言"直接能开单"，现在要先给「研发」落一张卡——这正是新规则要的效果。
+  assert.equal(opened.ok, false, '缺卡角色应被拒绝派活')
+  assert.match(opened.verdict, /没有蒸馏角色卡/, '拒绝文案应说清原因')
+  assert.match(opened.verdict, /jarvis_distill_guide/, '应给出可执行的蒸馏下一步')
+  // 落卡后再开单
+  fs.mkdirSync(path.join(dir, '.jarvis/cards'), { recursive: true })
+  fs.writeFileSync(path.join(dir, '.jarvis/cards/研发.md'), '# 研发\n## 身份定位\n工程师\n## 思维模型\n先验证再断言\n## 核心方法论\n小步快跑\n## 代表作品\n支付系统\n## 决策红线\n不出未测的代码\n## 语言风格\n直接')
+  const opened2 = await def.execute({ action: 'open', projectDir: dir, title: '接支付', stage: 'build', role: '研发' })
+  assert.equal(opened2.ok, true, '有卡后应能正常开单')
+  assert.ok(fs.existsSync(path.join(dir, '.jarvis/tickets', `${opened2.ticket.id}.json`)), '任务单应落盘')
 
   const listed = await def.execute({ action: 'list', projectDir: dir })
   assert.equal(listed.ok, true)
   assert.equal(listed.tickets.length, 1)
 
-  const ready = await def.execute({ action: 'report', projectDir: dir, ticketId: opened.ticket.id, state: 'ready', summary: '已交付' })
+  const ready = await def.execute({ action: 'report', projectDir: dir, ticketId: opened2.ticket.id, state: 'ready', summary: '已交付' })
   assert.equal(ready.ok, true)
   assert.equal(ready.ticket.ended.outcome, 'completed')
 })

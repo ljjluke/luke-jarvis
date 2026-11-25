@@ -279,9 +279,24 @@ export const REVIEW_TOOLS = [
             '- 没有卡就派活 = 成员只能凭模型默认思路做，等于「名义蒸馏、实际没按大佬方式工作」。',
           ].join('\n')
 
+      // ⛔ 缺卡横幅（v0.20）：原警告埋在 brief 中段（6000+ 字之后），成员和派活方
+      // 都看不到——用户实测「看不到子任务的蒸馏角色」正是这个。提到最顶部，第一眼可见。
+      const noCardBanner = card ? '' : [
+        '⛔⛔⛔ 本角色未蒸馏 —— 这份须知里没有角色卡 ⛔⛔⛔',
+        `本项目 .jarvis/cards/ 里找不到「${role}」的卡。你现在拿到的只是通用模板，不是这个人的工作方式。`,
+        '派活方必须先补齐，否则成员只能凭模型默认思路干（= 名义蒸馏、实际没按大佬方式工作）：',
+        `  1) jarvis_distill_guide(role="${role}", material=真实素材)   ← 提炼该领域真实权威的方法论`,
+        `  2) jarvis_distill(role="${role}", card=六段式)              ← 过结构校验`,
+        `  3) jarvis_store(action=save, itemType=card, ...)             ← 落到 .jarvis/cards/${role}.md`,
+        `  4) 重新生成本须知并派活`,
+        '（成员收到这份须知时：请把"我没有角色卡"写进第一份回报，让派活方知道。）',
+        '',
+      ].join('\n')
+
       const brief = [
         `【${role} · 开工须知（本项目团队正式成员，不是执行手）】`,
         '',
+        noCardBanner,
         JARVIS_CULTURE,
         '',
         '## 一、你首先是个"有判断的人"，不是等指令的手',
@@ -375,7 +390,11 @@ export const REVIEW_TOOLS = [
         cardPath: card ? card.relPath : '',
         cardMissing: !card,
         sendsBack: ['runId', 'dataDir(PONDER_DATA_DIR)', 'evidenceDir(阶段产出目录)', '交付物路径', '阻塞/风险'],
-        verdict: `已生成「${role}」成员开工须知：含 ponder 十阶段执行路径（skill-free bash 版）、协议要点、回报格式${task ? '、本次任务' : ''}——派活时原文附上（create_task 描述 或 send_message）；**executionPrompt 版同步给出（add_member 时注入成员系统 prompt，成员出生即带协议）**。`,
+        // 缺卡时 verdict 必须**第一句就说**——调用方（CEO/模型）常只读 verdict 不读 brief 正文，
+        // 把提示埋在正文里等于没提。用户实测「看不到蒸馏角色」就是只看到了一句"已生成须知"。
+        verdict: card
+          ? `已生成「${role}」成员开工须知（角色卡：${card.relPath}）：含 ponder 十阶段执行路径（skill-free bash 版）、协议要点、回报格式${task ? '、本次任务' : ''}——派活时原文附上（create_task 描述 或 send_message）；**executionPrompt 版同步给出（add_member 时注入成员系统 prompt，成员出生即带协议）**。`
+          : `⛔ 已生成「${role}」成员开工须知（含 executionPrompt 版），但**该角色没有角色卡**——这份须知里只有通用模板，不含这个人的工作方式。派活前必须先蒸馏：jarvis_distill_guide(role="${role}") → jarvis_distill → jarvis_store(itemType=card)。直接派活 = 名义蒸馏、实际按通用思路干（用户实测过的坑）。`,
       }
     },
   },
