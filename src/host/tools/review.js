@@ -534,7 +534,7 @@ export const REVIEW_TOOLS = [
         properties: {
           verdict: { type: 'string', description: 'PASS / FAIL' },
           runId: { type: 'string' },
-          runIdMatch: { type: 'boolean', description: '声称的 run_id 是否与状态文件一致' },
+          runIdMatch: { type: 'boolean', description: '声称的 run_id 是否与状态文件一致（false=不匹配，或调用方根本没声称 run_id因而无法比对——后者见 issues 里的说明）' },
           completedCount: { type: 'number' },
           totalCount: { type: 'number' },
           missing: { type: 'array', items: { type: 'string' }, description: '未执行的阶段' },
@@ -600,7 +600,14 @@ export const REVIEW_TOOLS = [
         if (fpIssueEarly) earlyIssues.push(fpIssueEarly)
         return {
           verdict: 'FAIL',
-          runId: claimed ?? undefined,
+          // 用空串而不是 undefined：schema 声明 runId 是 string，
+          // 给 undefined 虽会被 JSON.stringify 丢弃、功能上无害，但会让输出契约
+          // 在静态分析/校验器眼里出现"未声明字段 undefined"的假阳性。
+          runId: claimed ?? '',
+          // 契约完整性：schema 声明了 runIdMatch(boolean)，所有分支都应带上，
+          // 否则调用方按 schema 读会拿到 undefined（"字段存在但类型缺失"比"没有该字段"更易踩坑）。
+          // 无记录时不可能比对成功 → false。
+          runIdMatch: false,
           completedCount: 0,
           totalCount: STEPS.length,
           missing: STEPS,
@@ -609,7 +616,8 @@ export const REVIEW_TOOLS = [
           agentShortfalls: [],
           evidenceMissing: [],
           issues: earlyIssues,
-          action: '⛔ 打回重跑：要求该角色真实加载 ponder 跑完整十阶段（并在其隔离目录留下 step-guard 记录 + 阶段产出）',
+          action: '⛔ 打回重跑：要求该角色真实加载 ponder 跑完整十阶段（并在其隔离目录留下 step-guard 记录 + 阶段产出）'
+            + (claimed ? '' : '（注意：本次调用未传 runId，runIdMatch=false 表示"无法比对"而非"不匹配"）'),
         }
       }
 
@@ -724,7 +732,9 @@ export const REVIEW_TOOLS = [
       return {
         verdict: ok ? 'PASS' : 'FAIL',
         runId: state.run_id,
-        runIdMatch: runIdMatch === null ? undefined : runIdMatch,
+        // false 有两种含义：真不匹配 / 调用方没声称 run_id 因而无法比对。
+        // 后者会在 issues 之外用一句明确说明，避免调用方误读成"核验失败"。
+        runIdMatch: runIdMatch === null ? false : runIdMatch,
         completedCount: completed.length,
         totalCount: STEPS.length,
         missing,
@@ -733,10 +743,12 @@ export const REVIEW_TOOLS = [
         agentShortfalls,
         evidenceMissing,
         issues,
-        action: ok
+        action: (ok
           ? '✅ 核验通过：十阶段按序完整执行、子 agent 数达标' + (evidenceDir ? '、阶段产出齐全' : '（本次未核验产出文件，建议下次带 evidenceDir）')
-          : '⛔ 打回：不许把"声称已完成"当"已深度思考"——要求该角色补齐缺失阶段/按其隔离目录重跑并留下顺序记录与阶段产出，再交核验',
-        ...(wrote.path ? { recordPath: wrote.path, recordProjectDir: wrote.dir.replace(/[/\\\\]\.jarvis[/\\\\]docs[/\\\\]ponder-verify$/, '') } : {}),
+          : '⛔ 打回：不许把"声称已完成"当"已深度思考"——要求该角色补齐缺失阶段/按其隔离目录重跑并留下顺序记录与阶段产出，再交核验')
+          // 未声称 run_id 时 runIdMatch=false 不代表核验失败，必须说清楚，否则调用方会误判
+          + (runIdMatch === null ? '（注意：本次调用未传 runId，runIdMatch=false 表示"无法比对"而非"不匹配"）' : ''),
+        ...(wrote.path ? { recordPath: wrote.path, recordProjectDir: wrote.dir.replace(/[/\\]\.jarvis[/\\]docs[/\\]ponder-verify$/, '') } : {}),
       }
     },
   },

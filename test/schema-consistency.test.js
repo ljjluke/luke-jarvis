@@ -143,3 +143,40 @@ test('jarvis_gc / jarvis_company 的边界字段已声明', () => {
   const coSchema = coBlock.slice(0, coBlock.indexOf('execute:'))
   assert.ok(/node:\s*\{\s*type:\s*'object'/.test(coSchema), 'jarvis_company 返回 node，必须声明')
 })
+
+// ── 运行时验证（比静态扫描可靠）：直接调用，检查真实返回值 ──────────
+// 静态扫描靠正则解析源码，会被三元表达式/条件展开误判（如 `runId: claimed ?? undefined`
+// 曾被读成字段名 "undefined"）。运行时验证直接看真实对象，没有解析歧义。
+test('运行时：jarvis_ponder_check 各分支返回值无未声明字段、无 undefined 值', async () => {
+  const { TOOLS } = await import('../src/host/plugin.js')
+  const t = TOOLS.find((x) => x.name === 'jarvis_ponder_check')
+  assert.ok(t, 'jarvis_ponder_check 必须存在')
+  const declared = Object.keys(t.output.schema.properties || {})
+
+  // 三个分支：不传 runId / 传 runId / 指向不存在的数据目录
+  const cases = [
+    { label: '不传 runId', args: { dataDir: '/tmp/definitely-no-run-here' } },
+    { label: '传 runId', args: { runId: 'claimed-run-id', dataDir: '/tmp/definitely-no-run-here' } },
+  ]
+  for (const c of cases) {
+    const out = await t.execute(c.args)
+    const actual = Object.keys(out || {})
+    const extra = actual.filter((k) => !declared.includes(k))
+    const undefVals = Object.entries(out || {}).filter(([, v]) => v === undefined).map(([k]) => k)
+    assert.deepStrictEqual(extra, [], `${c.label}：返回了未声明字段 ${extra.join(', ')}（会触发 invalid output）`)
+    assert.deepStrictEqual(undefVals, [], `${c.label}：字段值为 undefined ${undefVals.join(', ')}（契约应为空串/false/null）`)
+    // runId 声明是 string，就必须永远是 string
+    assert.equal(typeof out.runId, 'string', `${c.label}：runId 必须是 string，实际 ${typeof out.runId}`)
+    // runIdMatch 声明是 boolean，就必须永远是 boolean
+    assert.equal(typeof out.runIdMatch, 'boolean', `${c.label}：runIdMatch 必须是 boolean，实际 ${typeof out.runIdMatch}`)
+  }
+})
+
+test('运行时：未声称 runId 时，action 必须说明 runIdMatch=false 是"无法比对"而非"不匹配"', async () => {
+  const { TOOLS } = await import('../src/host/plugin.js')
+  const t = TOOLS.find((x) => x.name === 'jarvis_ponder_check')
+  const out = await t.execute({ dataDir: '/tmp/definitely-no-run-here' })
+  if (out.runIdMatch === false) {
+    assert.ok(/未传 runId/.test(String(out.action)), '未传 runId 时 action 必须说明这一点，避免调用方误读成核验失败')
+  }
+})
