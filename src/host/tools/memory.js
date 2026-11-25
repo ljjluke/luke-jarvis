@@ -36,6 +36,7 @@ export const MEMORY_TOOLS = [
         projectDir: { type: 'string', description: '项目记忆库根目录（默认 <workspace>/.jarvis/）' },
         itemType: { type: 'string', description: '沉淀类型：prototype=真实人物原型→prototypes/ / card=虚拟人物卡→cards/ / process=领域流程→根 process-*.json / component=组件→components.json / project=项目细节快照→根 project.md / lesson=进度经验→根 lessons.md / report=审计报告→reports/ / design=设计稿→designs/ / script=验证脚本→scripts/ / doc=交付文档→docs/（save 用，按类型归档不散根目录）' },
         name: { type: 'string', description: '角色名或流程/组件名' },
+        content: { type: 'string', description: '（v0.24）mode=save 时要写入的文件正文。**captain 没有 write 工具**（preset 故意限制），所以需求规格/角色卡这类必须落盘的内容只能通过本参数传入。传了就真的写盘；不传只返回路径（供有写工具的成员自己写）。' },
         existingCards: { type: 'string', description: '本项目已沉淀角色卡清单 JSON，如 [{"role":"研发","file":"cards/研发.md"}]（reuse 校验用）' },
         existingDirs: { type: 'string', description: '本项目 .jarvis/ 已有目录清单 JSON（check 判定用）' },
         cards: { type: 'string', description: '已存在的角色卡名，逗号分隔（check 用）' },
@@ -52,6 +53,8 @@ export const MEMORY_TOOLS = [
           structure: { type: 'array', items: { type: 'string' }, description: '项目沉淀目录结构' },
           reuseRule: { type: 'string', description: '复用规则（本项目沉淀 vs 跨项目/插件禁止）' },
           savePath: { type: 'string', description: '本次写沉淀的目标路径' },
+          wrote: { type: 'boolean', description: '（v0.24）本次是否真的写了文件（传了 content 且落盘成功=true；只给路径未传内容=false）' },
+          writeError: { type: 'string', description: '（v0.24）写入失败原因（权限/路径非法等）' },
           verdict: { type: 'string' },
         },
         required: ['structure', 'reuseRule', 'verdict'],
@@ -103,6 +106,8 @@ export const MEMORY_TOOLS = [
       let reuseRule = ''
       let verdict = ''
       let savePath = ''
+      // 结果对象提前建：各分支往里塞，末尾统一返回（save 分支的真写入要写 wrote/writeError）
+      const storeOut = { structure, reuseRule: '', verdict: '' }
       if (mode === 'check') {
         // 阶段零：先查项目沉淀——有经验直接继续，没有才从零蒸馏
         const hasJarvis = !!(existingDirs && existingDirs.trim() !== '[]' && existingDirs.trim() !== '')
@@ -182,9 +187,38 @@ export const MEMORY_TOOLS = [
         // `/opt/work/testcards/研发.md`。用 path.join 保证任何输入都正确。
         const fileName = `${(name || itemType || 'item').replace(/[\\/:*?"<>|]/g, '_')}${ext}`
         savePath = isPlaceholder ? `${normDir}/${dir}${fileName}` : path.join(normDir, dir, fileName)
+        // ── 真写入（v0.24 修·用户实测 2026-11-25「三个工具缺陷叠在一起把流程锁死在第一步」）──
+        // 原实现只返回路径、从不写内容，verdict 却说"写入 xxx"——名不副实。
+        // 而 captain 预设故意不挂 tool-fs（不能 write），意味着它拿到路径也写不了：
+        // 需求规格永远落不了盘 → clarify 闸永远不过 → 流程死锁在第一步。
+        // 修法：新增 content 参数，传了就真落盘（mkdir -p + writeFileSync），并回报写入结果。
+        let wrote = false
+        let writeError = ''
+        const contentArg = String(args.content ?? '')
+        if (contentArg.trim() && !isPlaceholder) {
+          try {
+            const pathx = _require('node:path')
+            const fsx = _require('node:fs')
+            fsx.mkdirSync(pathx.dirname(savePath), { recursive: true })
+            fsx.writeFileSync(savePath, contentArg, 'utf8')
+            wrote = true
+          } catch (e) { writeError = String((e && e.message) || e) }
+        }
+        storeOut.wrote = wrote
+        if (writeError) storeOut.writeError = writeError
+        if (!wrote && contentArg.trim()) {
+          verdict = `⛔ 写入失败：${writeError || '未知原因'}（目标 ${savePath}）——检查目录权限/路径是否合法`
+        } else if (wrote) {
+          verdict = `✅ 已写入 ${savePath}（${contentArg.length} 字）`
+        }
         reuseRule =
           '写入后即成为本项目记忆库：后续本项目需求直接读取复用（卡须过 jarvis_distill 校验+按新需求修订）；跨项目不共享。'
-        verdict = `写入 ${savePath}（项目记忆库，非插件资产；按类型归档到对应子目录，不散在 .jarvis/ 根）——AI 识别到本项目直接读它继续，不用重分析源码。`
+        // 只在"只给了路径、没传内容"时才用旧的提示文案；真写入/失败已在上面的分支赋了 verdict
+        if (!contentArg.trim()) {
+          verdict = `目标路径 ${savePath}（项目记忆库，非插件资产；按类型归档到对应子目录，不散在 .jarvis/ 根）。` +
+            `⚠️ 本次未传 content——只返回路径，没有写文件。当前会话若有写工具请自己写；captain 会话没有写工具，` +
+            `必须用 content 参数一次性写入，否则文件不会存在（闸会拦）。`
+        }
         if (itemType === 'lesson') {
           verdict += ' ⚠️ 教训必须过 jarvis_lesson 结构化（分类/主责/现场/修向/状态）再写入，防止自由文本不可检索/不可归因/不可复用。'
         }
@@ -193,7 +227,9 @@ export const MEMORY_TOOLS = [
           '插件无静态卡/无领域模板（领域无关）。角色卡与流程只能来自：① 本项目 .jarvis/ 沉淀（可复用起点）；② 现场 web 蒸馏（新需求/跨项目必走）。'
         verdict = `项目沉淀结构就绪：${normDir} 已初始化（CEO 按结构落盘即可，文件由 CEO/成员在工作区管理）。`
       }
-      const storeOut = { structure, reuseRule, verdict }
+      storeOut.structure = structure
+      storeOut.reuseRule = reuseRule
+      storeOut.verdict = verdict
       if (savePath) storeOut.savePath = savePath
       return storeOut
     },

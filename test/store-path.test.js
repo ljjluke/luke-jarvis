@@ -114,6 +114,45 @@ test('端到端：jarvis_store 落卡 → jarvis_member_brief 能识别到角色
   }
 })
 
+// ── v0.24：captain 无写工具，store 必须能真写内容 ─────────────────
+test('mode=save 传 content → 真的写盘（captain 唯一的写通道）', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'save-content-'))
+  try {
+    const body = '# 需求规格\n## 功能\n1. 登录\n## 验收标准\n- 验收：' + '可登录。'.repeat(80)
+    const r = await store.execute({ mode: 'save', projectDir: dir, itemType: 'doc', name: '需求规格-演示', content: body })
+    assert.equal(r.wrote, true, `必须真的写入（wrote=${r.wrote}）`)
+    assert.ok(fs.existsSync(r.savePath), '文件必须真实存在')
+    assert.equal(fs.readFileSync(r.savePath, 'utf8'), body, '写入内容必须与传入一致')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('mode=save 不传 content → 不假称已写入（只返回路径并明确提示）', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'save-nocontent-'))
+  try {
+    const r = await store.execute({ mode: 'save', projectDir: dir, itemType: 'card', name: '空卡' })
+    assert.equal(r.wrote, false, '没传 content 时不该报 wrote=true')
+    assert.ok(!fs.existsSync(r.savePath), '没传 content 时不该凭空生成文件')
+    assert.ok(/未传 content/.test(r.verdict), '必须明确告知"只返回路径没写文件"')
+    assert.ok(/写工具/.test(r.verdict), '必须提示 captain 没有写工具、要用 content')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('端到端：store 带 content 落需求规格 → clarify 闸放行', async () => {
+  const os = await import('node:os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'store-gate-'))
+  try {
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo-project' }))
+    const fg = TOOLS.find((t) => t.name === 'jarvis_flowguard')
+    const body = '# 需求规格\n## 功能\n1. 登录\n## 验收标准\n- 验收：' + '正确账号密码可登录。'.repeat(60)
+    const s = await store.execute({ mode: 'save', projectDir: dir, itemType: 'doc', name: '需求规格-x', content: body })
+    assert.equal(s.wrote, true)
+    const r = await fg.execute({ step: 'clarify', projectDir: dir })
+    assert.equal(r.ok, true, `写好需求规格后 clarify 闸必须放行，实际 missing=${JSON.stringify(r.missing)}`)
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
 // ── 不变量：captain 无写工具这一设定仍须成立 ──────────────────────
 test('captain 预设故意不给写工具（这是 jarvis_store 必须能写的原因）', () => {
   const presetSrc = fs.readFileSync(new URL('../preset/jarvis-captain.cordis.yml', import.meta.url), 'utf8')
