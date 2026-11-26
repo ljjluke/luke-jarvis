@@ -22,7 +22,7 @@
 import { execSync, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { toPixOfficeSnapshot } from './office-bridge.js'
+import { toPixOfficeSnapshot, deriveEmployeeFacts } from './office-bridge.js'
 import { Engine, reasonText } from './core/index.js'
 import { JsonTicketRepositories } from './adapters/json-tickets.js'
 import { dshExecutorFor } from './adapters/dsh-executor.js'
@@ -623,7 +623,40 @@ export function apply(ctx, config) {
           let fsSvc = null
           try { fsSvc = getFsService(null) } catch { fsSvc = null }
           const state = await readCompanyState(fsSvc, cwd)
-          return { cwd, state: state || {}, seq0: Number((state && state.__seq) || 0) }
+          const st = state || {}
+          // ── 真实事实覆盖（v0.28·用户定调 2026-11-26）──
+          // 用户原话：「团队一览里面每个人员工作画面都要对上，不要让画面是假的，
+          // 活根本不是 /jarvis 的工作内容」。
+          // 原数据源只有 company-state.json，而它是模型用 jarvis_company 手填的——
+          // 实测某工作区 employees:0，3D 画面却照样显示有人在做需求分析。
+          // 这里改成：**员工名单与在办任务一律从团队事实（.agent-teams/team.json）推导**，
+          // company-state 只保留会议/招募/CEO 等场景要素（那些确实是它管的）。
+          try {
+            const facts = await deriveEmployeeFacts(cwd, _require('node:fs'), _require('node:path'))
+            if (Array.isArray(facts) && facts.length) {
+              st.employees = facts.map((f, i) => ({
+                id: 'emp-' + String(i + 1),
+                role: f.role,
+                persona: f.name,
+                status: f.status === 'working' ? 'working' : f.status === 'stalled' ? 'on_probation' : 'idle',
+                currentWork: f.currentWork,
+                __source: f.source,
+              }))
+              // 用真实的在办任务替换 company-state 的 tasks（那些常是手填/陈旧的）
+              st.tasks = facts.filter((f) => f.taskId).map((f) => ({
+                id: f.taskId,
+                subject: f.currentWork,
+                assignee: f.role,
+                status: f.status === 'working' ? 'in_progress' : 'pending',
+                updatedAt: f.lastActivityAt,
+                __source: f.source,
+              }))
+            } else if (Array.isArray(st.employees) && st.employees.length) {
+              // 团队事实读不到但 company-state 有员工 → 标记为"未核实"，不冒充真实
+              st.employees = st.employees.map((e) => ({ ...e, __source: 'company-state(未核实)' }))
+            }
+          } catch { /* 推导失败 → 保留 company-state 原值，不崩 */ }
+          return { cwd, state: st, seq0: Number((st && st.__seq) || 0) }
         }
         // relay 的 4 个接口一律过可选 token 闸（P0 安全）：默认关闭（token 为空放行），开启后无 token 401。
         const relayApi = (def) => ctx.effect(() =>

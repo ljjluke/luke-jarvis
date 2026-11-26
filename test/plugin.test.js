@@ -2758,11 +2758,16 @@ test('toPixOfficeSnapshot：员工/任务/事件映射 + 中文角色 id 稳定�
   assert.ok(kinds.includes('ceo.action'), '含 CEO 动作')
 })
 
-test('toPixOfficeSnapshot：无任务表时用 currentWork 合成任务；空状态不崩', async () => {
+test('toPixOfficeSnapshot：无任务表时**不再**合成任务（v0.28 去掉造假兜底）；空状态不崩', async () => {
   const m = await import('../src/host/office-bridge.js')
+  // v0.28 反转（用户定调 2026-11-26「不要让画面是假的」）：
+  // 旧实现用 currentWork 合成 work-<role> 假任务，注释写着「保证画面有人物在干活」。
+  // 那会让用户看到"张三正在写方案"，而张三此刻可能根本没开过会话。
+  // 现在：没有真实任务表就是没有——员工仍在（名单真实），但任务为空。
   const s1 = m.toPixOfficeSnapshot({ employees: [{ role: '架构师', status: 'working', currentWork: '写方案' }] }, { seq: 1 })
-  assert.strictEqual(s1.tasks.length, 1)
-  assert.strictEqual(s1.tasks[0].title, '写方案')
+  assert.strictEqual(s1.tasks.length, 0, '没有真实任务表就不该有任务（不能用 currentWork 造假）')
+  assert.strictEqual(s1.employees.length, 1, '员工名单保留（那是真实的）')
+  // 空状态不崩
   const s2 = m.toPixOfficeSnapshot(null, { seq: 1 })
   assert.deepStrictEqual([s2.employees.length, s2.tasks.length], [0, 0])
   assert.strictEqual(s2.schemaVersion, '1.0')

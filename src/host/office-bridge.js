@@ -127,24 +127,17 @@ export function toPixOfficeSnapshot(state, opts = {}) {
       summary: String(t.output || t.note || '').slice(0, 200),
     })
   })
-  // 没有任务表 → 用员工 currentWork 合成（保证画面有人物在干活）
-  if (tasks.length === 0) {
-    employeesIn.forEach((e, i) => {
-      const work = String(e.currentWork || '')
-      if (!work) return
-      const role = String(e.role || '')
-      const mapped = EMPLOYEE_STATUS_MAP[String(e.status || 'idle')] || 'queued'
-      tasks.push({
-        id: safeId('work-', e.id || role, i + 1),
-        title: work.slice(0, 80),
-        assigneeId: idByRole.get(role) || '',
-        status: mapped,
-        progress: mapped === 'completed' ? 100 : -1,
-        updatedAt: nowIso,
-        summary: String(e.lastReport || '').slice(0, 200),
-      })
-    })
-  }
+  // ── 诚实原则（v0.28·用户定调 2026-11-26）──
+  // 原实现：任务表为空时，用员工 currentWork 合成"任务"塞进画面，注释写着
+  //   「保证画面有人物在干活」。这是**主动造假**：
+  //   ① currentWork 往往是上次写入的残留值，与此刻真实执行无关
+  //   ② 合成的任务 id 形如 work-<role>，和真实任务单（ticket-*）完全对不上
+  //   ③ 用户看到的"张三正在做需求分析"，可能张三此刻根本没开过会话
+  // 用户原话：「不要让画面是假的，活根本不是 /jarvis 的工作内容」。
+  // 修法：没有真实任务表就是没有——员工显示为空闲。宁可画面空着，
+  //       也不能编一个"看起来在干活"的假任务。
+  // 真实任务表来自 company-state.tasks，而它应由 syncCompanyState 从
+  // .agent-teams/<team>/team.json + .jarvis/tickets 同步（见 syncCompanyStateFromFacts）。
 
   // ── 事件流：会议 / 招募 / CEO 动作 / 员工汇报与开除
   const events = []
@@ -208,4 +201,93 @@ export function toPixOfficeSnapshot(state, opts = {}) {
       steps: [],
     },
   }
+}
+
+/**
+ * 从真实事实推导「员工实况」——团队一览画面的唯一数据源（v0.28）。
+ *
+ * 用户定调（2026-11-26）：「团队一览里面每个人员工作画面都要对上，
+ * 不要让画面是假的，活根本不是 /jarvis 的工作内容」。
+ *
+ * 为什么需要：原来的员工状态来自 company-state.json，而那个文件靠模型手填
+ * （jarvis_company 工具），极易与真实执行脱节——实测某工作区 employees: 0，
+ * 但 3D 画面照样显示有人在做需求分析。
+ *
+ * 本函数只读三类**真实事实**，一个都不编：
+ *   ① .agent-teams/<team>/team.json  → 成员名单 + 任务状态 + assignee（谁在做什么）
+ *   ② .jarvis/tickets/ticket-*.json   → 任务单状态（是否有在办的活）
+ *   ③ 会话转录（可选，由调用方传入）  → 该成员是否真的还在跑（lastActivityAt）
+ *
+ * 返回 [{ role, name, status, currentWork, taskId, lastActivityAt, source }]
+ *   status: 'working'（有在办任务且会话活跃）/ 'idle'（无在办任务）/ 'stalled'（有任务但会话已停）
+ *   source: 说明这条状态是从哪个事实推出来的（便于排查"画面为什么显示这样"）
+ *
+ * 边界（刻意保守）：
+ *   · 读不到任何事实 → 返回空数组（画面空着，不造假人）
+ *   · 任务状态判定用 team.json 的 status 字段（与执行器一致）
+ *   · 不推断"应该"在做什么——只报磁盘上有的
+ */
+export async function deriveEmployeeFacts(projectDir, fs, path, opts = {}) {
+  const out = []
+  try {
+    const base = String(projectDir || '')
+    if (!base) return out
+    const teamsDir = path.join(base, '.agent-teams')
+    let teams = []
+    try { teams = fs.readdirSync(teamsDir) } catch { return out }
+    // 收集每个成员的活跃任务（跨团队合并，按 role 去重取最新）
+    const byRole = new Map()
+    for (const t of teams) {
+      if (/^(archive|\.|retired)/.test(String(t))) continue
+      let d = null
+      try { d = JSON.parse(fs.readFileSync(path.join(teamsDir, String(t), 'team.json'), 'utf8')) } catch { continue }
+      const members = Array.isArray(d.members) ? d.members : []
+      const tasks = Array.isArray(d.tasks) ? d.tasks : []
+      for (const m of members) {
+        const role = String(m.role || m.name || '').trim()
+        if (!role) continue
+        // 找该成员当前在办的任务（未终态）
+        const open = tasks.find((x) => String(x.assignee || '') === role
+          && !['completed', 'cancelled', 'failed', 'dropped'].includes(String(x.status || '')))
+        const prev = byRole.get(role)
+        const rec = {
+          role,
+          name: String(m.persona || m.name || role).slice(0, 40),
+          status: open ? 'working' : 'idle',
+          currentWork: open ? String(open.subject || open.title || '').slice(0, 80) : '',
+          taskId: open ? String(open.id || '') : '',
+          taskStatus: open ? String(open.status || '') : '',
+          lastActivityAt: open ? String(open.updatedAt || open.startedAt || '') : '',
+          team: String(t),
+          source: 'team.json',
+        }
+        // 同一 role 多团队 → 保留"有在办任务"的那条
+        if (!prev || (prev.status !== 'working' && rec.status === 'working')) byRole.set(role, rec)
+      }
+    }
+    // 用会话转录校正 working → stalled（有任务但会话已停 = 异常态，要如实显示）
+    const sessions = opts.sessions && Array.isArray(opts.sessions.items) ? opts.sessions.items : []
+    if (sessions.length) {
+      for (const rec of byRole.values()) {
+        const hit = sessions.find((s) => String(s.label || '') === rec.role
+          || String(s.label || '').includes(rec.role))
+        if (hit && rec.status === 'working') {
+          const lastAt = Number(new Date(hit.lastActivityAt || 0)) || 0
+          // 超过 10 分钟没动静 → 判定为停滞（不是假的"在干活"）
+          if (lastAt && Date.now() - lastAt > 10 * 60 * 1000) {
+            rec.status = 'stalled'
+            rec.source = 'team.json+sessions(超10分钟无活动)'
+          } else {
+            rec.source = 'team.json+sessions(会话活跃)'
+          }
+          rec.lastActivityAt = String(hit.lastActivityAt || rec.lastActivityAt)
+        } else if (rec.status === 'working' && !hit) {
+          // 有任务但没有对应会话 → 该成员没真在跑
+          rec.status = 'stalled'
+          rec.source = 'team.json(无对应子会话)'
+        }
+      }
+    }
+    return [...byRole.values()]
+  } catch { return out }
 }

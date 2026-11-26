@@ -2513,6 +2513,16 @@ function renderTeam(snap){
     const doing=tasks.filter(t=>!['completed','cancelled','failed','dropped'].includes(String(t.status))).length;
     presence.innerHTML=`<i class="pulse-dot"></i>${esc(t('team.presence').replace('{o}',online).replace('{k}',doing).replace('{tm}',picked?' · '+t('team.label')+picked.name:''))}`;
   }
+  // 3D 工位上限的诚实提示（v0.28）：上游场景只有 6 个固定工位，
+  // 员工多于 6 人时必然有几人共用画面位置。必须说明白，不能让用户以为
+  // "画面里那张脸就是某个具体员工"。左侧成员列表始终是全量真实数据。
+  const noteEl=$('.team-note');
+  if(noteEl){
+    const seatLimit=6;
+    noteEl.textContent = rows.length>seatLimit
+      ? `成员状态来自真实工作记录（team.json + 任务单），没有数据时不会显示虚构人员。\n当前 ${rows.length} 人，3D 场景只有 ${seatLimit} 个固定工位——画面只代表团队整体态势，具体某人的状态请以左侧列表为准。`
+      : '成员状态来自真实工作记录（team.json + 任务单），没有数据时不会显示虚构人员。';
+  }
   const done=tasks.filter(t=>String(t.status)==='completed');
   const pct=tasks.length?Math.round(done.length/tasks.length*100):0;
   setText('.whiteboard b',pct+'%');
