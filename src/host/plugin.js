@@ -52,6 +52,8 @@ export { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPr
 export { MEMORY_MAX_AGE_MS, checkMemoryFresh, recordGate } from './gates/store.js'
 export { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from './gates/stage.js'
 export { TEAM_TOOLS, jarvisFlowGuard } from './gates/flow.js'
+// jarvisPrecheck 也在 apply 里注册为 guard（第 1 个跑），导出以便测试断言注册顺序与拦截行为。
+export { jarvisPrecheck } from './gates/precheck.js'
 export { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from './pixoffice/index.js'
 const _require = createRequire(import.meta.url)
 

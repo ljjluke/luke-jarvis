@@ -18,7 +18,7 @@ import { TEAM_TOOLS, jarvisFlowGuard } from '../gates/flow.js'
 import { meetingGaps } from '../state/meetings.js'
 import { appendEvent } from '../state/events.js'
 import { harvestFromReport } from '../state/mind.js'
-import { auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkMemberPerf, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
+import { auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkMemberPerf, checkMemberDeliverables, checkCoverageGate, hasGlob, _dropMissing } from '../gates/audit.js'
 import { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from '../state/board.js'
 import { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from '../state/company.js'
 import { PIXOFFICE_ACTOR_IDS, PIXOFFICE_EVENT_KINDS, PIXOFFICE_COMMANDS, PIXOFFICE_LIMITS, normalizeEventKind, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand } from '../pixoffice/index.js'
@@ -758,28 +758,40 @@ export const DELIVER_TOOLS = [
         },
         decompose: {
           label: '拆解',
-          pre: ['需求规格（.jarvis/docs/需求规格-*.md）'],
+          pre: ['需求规格（.jarvis/docs/需求规格-*.md）', '任务编排图（.jarvis/docs/任务编排-*.md）'],
           check: async (missing) => {
-            // 需求规格存在？宽松匹配：目录里有 需求规格-*.md
-            if (fsSvc && typeof fsSvc.readText === 'function') {
-              try {
-                const dir = await fsSvc.readText(path.join(projectDir, '.jarvis/docs/需求规格-占位.probe'))
-                if (dir) {}
-              } catch {}
-            }
-            const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '需求规格')
-            if (!found) missing.push('需求规格（.jarvis/docs/需求规格-*.md 不存在——需求没打磨清楚不许拆解）')
+            // 前置：需求规格（上一步产物）
+            const reqFound = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '需求规格')
+            if (!reqFound) missing.push('需求规格（.jarvis/docs/需求规格-*.md 不存在——需求没打磨清楚不许拆解）')
             else _dropMissing(missing, (m) => m.startsWith('需求规格'))
+            // ⚠️ 本步产物：任务编排图（v0.26 修）
+            // 原实现只查「上一步的产物（需求规格）」就放行 —— 等于「拆解」这步可以完全跳过：
+            // 跑一次 jarvis_flowguard(step="decompose") 就 PASS，而从未产出任务编排图。
+            // 实测（2026-11-26）：空工作区调 decompose 闸 → ok=true，这正是用户说的"步骤被跳过"。
+            // 现在必须真有任务编排图才放行。
+            const ideaFound = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '任务编排')
+            if (!ideaFound) {
+              missing.push('任务编排图（.jarvis/docs/任务编排-*.md 不存在——**拆解这一步没有产出**：必须先用 jarvis_taskgraph 拆出结构化任务图（每任务含负责人/依赖/验收标准），校验通过后落盘，再跑本闸。直接跳过拆解 = 派活时依赖漏接、验收不明确。')
+            } else _dropMissing(missing, (m) => m.startsWith('任务编排'))
           },
           next: '过 jarvis_taskgraph 结构闸 → 出《任务编排图》',
         },
         design: {
           label: '方案设计',
-          pre: ['任务编排图（.jarvis/docs/任务编排-*.md）'],
+          pre: ['任务编排图（.jarvis/docs/任务编排-*.md）', '方案设计（.jarvis/docs/方案设计-*.md）'],
           check: async (missing) => {
+            // 前置：任务编排图（上一步产物）
             const found = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '任务编排')
             if (!found) missing.push('任务编排图（.jarvis/docs/任务编排-*.md 不存在——没拆解不许写方案）')
             else _dropMissing(missing, (m) => m.startsWith('任务编排'))
+            // ⚠️ 本步产物：方案设计（v0.26 修）
+            // 原实现只查「任务编排图存在」就放行 —— 「方案设计」这步可以完全跳过。
+            // 实测（2026-11-26）：无方案设计文件时 design 闸仍 ok=true。
+            // 方案设计是后续 execute 的唯一依据，缺了它成员只能凭猜干活。
+            const designFound = await hasGlob(fsSvc, path.join(projectDir, '.jarvis/docs'), '方案设计')
+            if (!designFound) {
+              missing.push('方案设计（.jarvis/docs/方案设计-*.md 不存在——**方案设计这一步没有产出**：必须写出每条需求→实现落点（用什么结构/怎么改/为什么这么选），再跑本闸。跳过方案 = 执行阶段没有依据，成员只能凭猜。')
+            } else _dropMissing(missing, (m) => m.startsWith('方案设计'))
           },
           next: '出《方案设计》（.jarvis/docs/方案设计-*.md 每条需求→实现落点）',
         },
@@ -831,6 +843,14 @@ export const DELIVER_TOOLS = [
             }
             // 会议：黑板有阻塞/接口变更、未决≥3、分工冲突、新成员进场 → 必开循环会
             missing.push(...meetingGaps(projectDir, 'execute', path, { teams: [...ownedSet] }))
+            // ⚠️ 成员真交付检查（v0.26 加·用户质疑 2026-11-26「有些步骤被跳过了」）：
+            // 原 execute 闸只查「方案设计存在 + captain 不自领 + 无卡死任务」——全是防 captain 越权，
+            // **完全不查成员是否真的交付了东西**。这是流程最长的一段，却是检查最薄的一段：
+            // 成员报 ready 就算过了，哪怕什么产出都没有。
+            try {
+              const deliverableGaps = await checkMemberDeliverables(fsSvc, projectDir, path, ownedSet)
+              missing.push(...deliverableGaps)
+            } catch { /* 检查异常不阻断（防死锁） */ }
           },
           next: '开发-测试迭代（对照基准）+ 质量自循环深挖 → 收口',
         },

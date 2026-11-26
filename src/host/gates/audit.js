@@ -456,3 +456,78 @@ export async function auditTeamCards(fsSvc, projectDir, path, owned) {
   } catch { return [] }
   return out
 }
+
+/** 成员真交付检查（v0.26）——execute 阶段最缺的一道检查。
+ *
+ *  用户质疑（2026-11-26）：「整个工作流程没有代码细化下去，导致有些步骤被跳过了」。
+ *  核实后确认：execute 闸原来只查「方案设计存在 + captain 不自领 + 无卡死任务」，
+ *  全是"防 captain 越权"，**完全不查成员是否真的交付了东西**——这是流程中最长的一段，
+ *  却是检查最薄的一段：成员报 ready 就算过了，哪怕什么产出都没有。
+ *
+ *  本函数只查两件可机械判定的事（不猜意图、不评判质量）：
+ *    ① 声称 completed 的成员任务，其 STATUS.md 必须存在（成员失忆后唯一的进度锚点）
+ *    ② 其交付物目录 .jarvis/outputs/<ticketId>/ 非空（至少有一个文件）
+ *
+ *  判据刻意克制：
+ *    · 只看「已完成」的任务——在办任务不该有产出，查它会误拦正常流程
+ *    · captain 的任务豁免（它是调度者）
+ *    · 只查"有没有"，不查"好不好"（质量归 jarvis_perf / 覆盖矩阵）
+ *    · 检查异常不抛，返回空（宁可放过也不要让流程死锁）
+ */
+export async function checkMemberDeliverables(fsSvc, projectDir, path, owned) {
+  const missing = []
+  if (!fsSvc) return missing
+  try {
+    const teamsDir = path.join(projectDir, '.agent-teams')
+    const teamsRaw = await listNames(fsSvc, teamsDir)
+    if (!teamsRaw) return missing
+    const teams = owned && owned.size ? teamsRaw.filter((n) => owned.has(String(n))) : teamsRaw
+    const completed = []
+    for (const t of teams) {
+      try {
+        const txt = await readTextSafe(fsSvc, path.join(teamsDir, String(t), 'team.json'))
+        if (!txt) continue
+        const d = JSON.parse(txt)
+        for (const task of d.tasks || []) {
+          if (String(task.status || '') !== 'completed') continue
+          const who = String(task.assignee || '')
+          if (!who || who === 'captain' || who === 'CEO' || who === '贾维斯') continue
+          completed.push({ id: String(task.id || ''), assignee: who })
+        }
+      } catch {}
+    }
+    if (!completed.length) return missing
+    // ① STATUS.md 必须存在（成员自己维护的进度锚点）
+    const noStatus = []
+    for (const c of completed) {
+      if (!c.id) continue
+      let has = false
+      try {
+        const p = path.join(projectDir, '.jarvis/outputs', c.id, 'STATUS.md')
+        const txt = await readTextSafe(fsSvc, p)
+        has = !!(txt && String(txt).trim())
+      } catch { has = false }
+      if (!has) noStatus.push(`${c.id}(${c.assignee})`)
+    }
+    if (noStatus.length) {
+      missing.push(`成员交付缺进度记录：${noStatus.length} 个已完成任务没有 STATUS.md（${noStatus.slice(0, 4).join('、')}）——成员声称做完却没留任何进度痕迹，无法确认是真干过还是空口报完成。要求成员在其任务目录补写 .jarvis/outputs/<ticketId>/STATUS.md（写清做了什么/产出在哪/怎么验证）。`)
+    }
+    // ② 产出目录必须非空（至少一个文件）
+    const noOutput = []
+    for (const c of completed) {
+      if (!c.id) continue
+      let count = 0
+      try {
+        const dir = path.join(projectDir, '.jarvis/outputs', c.id)
+        const names = await listNames(fsSvc, dir)
+        count = Array.isArray(names) ? names.length : 0
+      } catch { count = 0 }
+      // STATUS.md 不算产出（那是进度记录）——只有它没有别的东西 = 没交付物
+      if (count <= 1) noOutput.push(`${c.id}(${c.assignee})`)
+    }
+    if (noOutput.length) {
+      missing.push(`成员交付物为空：${noOutput.length} 个已完成任务在 .jarvis/outputs/<ticketId>/ 里没有任何产出文件（${noOutput.slice(0, 4).join('、')}）——"做完了"必须有东西证明：交付物写进该目录（报告/代码/测试/文档都算），只有 STATUS.md 不算。`)
+    }
+  } catch {}
+  return missing
+}

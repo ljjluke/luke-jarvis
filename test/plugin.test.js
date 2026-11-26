@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { apply, TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService, resolveOwnedTeams, auditTeamBriefs, looksLikePluginRepo, stateRootConflict, COORD_TASK_RE, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand, PIXOFFICE_ACTOR_IDS } from '../src/host/plugin.js'
+import { apply, TOOLS, validateCardShape, assessCardDepth, jarvisCommand, identifyIndustry, checkCollabHealth, nextBoardId, writeBoardItems, syncCompanyState, checkTalentPreconditions, auditCaptainOwnedTasks, auditStaleTasks, captainExecutionGuard, checkCoverageGate, jarvisFlowGuard, jarvisPrecheck, checkPonderVerify, recordGate, computeStage, renderStage, jarvisStageGate, hasGlob, writeActiveTeamMarker, getFsService, resolveOwnedTeams, auditTeamBriefs, looksLikePluginRepo, stateRootConflict, COORD_TASK_RE, buildPixOfficeFrame, validatePixOfficeFrame, sseFrameString, relaySeqDecision, frameHash, validatePixOfficeCommand, PIXOFFICE_ACTOR_IDS } from '../src/host/plugin.js'
 
 const GOOD_CEO_CARD = [
   '身份定位：电商 CEO，负责下沉市场拼团电商的战略与团队建设，一手抓增长质量一手抓风控底线。',
@@ -3238,10 +3238,13 @@ test('apply：与既有两闸并列注册第三个 guard（阶段网关真挂上
     get: () => undefined,
   }
   apply(ctx)
-  assert.strictEqual(guards.length, 3, `应注册 3 个 guard（captain/stage/flowguard）：实际 ${guards.length}`)
-  assert.strictEqual(guards[0], captainExecutionGuard, '第 1 个=captain 拦截')
-  assert.strictEqual(guards[1], jarvisStageGate, '第 2 个=阶段网关（顺序决定先给"走错阶段"的指引）')
-  assert.strictEqual(guards[2], jarvisFlowGuard, '第 3 个=流程闸（具体前置条件）')
+  assert.strictEqual(guards.length, 4, `应注册 4 个 guard（precheck/captain/stage/flowguard）：实际 ${guards.length}`)
+  // v0.26/precheck（7f3ec64）：新增 jarvisPrecheck 排在最前——它做「无团队时 agent_teams_* 提前中文拦截」
+  // 与「glob/grep 扫大目录提前拦」，必须比其它闸先跑，否则会先撞上英文报错或超时。
+  assert.strictEqual(guards[0], jarvisPrecheck, '第 1 个=前置体检（最先跑：大目录扫描与无团队提前拦）')
+  assert.strictEqual(guards[1], captainExecutionGuard, '第 2 个=captain 拦截')
+  assert.strictEqual(guards[2], jarvisStageGate, '第 3 个=阶段网关（顺序决定先给"走错阶段"的指引）')
+  assert.strictEqual(guards[3], jarvisFlowGuard, '第 4 个=流程闸（具体前置条件）')
 })
 
 // ── D5：活跃团队判据（防其它项目/历史团队的未完成任务把本项目钉死在 execute）──
