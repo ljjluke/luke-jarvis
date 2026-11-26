@@ -165,6 +165,56 @@ export function renderStage(cwd, opts = {}) {
   return lines.join('\n')
 }
 
+// ── 流程产物写入闸（v0.27·用户定调 2026-11-26「每个动作都需要代码控制」）──
+//
+// 为什么需要：阶段网关（STAGE_DENY）只按**工具名**拦，绕开它只需要换个写文件的方式：
+//   clarify 阶段 → jarvis_store(itemType=doc, name=方案设计-xxx) → 方案设计文件凭空出现
+//   → design 闸看到文件存在就放行 → **方案设计这一步实质被跳过**。
+//   这不是提示词能挡住的（它是真实的文件写入动作），必须在写入前机械拒绝。
+//
+// 判据（全部机械可判，不看模型自述）：
+//   · 目标是 .jarvis/docs/ 下的**流程产物**（按文件名前缀识别，表见 PRODUCT_STAGE）
+//   · 该产物归属某个阶段（需求规格→clarify / 任务编排→decompose / 方案设计→design）
+//   · 当前阶段必须 >= 该产物所属阶段 —— 不许超前写下游产物
+//   · 允许重写本阶段及更早阶段的产物（返工是正常流程）
+//
+// 边界（刻意收窄，避免误伤）：
+//   · 只针对 docs/ 下的流程产物；reports/designs/scripts/docs 里的**交付文档**、
+//     成员写的代码/报告/交付物，完全不拦
+//   · 只拦「写」动作（jarvis_store 的 save、write/edit 工具写到 docs/ 流程产物路径）
+//   · 只在写入时校验，不重判历史（存量项目已写好的产物不追溯推翻）
+export const PRODUCT_STAGE = [
+  { re: /^需求规格[-_]/, stage: 'clarify', label: '需求规格' },
+  { re: /^任务编排[-_]/, stage: 'decompose', label: '任务编排图' },
+  { re: /^方案设计[-_]/, stage: 'design', label: '方案设计' },
+  { re: /^基线清单[-_]/, stage: 'clarify', label: '基线清单' },
+]
+const STAGE_ORDER = ['clarify', 'decompose', 'design', 'build', 'execute', 'close']
+/** 判断一个文件名属于哪个阶段的产物；不属于任何阶段产物返回 null。 */
+export function productStageOf(fileName) {
+  const n = String(fileName || '').replace(/^.*[/\\]/, '').trim()
+  if (!n) return null
+  for (const p of PRODUCT_STAGE) if (p.re.test(n)) return p
+  return null
+}
+/** 当前阶段是否允许写该产物。允许返回 null；不允许返回拒绝文案。 */
+function _productWriteDeny(st, fileName, toolName) {
+  const prod = productStageOf(fileName)
+  if (!prod) return null
+  const curIdx = STAGE_ORDER.indexOf(String(st.stage || ''))
+  const needIdx = STAGE_ORDER.indexOf(prod.stage)
+  if (curIdx < 0 || needIdx < 0) return null    // 判不出阶段 → 放行（不误伤）
+  if (curIdx >= needIdx) return null            // 当前阶段 >= 产物阶段 → 允许（含返工）
+  return [
+    `【jarvis 阶段闸·产物写入】当前是「阶段 ${st.index}/${st.total} ${st.label}」，不允许写「${prod.label}」（那是第 ${needIdx + 1} 阶段 ${STAGE_LABELS[prod.stage]} 的产物）。`,
+    `被拒目标：${fileName}（工具 ${toolName}）`,
+    `为什么拦：跳过 ${prod.label} 之外的下游步骤会让后续闸看到"文件存在"就放行，等于这步没真做过。`,
+    `当前缺口：${(st.missing || []).join('；') || '无'}`,
+    `下一步：${st.next}`,
+    '这是插件按 .jarvis 磁盘事实+阶段算出来的，不是提示词建议——先完成当前阶段并过闸，再写下游产物。',
+  ].join('\n')
+}
+
 // ── 阶段网关（P2 · 完全体核心）：工具调用前按 computeStage 阶段机械拒绝「越阶段」────────────────
 // 为什么需要：v0.9.0 只有 computeStage + 每请求注入（提示词层），阶段推进全靠模型自觉；
 // 长会话/弱模型必然跳步。文字拦不住 → 必须在工具执行前让它**机械失败**（与 flowguard 同族思路）。
@@ -267,6 +317,21 @@ export function stageBase(exec) {
 export function jarvisStageGate(exec) {
   try {
     const name = String((exec && exec.name) || '')
+    const args = exec && exec.arguments
+    // ── 0) 流程产物写入闸（v0.27）──
+    // 这一支**优先于**工具名判断，因为产物写入可以发生在两类工具上：
+    //   · jarvis_store(mode=save, itemType, name)：captain 唯一的写通道
+    //   · write / edit：有写工具的会话（成员/旧 preset）也能直接写 docs/ 流程产物
+    // 顺序很重要：先判"这次要写的是不是下游阶段的流程产物"，再判工具名白/黑名单。
+    const writeTarget = _writeTargetOf(name, args)
+    if (writeTarget) {
+      const cwdW = stageBase(exec)
+      if (cwdW && _flowState(String(cwdW)).jarvis) {
+        const stW = computeStage(String(cwdW))
+        const denyW = _productWriteDeny(stW, writeTarget, name)
+        if (denyW) return denyW
+      }
+    }
     if (!/^(jarvis_|agent_teams_)/.test(name)) return undefined // 只管流程类；read/glob/bash 等不受影响
     const cwd = stageBase(exec) // D1：优先本次调用的 projectDir，回退会话 cwd（唯一入口）
     if (!cwd) return undefined // 判不出工作区 → 放行（不误拦 headless/无 cwd 会话）
@@ -285,6 +350,31 @@ export function jarvisStageGate(exec) {
     if (!deny.includes(name)) return undefined
     return _stageGateText(st, name)
   } catch { return undefined }
+}
+
+/** 从工具调用参数里取出「本次要写的产物文件名」。
+ *  只认会写 docs/ 流程产物的两类：
+ *    · jarvis_store(mode=save)：name + 扩展名（itemType 决定这是 docs 还是别的目录）
+ *    · write / edit：file_path 里含 .jarvis/docs/
+ *  返回 null = 这次调用不涉及流程产物写入（放行）。 */
+function _writeTargetOf(name, args) {
+  try {
+    if (!args || typeof args !== 'object') return null
+    if (name === 'jarvis_store') {
+      if (String(args.mode ?? '').trim() !== 'save') return null
+      const itemType = String(args.itemType ?? '').trim()
+      // 只有 doc 类会落到 .jarvis/docs/；card/project/lesson/report 等不属流程产物
+      if (itemType !== 'doc') return null
+      const nm = String(args.name ?? '').trim()
+      return nm ? (nm.endsWith('.md') ? nm : nm + '.md') : null
+    }
+    if (name === 'write' || name === 'edit') {
+      const p = String(args.file_path ?? args.path ?? '')
+      if (!/\.jarvis[/\\]docs[/\\]/.test(p)) return null
+      return p
+    }
+    return null
+  } catch { return null }
 }
 
 

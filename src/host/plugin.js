@@ -50,7 +50,7 @@ export { boardFilePath, readBoardItems, writeBoardItems, nextBoardId } from './s
 export { companyStateFile, readCompanyState, writeCompanyState, syncCompanyState } from './state/company.js'
 export { auditTeamBriefs, auditCaptainOwnedTasks, auditStaleTasks, checkTalentPreconditions, checkPonderVerify, checkCoverageGate, hasGlob } from './gates/audit.js'
 export { MEMORY_MAX_AGE_MS, checkMemoryFresh, recordGate } from './gates/store.js'
-export { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from './gates/stage.js'
+export { JARVIS_STAGES, STAGE_LABELS, STAGE_GATE, STAGE_DENY, PAID_WORK_TOOLS, PRODUCT_STAGE, productStageOf, computeStage, renderStage, jarvisStageGate, captainExecutionGuard } from './gates/stage.js'
 export { TEAM_TOOLS, jarvisFlowGuard } from './gates/flow.js'
 // jarvisPrecheck 也在 apply 里注册为 guard（第 1 个跑），导出以便测试断言注册顺序与拦截行为。
 export { jarvisPrecheck } from './gates/precheck.js'
