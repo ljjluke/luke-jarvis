@@ -30,16 +30,23 @@ test('根治：未建队时 subagent 被拦（这是绕过任务单的主要入�
     assert.ok(typeof r === 'string' && r.length > 0, '未建队时 subagent 必须被拦')
     assert.match(r, /还没建队|建队/, '提示应指向「先建队」')
     assert.match(r, /派活|dispatch_task/, '应给正确路径')
-    assert.match(r, /allow-captain-exec/, '必须告知逃生阀')
+    // v0.31：不再是"全部拦死 + 给逃生阀"，而是"只拦开子 agent + 明确说 bash/读写不拦"
+    assert.match(r, /bash\/读写工具在未建队时不拦/, '必须说明 bash/读写不拦（否则用户以为又被锁死了）')
   } finally { rm(ws) }
 })
 
-test('根治：未建队时 bash/edit/write 也被拦（不能自己干活）', () => {
+test('根治：未建队时 bash/edit/write **不拦**（v0.31 反转，用户实测"无法正常工作"的死锁）', () => {
   const ws = mkWs()
   try {
-    for (const n of ['bash', 'edit', 'write', 'subagent', 'workflow', 'ralph']) {
-      const r = captainExecutionGuard(mkExec(n, ws, 'sx'))
-      assert.ok(typeof r === 'string', `${n} 在未建队时应被拦`)
+    // 原实现：未建队时把 bash/edit/write 一起拦死 → 连 python3 解压附件都做不了 →
+    // 产出不了需求规格 → 永远过不了 clarify 闸 → 永远建不了队 → 死锁。
+    // 修正：没团队时没有"成员被架空"问题，用户就是唯一干活的人，不该拦。
+    for (const n of ['bash', 'edit', 'write']) {
+      assert.equal(captainExecutionGuard(mkExec(n, ws, 'sx')), undefined, `${n} 在未建队时应放行（否则死锁）`)
+    }
+    // 但绕过任务单的入口仍必须拦
+    for (const n of ['subagent', 'workflow', 'ralph']) {
+      assert.ok(typeof captainExecutionGuard(mkExec(n, ws, 'sx')) === 'string', `${n} 在未建队时应被拦`)
     }
   } finally { rm(ws) }
 })

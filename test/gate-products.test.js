@@ -192,20 +192,47 @@ test('isReadOnlyShell：2>/dev/null 与 2>&1 不算写重定向（这是误拦�
   assert.equal(isReadOnlyShell('ls x >> out.txt', 'bash'), false, '追加写也要拦')
 })
 
-test('captainExecutionGuard：未建队时只读 bash 放行，写操作仍拦', async () => {
+test('captainExecutionGuard：**未建队时不拦 bash/write**（用户实测「无法正常工作」的死锁）', async () => {
   const { captainExecutionGuard } = await import('../src/host/plugin.js')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'))
   try {
-    // 只建 .jarvis 不建团队 → _captainIds 会插 ANY_TOPLEVEL（"未建队时谁都别自己执行"）
+    // 只建 .jarvis 不建团队 → _captainIds 会插 ANY_TOPLEVEL
     fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
     const mk = (tool, args) => ({ name: tool, arguments: args, agent: { session: { id: 'sess-g', header: { cwd: dir } } } })
-    // 用户实测的那两条命令必须放行
-    assert.equal(captainExecutionGuard(mk('bash', { command: 'ls -d /root/.dsh/plugins/* 2>/dev/null | head -20' })), undefined, '只读 ls 必须放行（否则死锁）')
-    assert.equal(captainExecutionGuard(mk('bash', { command: 'ls -d /opt/work/dba/node_modules/* 2>/dev/null | head' })), undefined)
-    assert.equal(captainExecutionGuard(mk('bash', { command: 'git status' })), undefined, 'git status 放行')
-    // 写操作仍必须拦
-    assert.ok(typeof captainExecutionGuard(mk('bash', { command: 'mkdir -p x' })) === 'string', 'mkdir 必须拦')
-    assert.ok(typeof captainExecutionGuard(mk('bash', { command: 'npm test' })) === 'string', 'npm test 必须拦')
-    assert.ok(typeof captainExecutionGuard(mk('write', { file_path: 'x', content: 'y' })) === 'string', 'write 必须拦')
+    // v0.31 反转（用户实测 2026-11-27「现在都无法正常工作了」）：
+    // 未建队时**不该拦 bash/write/edit** —— 没团队时没有"成员被架空"的问题，用户就是唯一干活的人。
+    // 而产出需求规格（过 clarify 闸的前提）往往要先处理附件（python3/unzip/touch），全拦 = 死锁。
+    for (const cmd of [
+      'python3 -c "print(1)"',
+      'unzip -l x.zip',
+      'touch /tmp/x',
+      'mkdir -p x',
+      'npm test',
+    ]) {
+      assert.equal(captainExecutionGuard(mk('bash', { command: cmd })), undefined, `未建队时 bash 必须放行（否则死锁）：${cmd}`)
+    }
+    assert.equal(captainExecutionGuard(mk('write', { file_path: 'x', content: 'y' })), undefined, '未建队时 write 必须放行')
+    assert.equal(captainExecutionGuard(mk('edit', { file_path: 'x' })), undefined, '未建队时 edit 必须放行')
+    // 但「绕过任务单开子 agent」仍必须拦——这才是当初要防的（实测 14 个会话 tracked=0）
+    assert.ok(typeof captainExecutionGuard(mk('subagent', {})) === 'string', 'subagent 未建队时必须拦（防绕过任务单）')
+    assert.ok(typeof captainExecutionGuard(mk('workflow', {})) === 'string', 'workflow 未建队时必须拦')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('captainExecutionGuard：**建队后** captain 仍不得亲自执行（原设计意图保留）', async () => {
+  const { captainExecutionGuard } = await import('../src/host/plugin.js')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard2-'))
+  try {
+    fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+    fs.mkdirSync(path.join(dir, '.agent-teams/t1'), { recursive: true })
+    fs.writeFileSync(path.join(dir, '.agent-teams/t1/team.json'), JSON.stringify({ captainSessionId: 'cap-1', members: [], tasks: [] }))
+    const mk = (tool, args) => ({ name: tool, arguments: args, agent: { session: { id: 'cap-1', header: { cwd: dir } } } })
+    // 建队后：执行类仍拦（防"顶层把活干完"——实证某 captain bash 5.7 万次）
+    assert.ok(typeof captainExecutionGuard(mk('bash', { command: 'python3 x.py' })) === 'string', '建队后跑脚本必须拦')
+    assert.ok(typeof captainExecutionGuard(mk('write', { file_path: 'x', content: 'y' })) === 'string', '建队后 write 必须拦')
+    assert.ok(typeof captainExecutionGuard(mk('edit', { file_path: 'x' })) === 'string', '建队后 edit 必须拦')
+    // 但只读查看仍放行（detrox 环境仍是合法需求）
+    assert.equal(captainExecutionGuard(mk('bash', { command: 'ls -la' })), undefined, '建队后只读仍放行')
+    assert.equal(captainExecutionGuard(mk('bash', { command: 'git status' })), undefined)
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })

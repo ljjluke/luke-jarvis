@@ -109,8 +109,15 @@ export function _captainIds(cwd) {
       // 根治（2026-11-16 实证）：认不出 captain（没建队 / team.json 缺失）时，
       // 原实现返回空集 → 守卫完全失效 → 用户在会话里用原生 subagent 随便开子 agent，
       // 全部绕过任务单（实测 14 个会话 tracked=0，UI 只能靠提示卡兜底）。
-      // 修法：jarvis 工作区里没有可识别的 captain 时，插入 ANY_TOPLEVEL 标记，
-      // 让 captainExecutionGuard 对所有调用方生效——「未建队时谁都别自己执行」。
+      //
+      // ⚠️ 但 v0.31 修正（用户实测 2026-11-27：「现在都无法正常工作了」）：
+      //   原实现让 ANY_TOPLEVEL 对**所有** CAPTAIN_DENY_TOOLS 生效（含 bash/write/edit），
+      //   结果「还没建队 → 连 python3 解压附件、unzip、touch 都做不了」→ 彻底死锁：
+      //   阶段闸要求先产出需求规格，而产出需求规格需要处理用户给的附件，
+      //   处理附件需要跑 python/unzip，全被 captain 闸拦 → 永远走不到建队。
+      //   修正：未建队时**只拦"绕过任务单开子 agent"这一件事**（subagent/workflow/ralph），
+      //   不拦 bash/write/edit —— 没团队时没有"成员被架空"的问题，用户就是唯一干活的人。
+      //   建队后（有真实 captainSessionId）才恢复完整拦截。
       if (!found) ids.add(ANY_TOPLEVEL)
     }
   } catch { /* 无 .agent-teams/权限 → 不拦 */ }
@@ -468,14 +475,25 @@ export function captainExecutionGuard(exec) {
     const isCaptain = captains.has(String(sessionId)) || captains.has(ANY_TOPLEVEL)
     if (!isCaptain) return undefined
     // 未建队时的专属提示：不是「改走派活」（还没队可派），而是「先建队」。
+    //
+    // ⚠️ v0.31 修正（用户实测 2026-11-27「现在都无法正常工作了」）：
+    //   未建队时**只拦"绕过任务单开子 agent"**（subagent/workflow/ralph），
+    //   不再拦 bash/write/edit。理由：没团队时没有"成员被架空"的问题，用户就是唯一干活的人；
+    //   而产出需求规格（过 clarify 闸的前提）往往需要先处理附件/读资料，
+    //   全拦 = 永远走不到建队 = 死锁。
+    //   建队后（有真实 captainSessionId）才恢复完整拦截（含 bash/edit/write）。
     const unbeaten = captains.has(ANY_TOPLEVEL)
     if (unbeaten) {
-      return `【jarvis 严格闸·插件级】当前工作区是 jarvis 项目，但**还没建队**，不能直接开子任务/亲自执行 ${name}。\n` +
+      // 只拦"绕过任务单开子 agent"——这才是当初要防的（实测 14 个会话 tracked=0）
+      if (!['subagent', 'subagent_fork', 'subagent_codex', 'subagent_claude_code', 'workflow', 'ralph'].includes(name)) {
+        return undefined
+      }
+      return `【jarvis 严格闸·插件级】当前工作区是 jarvis 项目，但**还没建队**，不能直接开子任务（${name}）。\n` +
+        '**为什么**：直接开的子任务不进任务单 → 没有进度/没有验收/无法追溯，UI 也看不到。\n' +
         '**正确顺序**：① 过需求/拆解/方案三闸（jarvis_flowguard step=clarify/decompose/design）；' +
         '② jarvis_distill 蒸馏角色卡 → jarvis_company 让员工落盘（建队）；' +
         '③ 用 jarvis_dispatch_task(assignee=成员, subject, description, acceptance) 派活。\n' +
-        '**为什么**：直接开的子任务不进任务单 → 没有进度/没有验收/无法追溯，UI 也看不到。\n' +
-        '**确需临时调试**：在工作区新建空文件 `.jarvis/allow-captain-exec` 即可放行（调试完请删除）。'
+        '**注意**：bash/读写工具在未建队时不拦——你需要先把需求规格处理出来才可能过闸。'
     }
     // 缺陷 d 修复（2026-11-14 实证）：拒绝文案必须带「当前阶段 + 卡在哪 + 该走哪一步」。
     // 原因：原文案只说「改走派活」，但若流程还停在 clarify（前置产物没齐），
