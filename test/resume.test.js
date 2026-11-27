@@ -191,7 +191,10 @@ test('四层机制都在主流程接线（不是只写在文件里没调用）',
   const toolsSrc = fs.readFileSync(new URL('../src/host/tools/index.js', import.meta.url), 'utf8')
   assert.ok(/import { recordProgress }/.test(toolsSrc), '工具层应导入流水记录')
   assert.ok(/recordProgress\(cwd, tool\.name, args/.test(toolsSrc), '每次 jarvis 工具调用都要记流水')
-  assert.ok(/result\.then\(\(\) => note\(true\), \(e\) => note\(false/.test(toolsSrc), '异步工具成功/失败都要记')
+  // v0.34：返回值先过 lossless 归一（withSanitize），进度留痕挂在归一后的 promise 上。
+  // 断言收敛到「异步结果的成功/失败都记一条」这个语义本身，不钉死中间变量名。
+  assert.ok(/note\(true\), \(e\) => note\(false/.test(toolsSrc), '异步工具成功/失败都要记')
+  assert.ok(/sanitizeToolValue/.test(toolsSrc), '工具返回值必须过值级无损归一（否则 DSH 判 invalid output）')
   const resumeSrc = fs.readFileSync(new URL('../src/host/state/resume.js', import.meta.url), 'utf8')
   assert.ok(/function stalenessNote/.test(resumeSrc), '续接块应含新鲜度门')
   assert.ok(/function latestProgressAt/.test(resumeSrc), '新鲜度靠流水时间戳判定')

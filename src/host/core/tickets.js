@@ -61,16 +61,21 @@ export class Tickets {
       mandate: {
         strength: (input.mandate && input.mandate.strength) || 'inferred',
         basis: (input.mandate && input.mandate.basis) || 'open:unspecified',
-        by: input.mandate && input.mandate.by,
         at,
-        gate: input.mandate && input.mandate.gate,
       },
       assignments: [],
       createdAt: at,
       updatedAt: at,
-      meta: input.meta,
-      origin: input.origin,
     }
+    // 可选字段只在有值时挂键——**绝不挂 undefined**：DSH 的 output 校验走 lossless JSON 边界
+    // （dsh-util-values walkJsonValue），对象里任何 undefined 键都会让整次 jarvis_ticket 调用
+    // 被判 "value is not lossless JSON"（用户实测 2026-11-27：开单已成功但调用方拿不到结果）。
+    // 见 tools/contract.js 头部注释与 test/lossless.test.js。
+    const m = input.mandate || {}
+    if (m.by !== undefined) ticket.mandate.by = m.by
+    if (m.gate !== undefined) ticket.mandate.gate = m.gate
+    if (input.meta !== undefined) ticket.meta = input.meta
+    if (input.origin !== undefined) ticket.origin = input.origin
     const assignment = this.newAssignment(ticket, String(input.role || 'captain'))
     this.repo.tickets.save(ticket)
     this.executor.start(ticket, assignment)
@@ -163,7 +168,8 @@ export class Tickets {
       assignment.endedAt = at
       assignment.endedReason = reason || outcome
     }
-    ticket.ended = { at, by, outcome, reason: reason ? String(reason) : undefined }
+    ticket.ended = { at, by, outcome }
+    if (reason) ticket.ended.reason = String(reason) // 同 open()：不挂 undefined 键
     ticket.updatedAt = at
     this.repo.tickets.save(ticket)
     this.emit('ticket.ended', { ticketId, by, outcome })

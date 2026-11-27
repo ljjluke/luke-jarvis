@@ -2573,14 +2573,29 @@ test('jarvis_member_brief：须知含 read-before-edit 铁律 + 自改备份要�
   assert.ok(brief.includes('node --check'), '须知须含语法自检')
 })
 
-test('协议与预设：含"同名 has already been used"与"member is busy"判断（报错回执 #1/#2）', () => {
+test('协议与预设：建队/派活机制描述必须与真实实现一致（v0.34 反转）', () => {
+  // 反转原因（2026-11-27 用户实测）：旧断言要求三份文件都写 agent_teams_* 的 add_member/reassign_task，
+  // 但本部署 agent_teams_create 必然失败（"you do not lead or belong to any active team yet"），
+  // 真实的建队/派活链路是 jarvis_distill / jarvis_company / jarvis_dispatch_task / jarvis_ticket。
+  // 旧断言把错误的引导钉死在这些文档里，导致模型反复调 agent_teams_create 反复失败。
   const files = ['skills/jarvis.md', 'preset/agent.cordis.yml', 'preset/jarvis-captain.cordis.yml']
   for (const f of files) {
     const t = fs.readFileSync(path.resolve(f), 'utf8')
-    assert.ok(t.includes('has already been used'), `${f} 须含同名报错与查重要求`)
-    assert.ok(/busy with|正在忙|BUSY/.test(t), `${f} 须含 busy 判断（busy 时不要 reassign）`)
-    assert.ok(t.includes('reassign_task'), `${f} 须含 reassign 派活/唤醒指引`)
+    assert.ok(/jarvis_dispatch_task/.test(t), `${f} 须指引 jarvis_dispatch_task 派活`)
+    assert.ok(/jarvis_company/.test(t), `${f} 须指引 jarvis_company 员工落盘/入职`)
+    assert.ok(/jarvis_ticket/.test(t), `${f} 须指引 jarvis_ticket 盯控/重派/换人`)
+    // 若提到 agent_teams_*，不得出现「怎么用它」的动作词（那才是误导模型去调用）
+    // （允许：不要调用/必失败/NOT agent_teams/走 jarvis 之类的负向说明）
+    const AT_USAGE = /agent_teams_(add_member|remove_member|create_task|reassign_task|status|send_message|approve|update_task|edit_plan|claim_task|amend_task|delete|resume)/
+    const atLines = t.split('\n').filter((l) => /agent_teams_/.test(l))
+    for (const l of atLines) {
+      assert.ok(!AT_USAGE.test(l), `${f} 仍在教怎么用 agent_teams：${l.slice(0, 100)}`)
+    }
   }
+  // captain 预设必须明确说 agent_teams_create 会失败/不要用（这是当初反复失败的根因）
+  const cap = fs.readFileSync(path.resolve('preset/jarvis-captain.cordis.yml'), 'utf8')
+  assert.ok(/agent_teams_create[\s\S]{0,160}(失败|fail|WRONG|不要用|别调用)/i.test(cap),
+    'captain 预设必须写明 agent_teams_create 会失败/不要用')
 })
 
 // ── v0.4.0：覆盖优先（基线→覆盖矩阵→收口硬闸，防"换UI丢页面"）──

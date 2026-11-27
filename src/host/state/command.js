@@ -9,6 +9,7 @@
  *   ④ 每次调用落一条 `command` 事件，界面/时间轴/审计都能看到"谁在什么时候点了什么"。
  */
 import { TOOLS } from '../tools/index.js'
+import { invokeNestedTool } from '../tools/contract.js'
 import { createJarvisEngine } from '../engine.js'
 import { recordProgress } from './progress.js'
 
@@ -142,7 +143,19 @@ export async function runCommand({ ctx, projectDir, tool, args, agent, signal })
     tool: spec.name,
     args: norm,
     startedAt,
-    execute: () => toolsSvc.execute({ callId, name: spec.name, arguments: norm, agent, signal: signal || AbortSignal.timeout(120000) }),
+    // ⚠️ DSH 契约是 execute({calls:[ToolCallBlock], signal, agent}) → ToolBatchResult，
+    //    旧写法 {callId, name, arguments} 会让 batch.ts 抛 TypeError（"Tool batch execution failed"）。
+    //    invokeNestedTool 统一解构，并适配 engine.runCommand 期望的 {isError, value, content} 形态。
+    execute: async () => {
+      const r = await invokeNestedTool(toolsSvc, { name: spec.name, args: norm, agent, signal: signal || AbortSignal.timeout(120000), callId })
+      return {
+        isError: r.isError,
+        value: r.value,
+        // engine.runCommand 的 textOf 只读 content 里的 text block
+        content: (r.content && r.content.length) ? r.content : [{ type: 'text', text: r.isError ? (r.error || '工具执行失败') : JSON.stringify(r.value ?? {}, null, 2) }],
+        ...(r.isError ? { error: { message: r.error } } : {}),
+      }
+    },
   })
   note(!out || out.ok !== false, out && out.ok === false ? String(out.error || '') : '')
   return out

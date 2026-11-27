@@ -8,6 +8,7 @@ import { toPixOfficeSnapshot } from '../office-bridge.js'
 import { Engine, reasonText } from '../core/index.js'
 import { JsonTicketRepositories } from '../adapters/json-tickets.js'
 import { SECTIONS, EVIDENCE_SECTIONS, COLLAB_FOUR, checkCollabHealth, validateCardShape, assessCardDepth, distillGuide, identifyIndustry, checkContentFingerprint } from '../distill/index.js'
+import { invokeNestedTool } from './contract.js'
 import { JARVIS_SYSTEM_PROTOCOL, JARVIS_CULTURE } from '../protocol/index.js'
 import { COORD_TASK_RE, TERMINAL_TASK_STATUS, ACTIVE_TEAM_MARKER_TTL_MS, ACTIVE_TEAM_MAX_AGE_MS, ARCHIVED_TEAM_RE, resolveOwnedTeams, looksLikePluginRepo, stateRootConflict, writeActiveTeamMarker } from '../gates/ownership.js'
 import { listNames, readTextSafe, hasTeamJson, resolveWorkspace, ponderVerifyProjectDir, getFsService, getRuntimeContext, getLatestExec, getResolvedWorkspace, markJarvisSession, isJarvisSession } from '../runtime.js'
@@ -897,7 +898,7 @@ export const ORG_TOOLS = [
     const projectDir = String(args.projectDir ?? '').trim() || resolveWorkspace(getRuntimeContext()) || ''
     const rt = getRuntimeContext()
     const toolsSvc = rt && typeof rt.get === 'function' ? rt.get('tools') : undefined
-    if (!toolsSvc || typeof toolsSvc.execute !== 'function') {
+    if (!toolsSvc || (typeof toolsSvc.execute !== 'function' && typeof toolsSvc.executeTool !== 'function')) {
       return {
         ok: false,
         dispatched: false,
@@ -905,9 +906,11 @@ export const ORG_TOOLS = [
       }
     }
     const signal = (exec && exec.signal) || new AbortController().signal
-    const rootCallId = (exec && exec.rootCallId) || undefined
+    // ⚠️ 嵌套调用必须走 DSH 契约（ToolBatchInput：{calls:[ToolCallBlock], signal, agent}），
+    //    不是 {callId, name, arguments}（那样 batch.ts 会抛 TypeError → "Tool batch execution failed"）。
+    //    invokeNestedTool 统一解构成 {isError, value, error, content}，并兼容测试桩的 executeTool 形态。
     const call = (name, a) =>
-      toolsSvc.execute({ callId: `jarvis-dispatch-${name}-${Date.now().toString(36)}`, rootCallId, name, arguments: a, agent: exec && exec.agent, signal })
+      invokeNestedTool(toolsSvc, { name, args: a, agent: exec && exec.agent, signal })
     const inner = []
     const textOf = (res) => {
       try {
@@ -932,7 +935,7 @@ export const ORG_TOOLS = [
       const bv = b && !b.isError ? b.value : undefined
       cardPath = String((bv && bv.cardPath) || '')
       cardMissing = bv ? Boolean(bv.cardMissing) : true
-      if (b && b.isError) return { ok: false, dispatched: false, inner, cardPath, cardMissing, summary: `⚠️ 生成成员须知失败：${String((b.error && (b.error.message || b.error.code)) || '未知错误')}` }
+      if (b && b.isError) return { ok: false, dispatched: false, inner, cardPath, cardMissing, summary: `⚠️ 生成成员须知失败：${String(b.error || '未知错误')}` }
     } catch (e) {
       return { ok: false, dispatched: false, inner, summary: `⚠️ 生成成员须知抛错：${String((e && e.message) || e)}` }
     }
@@ -968,7 +971,7 @@ export const ORG_TOOLS = [
           cardMissing,
           briefChars: brief.length,
           inner,
-          summary: `⚠️ 开单失败：${String((created && created.error && (created.error.message || created.error.code)) || (cv && cv.verdict) || '未知错误')}——须知已生成（${brief.length} 字），可手工 jarvis_ticket action=open 开单（brief 参数直接带须知）。`,
+          summary: `⚠️ 开单失败：${String((created && created.error) || (cv && cv.verdict) || '未知错误')}——须知已生成（${brief.length} 字），可手工 jarvis_ticket action=open 开单（brief 参数直接带须知）。`,
         }
       }
       let meetingHint = ''

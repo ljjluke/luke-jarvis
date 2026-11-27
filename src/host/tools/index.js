@@ -11,6 +11,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { assertObjectJsonSchema, assertSupportedJsonSchema } from './schema.js'
+import { sanitizeToolValue } from './contract.js'
 import { getRuntimeContext, setRuntimeContext, rememberExec, markJarvisSession, resolveWorkspace } from '../runtime.js'
 import { renderStage } from '../gates/stage.js'
 import { stateRootConflict } from '../gates/ownership.js'
@@ -148,11 +149,12 @@ function trackExecution(tool, args, exec) {
   }
   // 异步结果：成功/失败都要记一条（不 await，不拖慢返回）
   if (result && typeof result.then === 'function') {
-    result.then(() => note(true), (e) => note(false, String((e && e.message) || e)))
-    return result
+    const p = withSanitize(result, tool.name)
+    p.then(() => note(true), (e) => note(false, String((e && e.message) || e)))
+    return p
   }
   note(true)
-  return result
+  return sanitizeToolValue(result, tool.name)
 }
 
 /** 工具渲染结果 → 模型可见文本块（render 契约要求 ContentBlock[]，必须纯、不抛）。 */
@@ -163,6 +165,16 @@ function textBlocks(rendered) {
   else if (typeof rendered === 'object') text = JSON.stringify(rendered, null, 2)
   else text = String(rendered)
   return [{ type: 'text', text }]
+}
+
+/** 值级无损归一（同步/异步同款）：DSH 在 pipe 线里对返回值先做 lossless JSON 判定，
+ *  任何 undefined/NaN/Date/环都会让整次调用判 invalid output（工具执行其实已成功）。
+ *  修在注册边界 = 38 个工具一次覆盖，见 tools/contract.js 头部注释里的实证。 */
+function withSanitize(value, toolName) {
+  if (value && typeof value.then === 'function') {
+    return value.then((v) => sanitizeToolValue(v, toolName))
+  }
+  return sanitizeToolValue(value, toolName)
 }
 
 /** 把一个工具定义规范成 DSH 的 ToolDefinition（注册前就校验，坏定义在 apply 期直接报错）。 */
