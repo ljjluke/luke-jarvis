@@ -185,7 +185,12 @@ export const MEMORY_TOOLS = [
         const dir = DIR[itemType] ?? ''
         // v0.23 修：原来 `${projectDir}${dir}...` 在 projectDir 无尾斜杠时会拼成
         // `/opt/work/testcards/研发.md`。用 path.join 保证任何输入都正确。
-        const fileName = `${(name || itemType || 'item').replace(/[\\/:*?"<>|]/g, '_')}${ext}`
+        // ⚠️ 防止双后缀（用户实测 2026-11-27：写出了 `需求规格-xxx.md.md`）：
+        // 调用方常按直觉把扩展名写进 name，而本函数又会补一次 ext → 变成 .md.md。
+        // 修法：先剥掉 name 末尾与目标 ext 相同的后缀（.md/.json/.mjs），避免重复。
+        const rawName = String(name || itemType || 'item').replace(/[\\/:*?"<>|]/g, '_')
+        const safeName = rawName.replace(new RegExp(`(${ext.replace(/\./g, '\\.')})$`, 'i'), '')
+        const fileName = `${safeName || itemType || 'item'}${ext}`
         savePath = isPlaceholder ? `${normDir}/${dir}${fileName}` : path.join(normDir, dir, fileName)
         // ── 真写入（v0.24 修·用户实测 2026-11-25「三个工具缺陷叠在一起把流程锁死在第一步」）──
         // 原实现只返回路径、从不写内容，verdict 却说"写入 xxx"——名不副实。
