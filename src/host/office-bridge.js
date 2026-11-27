@@ -24,6 +24,13 @@ export const EMPLOYEE_STATUS_MAP = {
 }
 
 /** 角色关键词 → PixOffice 人物（sceneActorId）。多对一绑定是官方支持的用法。 */
+// 上游场景可用演员（与 pixoffice/index.js 的 PIXOFFICE_ACTOR_IDS 保持一致）。
+// 这里单独定义一份是为了避免 office-bridge ↔ pixoffice 的循环依赖
+// （pixoffice/index.js 又 import 本文件的 toPixOfficeSnapshot）。
+// ⚠️ 改这里必须同步改 src/host/pixoffice/index.js 的 PIXOFFICE_ACTOR_IDS，否则帧校验会拒。
+export const PIXOFFICE_ACTORS = Object.freeze([
+  'office-lead', 'review-agent', 'data-agent', 'file-agent', 'app-agent', 'code-agent',
+])
 // 顺序即优先级：越具体的岗位越靠前（"测试工程师"必须命中 review-agent，不能被"工程师"抢走）
 const ACTOR_RULES = [
   [/ceo|总经理|老板|厂长|店长|负责人|lead|主管/i, 'office-lead'],
@@ -88,23 +95,56 @@ export function toPixOfficeSnapshot(state, opts = {}) {
   const recruitingIn = Array.isArray(st.recruiting) ? st.recruiting : []
 
   // ── 员工：只保留未离场的（terminated 仍要展示为 failed 一段时间，由调用方决定是否过滤）
+  //
+  // ⚠️ 场景容量硬限制（v0.29·用户定调 2026-11-27「不要自绘」）：
+  //   上游 PixOffice 只有 6 个角色模型与 6 个固定工位（p1..p6），actor id 白名单也固定 6 个。
+  //   在「不自绘 + 不改上游 bundle」的前提下，物理上不可能给第 7 个人独立工位。
+  //   所以这里的策略是：**让这 6 个位置放"最该被看见的 6 个人"**——
+  //     ① 优先 working（正在干活的人必须出现在画面里，这是"画面对不上"的核心抱怨）
+  //     ② 其次 stalled（有任务但会话停了，需要被注意到）
+  //     ③ 最后 idle
+  //   原实现是按 employeesIn 原序取前 200 个、按 role 哈希选 actor，
+  //   完全不看谁在干活 → 可能出现"idle 的人占着台，正在干活的人不在画面里"。
   const employees = []
   const idByRole = new Map()
-  employeesIn.slice(0, 200).forEach((e, i) => {
+  // 先按活跃度排序（working > stalled > idle），同档按原序（保持稳定）
+  const ACTIVITY_RANK = { working: 0, reporting: 0, meeting: 0, stalled: 1, on_probation: 1, idle: 2, terminated: 3 }
+  const sorted = employeesIn.slice(0, 200).map((e, i) => ({ e, i, r: ACTIVITY_RANK[String(e.status || 'idle')] ?? 2 }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+  // 已占用的 actor 必须去重：同一个 sceneActorId 出现两次，上游只会渲染一个实例，
+  // 等于"两个人挤一个工位"——这正是用户抱怨的"画面对不上"。
+  const usedActors = new Set()
+  for (const { e, i } of sorted) {
     const role = String(e.role || e.name || `员工${i + 1}`)
     const id = safeId('emp-', e.id || role, i + 1)
-    if (idByRole.has(role)) return
+    if (idByRole.has(role)) continue
+    let actor = pickActor(role)
+    // actor 撞车 → 换一个没被占用的（实在没有才允许复用，并标记 congested）
+    let congested = false
+    if (usedActors.has(actor)) {
+      const free = PIXOFFICE_ACTORS.find((a) => !usedActors.has(a))
+      if (free) actor = free
+      else congested = true
+    }
+    usedActors.add(actor)
     idByRole.set(role, id)
     const status = String(e.status || 'idle')
     employees.push({
       id,
-      sceneActorId: pickActor(role),
+      sceneActorId: actor,
       name: String(e.persona || e.name || role).slice(0, 40),
       role: role.slice(0, 60),
+      status,
+      currentWork: String(e.currentWork || '').slice(0, 80),
       // 修正三目永真（旧式两个分支对 idle 都返回 true → idle 员工在画面上永远在线）
       online: status !== 'terminated' && status !== 'idle',
+      congested,          // true = 工位已满，此人与别人共用同一个场景角色
     })
-  })
+  }
+  // 场景可见人数上限 = 6 个演员；超出部分不进场景（但左侧列表仍全量显示）
+  const SEAT_LIMIT = PIXOFFICE_ACTORS.length
+  const sceneVisible = employees.slice(0, SEAT_LIMIT)
+  const overflow = Math.max(0, employees.length - SEAT_LIMIT)
 
   // ── 任务：优先用真实任务表；没有任务表时，用员工 currentWork 合成展示任务
   const tasks = []
@@ -191,12 +231,19 @@ export function toPixOfficeSnapshot(state, opts = {}) {
       id: String(opts.workspaceId || 'jarvis-team'),
       name: String(opts.workspaceName || st.company?.name || 'Jarvis 数字员工公司'),
     },
-    employees,
+    // 场景只渲染 6 个工位（上游硬限制）；超出的人不进 employees（避免同一 actor 重复绑定）。
+    // 左侧成员列表走的是另一条数据（直接读 team.json），始终全量。
+    employees: sceneVisible,
+    // 溢出信息：让场景内的 whiteboard 与前端能说清"画面只显示了一部分"
+    seatInfo: { limit: SEAT_LIMIT, total: employeesIn.length, overflow: Math.max(0, employeesIn.length - SEAT_LIMIT), congested: employees.filter((e) => e.congested).length },
     tasks,
     events,
     whiteboard: {
       template: 'task-board-v1',
-      title: String(st.phase ? `当前阶段：${st.phase}` : '任务白板'),
+      // 文案必须诚实：员工多于工位时明确说"画面 X/共 N"
+      title: overflow > 0
+        ? `画面 ${sceneVisible.length}/${employees.length} 人在岗 · 其余见左侧列表`
+        : String(st.phase ? `当前阶段：${st.phase}` : '任务白板'),
       status: 'queued',
       steps: [],
     },

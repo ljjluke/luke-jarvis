@@ -113,3 +113,46 @@ test('状态映射：idle 不算 online（旧实现三目永真会让空闲员�
   assert.equal(byRole['B'].online, true, 'working 员工在线')
   assert.equal(EMPLOYEE_STATUS_MAP.idle, 'queued', 'idle 映射为 queued（不占"running"槽）')
 })
+
+// ── v0.29：场景容量限制的诚实处理（用户定调"不要自绘"）─────────────
+test('场景容量：员工多于 6 人时只显示 6 个，并用 whiteboard 明确标注溢出', () => {
+  const employees = ['CEO', '研发A', '研发B', '架构师', '测试员', '前端1', '前端2', '产品经理', '运维']
+    .map((r, i) => ({ role: r, status: i < 4 ? 'working' : 'idle', currentWork: i < 4 ? '任务' + i : '' }))
+  const snap = toPixOfficeSnapshot({ employees }, { seq: 1 })
+  assert.equal(snap.employees.length, 6, '上游只有 6 个工位，场景内最多 6 人')
+  assert.equal(snap.seatInfo.total, 9, '总数要如实报')
+  assert.equal(snap.seatInfo.overflow, 3, '溢出数要如实报')
+  assert.ok(/画面 6\/9/.test(snap.whiteboard.title), `whiteboard 必须标注"画面 X/共 N"，实际：${snap.whiteboard.title}`)
+  assert.ok(/其余见左侧列表/.test(snap.whiteboard.title), '必须告诉用户还有人在列表里')
+})
+
+test('场景容量：活跃员工优先入园（"在干活的人必须在画面里"）', () => {
+  // 故意构造：前 3 个 idle，后 3 个 working——原实现按原序取，会把干活的挤掉
+  const employees = [
+    { role: '闲1', status: 'idle' }, { role: '闲2', status: 'idle' }, { role: '闲3', status: 'idle' },
+    { role: '忙1', status: 'working', currentWork: 'A' },
+    { role: '忙2', status: 'working', currentWork: 'B' },
+    { role: '忙3', status: 'working', currentWork: 'C' },
+    { role: '闲4', status: 'idle' },
+  ]
+  const snap = toPixOfficeSnapshot({ employees }, { seq: 1 })
+  const shown = snap.employees.map((e) => e.role)
+  for (const busy of ['忙1', '忙2', '忙3']) {
+    assert.ok(shown.includes(busy), `正在干活的 ${busy} 必须在画面里，实际显示：${shown.join(',')}`)
+  }
+})
+
+test('场景容量：actor 唯一（同一 actor 出现两次会被上游只渲染一个 = 两人挤一工位）', () => {
+  const employees = Array.from({ length: 20 }, (_, i) => ({ role: '员工' + i, status: 'working' }))
+  const snap = toPixOfficeSnapshot({ employees }, { seq: 1 })
+  const actors = snap.employees.map((e) => e.sceneActorId)
+  assert.equal(new Set(actors).size, actors.length, `actor 必须互不相同，实际：${actors.join(',')}`)
+  assert.equal(snap.employees.length, 6, '最多 6 个')
+})
+
+test('场景容量：员工不足 6 人时不补假人', () => {
+  const snap = toPixOfficeSnapshot({ employees: [{ role: 'A', status: 'working' }, { role: 'B', status: 'idle' }] }, { seq: 1 })
+  assert.equal(snap.employees.length, 2, '有几个就显示几个，不补假人凑满 6 个')
+  assert.equal(snap.seatInfo.overflow, 0, '没溢出')
+  assert.ok(!/画面 [0-9]+\/[0-9]+/.test(snap.whiteboard.title), '未溢出时不显示"画面 X/共 N"')
+})

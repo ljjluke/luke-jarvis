@@ -4223,10 +4223,18 @@ test('T11 relay：buildPixOfficeFrame 生成合法快照帧（无 INVALID_BINDIN
   }
 })
 
-test('T11 relay：employees >200 截断；tasks/events 也按上游上限截断', () => {
-  const many = Array.from({ length: 260 }, (_, i) => ({ id: 'e' + i, role: '角色' + i, status: 'idle' }))
+test('T10 relay：员工超过场景容量时只保留场景能渲染的（v0.29 上游只有 6 工位）；帧仍合法', () => {
+  const many = Array.from({ length: 260 }, (_, i) => ({ id: 'e' + i, role: '角色' + i, status: 'working' }))
   const frame = buildPixOfficeFrame({ employees: many }, { seq: 1 })
-  assert.strictEqual(frame.snapshot.employees.length, 200, `employees 必须截断到 200（实际 ${frame.snapshot.employees.length}）`)
+  // v0.29：场景容量 = 上游演员数（6）。原实现保留 200 个，但上游只有 6 个工位，
+  // 多出来的会在同一 actorId 上撞车 → 上游只渲染一个实例 → 画面"两个人挤一个位置"。
+  // 现在只保留 6 个进场景，其余通过 seatInfo.overflow 如实上报（左侧列表仍全量）。
+  assert.strictEqual(frame.snapshot.employees.length, 6, `employees 应截到场景容量 6（实际 ${frame.snapshot.employees.length}）`)
+  assert.strictEqual(frame.snapshot.seatInfo.total, 260, '总数必须如实上报')
+  assert.strictEqual(frame.snapshot.seatInfo.overflow, 254, '溢出数必须如实上报')
+  // actor 唯一是上游硬要求：重复 actorId 会被整批丢弃
+  const actors = frame.snapshot.employees.map((e) => e.sceneActorId)
+  assert.strictEqual(new Set(actors).size, actors.length, `actor 必须互不相同：${actors.join(',')}`)
   assert.strictEqual(validatePixOfficeFrame(frame).ok, true, '截断后仍应合法')
 })
 
