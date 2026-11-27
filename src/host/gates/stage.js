@@ -14,14 +14,74 @@ const _require = createRequire(import.meta.url)
 // 固化、无法追溯修改 → 顶层 captain 于是自己把活干完（实证：某 captain 会话 bash 5.7 万次）。
 // 此 guard 直接拦在工具执行前，**对已存在会话同样生效**：
 //   • 仅当调用会话 = 「jarvis 工作区（有 .jarvis/）+ 某团队 team.json 的 captainSessionId」时才拦；
-//   • 只拦执行类工具（bash/pwsh/edit/write/subagent/workflow/ralph）；
+//   • 只拦执行类工具（edit/write/subagent/workflow/ralph）；
 //     read/glob/grep（只读查看）与 jarvis_*（派发与流程）不受影响；
 //   • 成员会话（非 captain）完全不受影响。
+//
+// ⚠️ bash/pwsh 单独处理（v0.30·用户实测 2026-11-27）：
+//   原实现把 bash 一刀切拦死，结果**只读探查也被当成"亲自干活"**——
+//   用户想 ls 一下插件目录定位问题，直接撞上「还没建队不能执行 bash」，
+//   而当前阶段恰恰需要先探查环境才能往下走 → **死锁**。
+//   修法：区分只读命令与写操作命令。只读（ls/cat/grep/find/git status/node --check/…）
+//   一律放行；只有会改文件/跑构建/起进程的命令才拦。
+//   "只读"判据刻意保守：任何无法确认只读的命令 → 按写操作拦（宁可多拦，不可放过真执行）。
 const CAPTAIN_DENY_TOOLS = new Set([
-  'bash', 'pwsh', 'edit', 'write',
+  'edit', 'write',
   'subagent', 'subagent_fork', 'subagent_codex', 'subagent_claude_code',
   'workflow', 'ralph',
 ])
+const SHELL_TOOLS = new Set(['bash', 'pwsh', 'terminal', 'shell'])
+
+/** 判断一条 shell 命令是否【只读】。
+ *  保守策略：仅当整条命令的每个指令段都以已知只读命令开头、且不含重定向/管道写、不含危险动词时才算只读。
+ *  任何不确定 → 返回 false（按写操作拦）。 */
+export function isReadOnlyShell(command, toolName) {
+  const raw = String(command || '').replace(/\\\\n/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!raw) return false
+  // 写重定向一律不算只读——但必须排除「丢弃输出」的 2>/dev/null、>/dev/null、2>&1
+  // （那些不写文件，是常见只读命令的标配）。
+  //
+  // 判法：把「纯丢弃」重定向先摘掉，再看还剩不剩重定向。
+  const stripped = raw
+    .replace(/\d*>>?\s*\/dev\/null/g, ' ')     // 2>/dev/null / >/dev/null / >>/dev/null
+    .replace(/\d*>&\d+/g, ' ')                 // 2>&1 / 1>&2
+  if (/>>?\s*[^\s&]/.test(stripped)) return false
+  if (/\btee\b/.test(raw) || /\b(sed|perl)\s+-i/.test(raw)) return false
+  // 危险动词（会改状态/跑构建/起进程）
+  if (/\b(mkdir|touch|rm|rmdir|mv|cp|chmod|chown|ln|truncate|dd|kill|pkill|systemctl|service|docker|npm|pnpm|yarn|pip|apt|yum|brew|cargo|make|gradle|mvn)\b/.test(raw)) return false
+  // git 只读子命令
+  if (/\bgit\b/.test(raw) && !/\bgit\s+(status|log|show|diff|branch|rev-parse|ls-files|describe|remote|config\s+--get)\b/.test(raw)) return false
+  // node/npx：--check/--version 只读，其余（跑脚本/起服务）不算
+  if (/\b(node|npx)\b/.test(raw) && !/\b(node\s+(--check|-v|--version)|npx\s+--version)\b/.test(raw)) return false
+  // python/perl 直接跑 → 不算只读（除非 -c 只读表达式，太模糊，一律拦）
+  if (/\b(python|python3|perl|ruby|php)\b/.test(raw)) return false
+  // 指令段逐个检查：每段的首个词必须在只读白名单内
+  // （git/node/npx 已在上面的子命令白名单里验过具体参数，这里只需认命令名本身）
+  const READONLY_CMDS = new Set([
+    'ls', 'll', 'cat', 'head', 'tail', 'less', 'zstdcat', 'zcat', 'grep', 'egrep', 'rg', 'ag',
+    'find', 'which', 'type', 'whereis', 'stat', 'file', 'wc', 'du', 'df', 'date', 'pwd', 'echo',
+    'printf', 'id', 'whoami', 'uname', 'hostname', 'env', 'printenv', 'jq', 'sort', 'uniq',
+    'cut', 'tr', 'awk', 'dirname', 'basename', 'realpath', 'readlink', 'md5sum', 'sha256sum',
+    'tree', 'ps', 'ss', 'netstat', 'ping', 'curl', 'wget', 'test', '[', 'true', 'false', 'sleep',
+    // 复合命令：具体子命令已在上面校验过（git status 只读 / git commit 已拦）
+    'git', 'node', 'npx', 'bash', 'sh', 'cd', 'expr',
+  ])
+  // 按 ; && || | 切分，管道两侧都检查；跳过纯环境变量赋值段
+  const segs = raw.split(/;|&&|\|\||\|/).map((s) => s.trim()).filter(Boolean)
+  for (const seg of segs) {
+    // 允许 `cd xxx && ...` 里 cd 段（切目录不写文件）
+    if (/^cd\s/.test(seg)) continue
+    // 允许前置环境变量赋值（FOO=bar cmd）
+    const m = seg.match(/^(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]*\s+)*([^\s]+)/)
+    const cmd = m ? m[1] : ''
+    if (!cmd) continue
+    // 带路径的命令取 basename（/usr/bin/ls → ls）
+    const base = cmd.split(/[\\/]/).pop() || cmd
+    if (!READONLY_CMDS.has(base)) return false
+  }
+  void toolName
+  return true
+}
 const _captainCache = { at: 0, cwd: '', ids: new Set() }
 /** 未建队时的「默认 captain」标记：认不出真实 captain 但工作区是 jarvis 时，
  *  把所有调用当作顶层 captain 处理（见 captainExecutionGuard 的兜底分支）。 */
@@ -381,7 +441,15 @@ function _writeTargetOf(name, args) {
 export function captainExecutionGuard(exec) {
   try {
     const name = String((exec && exec.name) || '')
-    if (!CAPTAIN_DENY_TOOLS.has(name)) return undefined
+    // v0.30：shell 类工具先判只读——只读命令放行（探查环境不是"亲自干活"）。
+    // 这修的是用户实测的死锁：还没建队时连 `ls` 都被拦，导致无法定位问题。
+    if (SHELL_TOOLS.has(name)) {
+      const cmd = String((exec && exec.arguments && (exec.arguments.command ?? exec.arguments.cmd)) || '')
+      if (isReadOnlyShell(cmd, name)) return undefined
+      // 写操作命令 → 落到下面按 captain 规则拦
+    } else if (!CAPTAIN_DENY_TOOLS.has(name)) {
+      return undefined
+    }
     const agent = exec && exec.agent
     const session = agent && agent.session
     const sessionId = session && session.id

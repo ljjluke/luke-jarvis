@@ -146,3 +146,66 @@ test('fs 服务挂在 exec.ctx 才能被闸取到（挂 exec.fs 会被静默 fai
   assert.ok(/pick\(exec && exec\.ctx\)/.test(seg), 'getFsService 必须从 exec.ctx 取 fs（不是 exec.fs）')
   assert.ok(/pick\(moduleCtx\)/.test(seg), '取不到时回退 moduleCtx')
 })
+
+// ── v0.30：只读 shell 不得被 captain 闸误拦（用户实测死锁）────────
+// 用户原文：想 `ls` 定位插件目录，撞上「还没建队不能执行 bash」→ 无法继续 →
+// 而这阶段恰恰需要先探查环境。修法是把 bash 拆成「只读」和「写操作」两类。
+test('isReadOnlyShell：只读命令放行，写操作命令拦住', async () => {
+  const { isReadOnlyShell } = await import('../src/host/plugin.js')
+  const readonly = [
+    'ls -d /root/.dsh/plugins/* 2>/dev/null | head -20',
+    'ls -d /opt/work/dba/node_modules/* 2>/dev/null | head',
+    'cat foo.txt',
+    'grep -r foo src/',
+    'git status',
+    'git log --oneline -3',
+    'node --check a.js',
+    'cd /tmp && ls',
+    'curl -s https://example.com',
+    'find . -name "*.md"',
+    'wc -l x.js',
+    'jq . x.json',
+  ]
+  for (const c of readonly) assert.equal(isReadOnlyShell(c, 'bash'), true, `应判只读：${c}`)
+
+  const writes = [
+    'echo hi > x.txt',
+    'mkdir -p a',
+    'rm -rf x',
+    'npm test',
+    'python3 a.py',
+    'sed -i s/a/b/ x',
+    'git commit -m x',
+    'node script.js',
+    'cp a b',
+    'chmod +x a',
+    'cat x | tee y',
+  ]
+  for (const c of writes) assert.equal(isReadOnlyShell(c, 'bash'), false, `应判写操作：${c}`)
+})
+
+test('isReadOnlyShell：2>/dev/null 与 2>&1 不算写重定向（这是误拦的主因）', async () => {
+  const { isReadOnlyShell } = await import('../src/host/plugin.js')
+  assert.equal(isReadOnlyShell('ls x 2>/dev/null', 'bash'), true, '2>/dev/null 是丢弃输出，不是写文件')
+  assert.equal(isReadOnlyShell('ls x 2>&1 | head', 'bash'), true, '2>&1 是合并输出')
+  assert.equal(isReadOnlyShell('ls x > out.txt', 'bash'), false, '真写文件要拦')
+  assert.equal(isReadOnlyShell('ls x >> out.txt', 'bash'), false, '追加写也要拦')
+})
+
+test('captainExecutionGuard：未建队时只读 bash 放行，写操作仍拦', async () => {
+  const { captainExecutionGuard } = await import('../src/host/plugin.js')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'))
+  try {
+    // 只建 .jarvis 不建团队 → _captainIds 会插 ANY_TOPLEVEL（"未建队时谁都别自己执行"）
+    fs.mkdirSync(path.join(dir, '.jarvis'), { recursive: true })
+    const mk = (tool, args) => ({ name: tool, arguments: args, agent: { session: { id: 'sess-g', header: { cwd: dir } } } })
+    // 用户实测的那两条命令必须放行
+    assert.equal(captainExecutionGuard(mk('bash', { command: 'ls -d /root/.dsh/plugins/* 2>/dev/null | head -20' })), undefined, '只读 ls 必须放行（否则死锁）')
+    assert.equal(captainExecutionGuard(mk('bash', { command: 'ls -d /opt/work/dba/node_modules/* 2>/dev/null | head' })), undefined)
+    assert.equal(captainExecutionGuard(mk('bash', { command: 'git status' })), undefined, 'git status 放行')
+    // 写操作仍必须拦
+    assert.ok(typeof captainExecutionGuard(mk('bash', { command: 'mkdir -p x' })) === 'string', 'mkdir 必须拦')
+    assert.ok(typeof captainExecutionGuard(mk('bash', { command: 'npm test' })) === 'string', 'npm test 必须拦')
+    assert.ok(typeof captainExecutionGuard(mk('write', { file_path: 'x', content: 'y' })) === 'string', 'write 必须拦')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
