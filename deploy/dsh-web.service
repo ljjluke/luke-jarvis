@@ -1,0 +1,23 @@
+[Unit]
+Description=DeepSeek Harness Web (dsh web)
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=HOME=/root
+Environment=PATH=/usr/local/lighthouse/softwares/nodejs/node/bin:/usr/local/bin:/usr/bin:/bin
+# 启动前等 3080 释放，避免与未退干净的旧实例抢端口（EADDRINUSE → 必需插件激活失败 → 整站 502）
+ExecStartPre=/usr/local/bin/dsh-web-preflight
+ExecStart=/usr/local/bin/dsh-web-run
+# 关键修正（2026-11-27）：原 Restart=on-failure 在「进程干净退出（exit 0）」时不重启，
+# 结果 11-19 服务停了一周没人知道。改成 always —— 无论怎么退都要拉起来。
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+# mixed：SIGTERM 给主进程、SIGKILL 给整个 cgroup，确保 dsh-web-run 里的子 node 一起退
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
