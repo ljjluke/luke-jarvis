@@ -638,8 +638,12 @@ export function apply(ctx, config) {
                 id: 'emp-' + String(i + 1),
                 role: f.role,
                 persona: f.name,
-                status: f.status === 'working' ? 'working' : f.status === 'stalled' ? 'on_probation' : 'idle',
+                // v0.35：直传真实状态（working/stalled/idle），不再把 stalled 压成 on_probation——
+                // 那会让 3D 画面把"活卡着没人干"显示成"新人在试用"，同样是假的。
+                status: f.status === 'working' ? 'working' : f.status === 'stalled' ? 'stalled' : 'idle',
                 currentWork: f.currentWork,
+                statusLine: f.statusLine || '',
+                lastActivityAt: f.lastActivityAt || '',
                 __source: f.source,
               }))
               // 用真实的在办任务替换 company-state 的 tasks（那些常是手填/陈旧的）
@@ -647,7 +651,7 @@ export function apply(ctx, config) {
                 id: f.taskId,
                 subject: f.currentWork,
                 assignee: f.role,
-                status: f.status === 'working' ? 'in_progress' : 'pending',
+                status: f.status === 'working' ? 'in_progress' : f.status === 'stalled' ? 'blocked' : 'pending',
                 updatedAt: f.lastActivityAt,
                 __source: f.source,
               }))

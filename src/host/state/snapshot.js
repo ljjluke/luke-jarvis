@@ -12,6 +12,7 @@ import { createRequire } from 'node:module'
 import { computeStage, JARVIS_STAGES, STAGE_LABELS } from '../gates/stage.js'
 import { meetingPolicy } from './meetings.js'
 import { CARD_SECTIONS } from './cards.js'
+import { deriveJarvisFacts, jarvisTeamShape } from './jarvis-facts.js'
 import { gcSummary } from '../tools/gc.js'
 
 const _require = createRequire(import.meta.url)
@@ -57,7 +58,9 @@ function listTeams(projectDir, fs, path) {
   try {
     names = fs.readdirSync(td).filter((n) => !/^(archived?|_archive|\.)|-archive$/i.test(n))
   } catch {
-    return { teams, open: 0, completed: 0 }
+    // ⚠️ v0.35：**不能提前 return**——.agent-teams 不存在是本部署的常态（JARVIS 链路不写它），
+    // 提前 return 会让下面的 jarvis 事实叠加代码永远走不到，前端团队一览永远空。
+    names = []
   }
   const TERMINAL = new Set(['completed', 'cancelled', 'failed', 'dropped'])
   let open = 0
@@ -107,8 +110,31 @@ function listTeams(projectDir, fs, path) {
     const a = readJsonSafe(projectDir, '.jarvis/active-team.json', fs, path)
     if (a && Array.isArray(a.teams)) activeNames = a.teams.map(String)
   } catch {}
+  // ── JARVIS 事实叠加（v0.35·用户定调 2026-11-27「团队一览里面的员工干活还是假的」）──
+  // 根因：本部署的建队/派活链路（jarvis_distill → jarvis_company → jarvis_dispatch_task
+  // → jarvis_ticket）**一个字节都不写 .agent-teams/**，而本函数原来只读 .agent-teams。
+  // 结果：新工作区团队一览永远空；老工作区显示 11 月 agent_teams 时代的残留假成员。
+  // 修法：把 .jarvis/cards + .jarvis/tickets + STATUS.md + exec-map 推导出的事实
+  // 叠加成同形团队（name='jarvis'），前端结构不用改。两源合并（老 .agent-teams 仍可见）。
+  try {
+    const facts = deriveJarvisFacts(projectDir, fs, path)
+    const jt = jarvisTeamShape(facts, path)
+    if (jt) {
+      // 同一角色若在 .agent-teams 与 jarvis 事实里都出现：保留 jarvis 那条（它才是真在跑的链路）
+      const jarvisRoles = new Set(jt.members.map((m) => m.role))
+      for (const t of teams) {
+        if (t.members.length && t.members.every((m) => jarvisRoles.has(m.role))) {
+          // 这个 .agent-teams 团队与 jarvis 事实完全重合 → 标记为陈旧快照，不重复展示
+          t.staleDuplicateOfJarvis = true
+        }
+      }
+      teams.push(jt)
+      for (const tt of jt.tasks) (TERMINAL.has(tt.status) ? completed++ : open++)
+    }
+  } catch { /* 推导失败不阻断快照（画面退化为空，比崩好） */ }
   teams.sort((x, y) => (y.mtime || 0) - (x.mtime || 0))
-  const marked = teams.map((t) => ({ ...t, active: activeNames.includes(t.name) }))
+  const shown = teams.filter((t) => !t.staleDuplicateOfJarvis)
+  const marked = shown.map((t) => ({ ...t, active: activeNames.includes(t.name) || t.source === 'jarvis-facts' }))
   return { teams: marked, open, completed, activeTeams: activeNames }
 }
 
@@ -830,14 +856,20 @@ export function buildSnapshot(projectDir, meta = {}) {
           company: { name: path.basename(dir) },
           employees: teams.teams.flatMap((t) =>
             (t.members || []).map((m) => {
-              const cur = t.tasks.find((x) => x.assignee === (m.name || m.role) && !['completed', 'cancelled', 'failed', 'dropped'].includes(x.status))
+              const cur = t.tasks.find((x) => x.assignee === (m.role || m.name) && !['completed', 'cancelled', 'failed', 'dropped'].includes(x.status))
+              // v0.35：status 以成员事实为准（m.status 来自 jarvis-facts，含 working/stalled/idle）。
+              // 旧实现 cur?'working':'idle' —— 有未结束任务就显示"在干活"，不管会话死活 → 3D 画面假活跃。
+              const st = String(m.status || (cur ? 'working' : 'idle'))
               return {
                 id: m.name || m.role,
                 role: m.role || m.name,
                 persona: (m.name && m.role && m.name !== m.role) ? m.name : '',
-                status: cur ? 'working' : 'idle',
+                status: st,
                 taskId: cur ? cur.id : '',
                 currentWork: cur ? cur.subject : '',
+                // 成员自写进度（STATUS.md 首行）——没有就空，前端如实显示"未记录进度"
+                statusLine: String(m.statusLine || ''),
+                lastActivityAt: String(m.lastActivityAt || ''),
                 team: t.name,
               }
             }),

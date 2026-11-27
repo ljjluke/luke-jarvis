@@ -18,6 +18,9 @@ export const EMPLOYEE_STATUS_MAP = {
   working: 'running',
   reporting: 'running',
   meeting: 'blocked',
+  // v0.35：stalled = 有活但会话已停（jarvis-facts 的真实判定）。
+  // 映射成 blocked 而非 queued：它需要老板注意（不是"排队等着"）。
+  stalled: 'blocked',
   idle: 'queued',
   on_probation: 'queued',
   terminated: 'failed',
@@ -137,8 +140,11 @@ export function toPixOfficeSnapshot(state, opts = {}) {
       status,
       currentWork: String(e.currentWork || '').slice(0, 80),
       // 修正三目永真（旧式两个分支对 idle 都返回 true → idle 员工在画面上永远在线）
-      online: status !== 'terminated' && status !== 'idle',
+      // v0.35：stalled（有活但会话已停）不能算在线——它就是"人不在工位，活卡着"。
+      online: status === 'working' || status === 'reporting' || status === 'meeting',
       congested,          // true = 工位已满，此人与别人共用同一个场景角色
+      // 成员自写进度（STATUS.md 首行）；空 = 还没记录（前端如实显示，不编百分比）
+      progressLine: String(e.statusLine || '').slice(0, 80),
     })
   }
   // 场景可见人数上限 = 6 个演员；超出部分不进场景（但左侧列表仍全量显示）
@@ -280,8 +286,14 @@ export async function deriveEmployeeFacts(projectDir, fs, path, opts = {}) {
     const base = String(projectDir || '')
     if (!base) return out
     const teamsDir = path.join(base, '.agent-teams')
+    // ⚠️ v0.35（用户实测 2026-11-27「团队一览里面的员工干活还是假的啊」）：
+    // 原实现 `try { teams = readdirSync } catch { return out }` —— 读不到 .agent-teams 就直接返回空。
+    // 但本部署的建队/派活链路（jarvis_distill → jarvis_company → jarvis_dispatch_task →
+    // jarvis_ticket）**根本不写 .agent-teams/**，真实员工与在办活全在 .jarvis/ 里。
+    // 于是新工作区永远空、老工作区显示 11 月的残留假人。
+    // 修法：.agent-teams 为空**不再提前返回**，继续读 jarvis 事实（双源合并）。
     let teams = []
-    try { teams = fs.readdirSync(teamsDir) } catch { return out }
+    try { teams = fs.readdirSync(teamsDir) } catch { teams = [] }
     // 收集每个成员的活跃任务（跨团队合并，按 role 去重取最新）
     const byRole = new Map()
     for (const t of teams) {
@@ -335,6 +347,35 @@ export async function deriveEmployeeFacts(projectDir, fs, path, opts = {}) {
         }
       }
     }
+    // ── JARVIS 事实叠加（v0.35）：.jarvis/cards + tickets + STATUS.md + exec-map ──
+    // 这是本部署真正在跑的链路。放在最后叠加：同一 role 若 .agent-teams 与 jarvis
+    // 都有，jarvis 那条优先（它的任务单是活着的真状态，team.json 往往是历史残留）。
+    try {
+      const { deriveJarvisFacts } = await import('./state/jarvis-facts.js')
+      const facts = deriveJarvisFacts(base, fs, path)
+      for (const e of facts.employees) {
+        const rec = {
+          role: e.role,
+          name: e.name,
+          status: e.status,
+          currentWork: e.currentWork,
+          taskId: e.ticketId,
+          taskStatus: e.taskState,
+          reportState: e.reportState,
+          lastActivityAt: e.lastActivityAt,
+          statusLine: e.statusLine,
+          statusExists: e.statusExists,
+          longOpen: e.longOpen,
+          team: 'jarvis',
+          source: e.source,
+        }
+        const prev = byRole.get(e.role)
+        // jarvis 事实优先：只要它有明确状态（working/stalled/idle）就覆盖 team.json 的推断
+        if (!prev || e.status === 'working' || prev.status !== 'working' || prev.source.startsWith('team.json')) {
+          byRole.set(e.role, rec)
+        }
+      }
+    } catch { /* jarvis 事实不可用不阻断 */ }
     return [...byRole.values()]
   } catch { return out }
 }
