@@ -488,12 +488,28 @@ export function captainExecutionGuard(exec) {
       if (!['subagent', 'subagent_fork', 'subagent_codex', 'subagent_claude_code', 'workflow', 'ralph'].includes(name)) {
         return undefined
       }
-      return `【jarvis 严格闸·插件级】当前工作区是 jarvis 项目，但**还没建队**，不能直接开子任务（${name}）。\n` +
-        '**为什么**：直接开的子任务不进任务单 → 没有进度/没有验收/无法追溯，UI 也看不到。\n' +
-        '**正确顺序**：① 过需求/拆解/方案三闸（jarvis_flowguard step=clarify/decompose/design）；' +
-        '② jarvis_distill 蒸馏角色卡 → jarvis_company 让员工落盘（建队）；' +
-        '③ 用 jarvis_dispatch_task(assignee=成员, subject, description, acceptance) 派活。\n' +
-        '**注意**：bash/读写工具在未建队时不拦——你需要先把需求规格处理出来才可能过闸。'
+      // 文案给出**可照抄的下一步命令**，而不是让模型自己推导流程。
+      // 用户实测（2026-11-27）：被拦后模型不知道该先做什么，反复重试 subagent → 死循环。
+      // 这里直接算出现有产物 + 缺什么，把"下一条该敲的工具名+关键参数"写出来。
+      let progress = ''
+      try {
+        const st = computeStage(String(cwd))
+        const need = []
+        const docs = st && st.artifacts ? st.artifacts : {}
+        if (!docs.reqDoc) need.push('① 先在 .jarvis/docs 落下《需求规格-*.md》(≥300字含「验收」)')
+        if (!docs.taskmap) need.push('② jarvis_taskgraph 出《任务编排-*.md》')
+        if (!docs.designDoc) need.push('③ 写《方案设计-*.md》(每条需求→实现落点)')
+        if ((docs.cards || 0) < 2) need.push('④ jarvis_distill 蒸馏角色卡（至少 CEO 卡 + 岗位卡）')
+        if ((docs.teams || 0) === 0) need.push('⑤ jarvis_company(mode=action, actionType=employee_hired, role=…) 让员工落盘 → 建队')
+        need.push('⑥ jarvis_dispatch_task(assignee=成员, subject, description, acceptance) 派活（开单即派成员子会话）')
+        progress = `**你现在在哪**：阶段 ${st.index}/${st.total}「${st.label}」；已过：${st.done.join('→') || '（无）'}；还差：${(st.missing || []).join('；') || '无'}\n` +
+          `**按顺序做**（前面已完成的跳过）：\n${need.join('\n')}\n`
+      } catch { /* 算不出阶段就不带这段 */ }
+      return `【jarvis 严格闸·插件级】未建队时不能直接开子任务（${name}）——子任务不进任务单，没有进度/验收/追溯，UI 也看不到。\n` +
+        `${progress}` +
+        `**为什么不能用 subagent 顶替**：你自己开子 agent = 绕过任务单 = 团队成员没名字没绩效没验收，交付无法追责。\n` +
+        `**bash / 读写工具在未建队时不拦**——你要处理附件、读资料、写文档都直接做，不用开子 agent。\n` +
+        `**确需临时调试**（如一次性探查）：创建空文件 \`.jarvis/allow-captain-exec\` 可放行全部工具，用完删掉。`
     }
     // 缺陷 d 修复（2026-11-14 实证）：拒绝文案必须带「当前阶段 + 卡在哪 + 该走哪一步」。
     // 原因：原文案只说「改走派活」，但若流程还停在 clarify（前置产物没齐），
