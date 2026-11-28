@@ -51,7 +51,7 @@ export function jarvisPrecheck(exec) {
     if (!cwd) return undefined
 
     // ① agent_teams_*：没有团队时必然失败 → 提前给中文指引（替代英文报错）
-    if (/^agent_teams_/.test(name) && !hasAnyTeam(cwd)) {
+    if (/^agent_teams_/.test(name) && name !== 'agent_teams_create' && !hasAnyTeam(cwd)) {
       return `【团队前置检查】当前工作区还没有任何团队（.agent-teams 里没有 team.json），\`${name}\` 现在调用必然失败（原生报错是英文 "you do not lead or belong to any active team yet"，模型往往误判成权限问题）。\n` +
         `不要重试这个工具。按流程走：① jarvis_clarify 打磨需求 → ② 产出 .jarvis/docs/需求规格-*.md（≥300 字含验收）→ ③ jarvis_flowguard(step="clarify") → 拆解/方案 → ④ 建队（jarvis_distill 蒸馏角色卡 + jarvis_company 落员工）→ ⑤ jarvis_dispatch_task 派活。\n` +
         `想确认团队现状：jarvis_ticket(action=list) 或 jarvis_company(mode=snapshot)，这两个在没有团队时也能安全调用。`

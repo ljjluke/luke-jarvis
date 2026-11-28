@@ -134,7 +134,7 @@ export function jarvisCommand(requirement) {
 
 
 // 声明注入：apply 在 tools 服务就绪后才执行（修复"服务不可用导致工具未注册"）
-export const inject = ['tools', 'webServer', 'agents', 'systemPrompt']
+export const inject = ['tools', 'webServer', 'agents', 'systemPrompt', 'subagents']
 
 // ── DSH 设置面板：Config schema（设置 → 内置插件 → luke-jarvis → 配置卡片）──
 // 约定与 @nanmicoder/dsh-agent-teams 一致：@deepseek-ai/schemastery 的 z.object 导出 Config。
