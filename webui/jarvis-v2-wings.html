@@ -2464,9 +2464,26 @@ function applySceneAdapter() {
 }
 
 /** 初始化场景：等 load 后注入主题；延迟再刷两次（场景启动后才挂 canvas） */
-function initScene() {
+function initScene(snap){
+  // v0.35（2026-11-28）：iframe src 原来写死在 HTML 里（不带 workspace）→
+  // relay 只能回服务端默认工作区 → 场景拿到空员工名单 → 退回上游 demo 花名册（王明/陈书…）。
+  // 这里在加载前把当前工作区拼进 src，让场景的 /api/pixoffice/* 请求带上 ?workspace=。
+  const f=document.getElementById('teamScene')
+  if(f && !SCENE_ADAPTER.iframe){
+    try{
+      // 优先用快照里的真实工作区路径（renderTeam 传进来的 snap.workspace.cwd）
+      const ws=(snap&&snap.workspace&&snap.workspace.cwd)
+        || (LIVE&&LIVE.snap&&LIVE.snap.workspace&&LIVE.snap.workspace.cwd)
+        || (typeof wsOverride==='string'?wsOverride:'')
+        || ''
+      if(ws){
+        const cur=f.getAttribute('src')||'/jarvis-office/jarvis-scene.html?layout=scene'
+        const base=cur.split('&workspace=')[0].split('?workspace=')[0]
+        f.setAttribute('src', base + (base.includes('?')?'&':'?') + 'workspace=' + encodeURIComponent(ws))
+      }
+    }catch(e){console.warn('scene workspace',e)}
+  }
   if (SCENE_ADAPTER.iframe) return
-  const f = document.getElementById('teamScene')
   if (!f) return
   SCENE_ADAPTER.iframe = f
   const done = () => {
@@ -2481,7 +2498,7 @@ function initScene() {
 }
 
 function renderTeam(snap){
-  initScene()   // 场景懒初始化（进团队页才拉，避免主屏白白加载 3D）
+  initScene(snap)   // 场景懒初始化（进团队页才拉，避免主屏白白加载 3D）
 
   const teams=(snap.tasks&&snap.tasks.teams)||[];
   const activeNames=(snap.tasks&&snap.tasks.activeTeams)||[];

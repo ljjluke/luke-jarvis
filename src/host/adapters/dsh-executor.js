@@ -483,7 +483,7 @@ function createDshExecutor({ projectDir, getEngine, labelPrefix = 'jarvis-ticket
     }
     let started
     if (typeof runtime.startActivation === 'function') {
-      started = await runtime.startActivation.call(runtime, { provider, label, request: { ...spec.request }, signal: undefined, delivery: 'parent' })
+      started = await runtime.startActivation.call(runtime, { provider, label, request: { ...spec.request }, signal: new AbortController().signal, delivery: 'parent' })
     } else if (typeof runtime.startContinuable === 'function') {
       started = await runtime.startContinuable.call(runtime, spec)
     } else if (typeof runtime.start === 'function') {
