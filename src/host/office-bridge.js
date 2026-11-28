@@ -282,6 +282,10 @@ export function toPixOfficeSnapshot(state, opts = {}) {
  */
 export async function deriveEmployeeFacts(projectDir, fs, path, opts = {}) {
   const out = []
+  // v0.15.14：角色归一键——team.json 的 role 常写成"总经理（…影子：范渊）"，
+  // cards/company-state 是干净职位名"总经理"；两者必须归一到同一个键，否则同一个人
+  // 会被当成两个员工（实测画面 6 人 vs 实际 4 人）。口径与 state/snapshot.js 一致。
+  const roleKeyOf = (r) => String(r || '').split(/[（(·]|[，,]?影子/)[0].replace(/[：:].*$/, '').trim().toLowerCase()
   try {
     const base = String(projectDir || '')
     if (!base) return out
@@ -305,10 +309,11 @@ export async function deriveEmployeeFacts(projectDir, fs, path, opts = {}) {
       for (const m of members) {
         const role = String(m.role || m.name || '').trim()
         if (!role) continue
+        const rk = roleKeyOf(role)
         // 找该成员当前在办的任务（未终态）
         const open = tasks.find((x) => String(x.assignee || '') === role
           && !['completed', 'cancelled', 'failed', 'dropped'].includes(String(x.status || '')))
-        const prev = byRole.get(role)
+        const prev = byRole.get(rk)
         const rec = {
           role,
           name: String(m.persona || m.name || role).slice(0, 40),
@@ -320,8 +325,8 @@ export async function deriveEmployeeFacts(projectDir, fs, path, opts = {}) {
           team: String(t),
           source: 'team.json',
         }
-        // 同一 role 多团队 → 保留"有在办任务"的那条
-        if (!prev || (prev.status !== 'working' && rec.status === 'working')) byRole.set(role, rec)
+        // 同一角色多团队 → 保留"有在办任务"的那条
+        if (!prev || (prev.status !== 'working' && rec.status === 'working')) byRole.set(rk, rec)
       }
     }
     // 用会话转录校正 working → stalled（有任务但会话已停 = 异常态，要如实显示）
@@ -369,10 +374,27 @@ export async function deriveEmployeeFacts(projectDir, fs, path, opts = {}) {
           team: 'jarvis',
           source: e.source,
         }
-        const prev = byRole.get(e.role)
-        // jarvis 事实优先：只要它有明确状态（working/stalled/idle）就覆盖 team.json 的推断
-        if (!prev || e.status === 'working' || prev.status !== 'working' || prev.source.startsWith('team.json')) {
-          byRole.set(e.role, rec)
+        const rk = roleKeyOf(e.role)
+        const prev = byRole.get(rk)
+        // jarvis 事实优先：只要它有明确状态（working/stalled/idle）就覆盖 team.json 的推断。
+        // 但 name 保留更像"人名"的那个（team.json 的 name 常是干净职位名，
+        // jarvis-facts 的 name 是"范渊…影子"这类 persona —— 后者更像真人）。
+        if (!prev) {
+          rec.role = String(e.role || '').trim()      // 干净职位名
+          byRole.set(rk, rec)
+        } else {
+          // role 用**干净职位名**（jarvis-facts 的 e.role）；prev.role 是 team.json 的长描述，留着会让画面标签很长
+          // 画面/列表显示职位名；影子名留在 persona（供详情页）
+          rec.persona = rec.persona || rec.name
+          rec.name = String(e.role || '').trim() || rec.name
+          const merged = { ...prev, ...rec, role: String(e.role || '').trim() || prev.role }
+          // 状态取更强：working > stalled > idle
+          const rank = { working: 3, stalled: 2, idle: 1 }
+          if ((rank[rec.status] || 0) >= (rank[prev.status] || 0)) {
+            byRole.set(rk, merged)
+          } else {
+            byRole.set(rk, { ...merged, status: prev.status, source: prev.source })
+          }
         }
       }
     } catch { /* jarvis 事实不可用不阻断 */ }
