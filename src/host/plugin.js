@@ -717,7 +717,7 @@ export function apply(ctx, config) {
                 }
                 try {
                   // id: 让浏览器在重连时回传 Last-Event-ID（配合上面的跨连接 seq，实现断线续传）
-                  res.write('id: ' + String(frame.seq) + '\n')
+                  res.write('id: ' + String((frame.snapshot && frame.snapshot.seq) || frame.seq || seq) + '\n')
                   res.write(sseFrameString(frame))
                   relaySeqState.set(workspaceIdForSeq, frame.seq)
                 } catch { return false }

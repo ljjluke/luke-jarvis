@@ -58,8 +58,55 @@ export function buildPixOfficeFrame(state, opts = {}) {
       .slice(0, PIXOFFICE_LIMITS.events)
       .map((e) => ({ ...e, kind: normalizeEventKind(e && e.kind), summary: String((e && e.summary) || '').slice(0, 300) || '（无摘要）' })),
   }
-  // 上游 receive 用 zod 联合体分派：office.sync / office.sync.start / office.sync.complete，其余落到 safeParse 失败
-  return { type: 'office.sync', seq: safeSeq, snapshot: normalized }
+  // ⚠️ v0.15.12 根治：**外层不能带 seq**。
+  // 上游 OfficeIntegrationSession.receive 用 zod 严格对象校验 {type:'office.sync', snapshot}，
+  // 多一个外层 seq 字段 → 「Unrecognized key: "seq"」→ safeParse 失败 → 整帧被丢弃
+  // → 画面永远停在「等待后端初始化办公室」（用户实测 2026-11-28 16:28）。
+  // 实测（用上游真实 zod schema core.p.safeParse）：
+  //   {type, seq, snapshot}  → FAIL: Unrecognized key: seq
+  //   {type, snapshot}       → PASS
+  // ── v0.15.12 根治：白名单投影（上游 zod 是 strict 对象，多一个字段整帧被丢）──
+  // 实测用上游真实 schema（core.p.safeParse）逐字段探测确认：
+  //   snapshot 允许：schemaVersion / seq / workspace{id,name} / employees / tasks / events / whiteboard
+  //   employee 允许：id / sceneActorId / name / role / online
+  // 我们在 v0.29–v0.35 为"诚实展示"加的字段（status/currentWork/congested/progressLine/
+  // persona/taskId/seatInfo…）全在拒绝名单里 → safeParse 失败 → 画面永远"等待后端初始化办公室"。
+  // 所以上线帧必须严格裁剪；完整数据留在 toPixOfficeSnapshot 的返回值里，供其它 UI 消费者用。
+  const pick = (o, keys) => {
+    const out = {}
+    for (const k of keys) if (o && Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k]
+    return out
+  }
+  const wireEmployees = (Array.isArray(normalized.employees) ? normalized.employees : [])
+    .map((e) => pick(e, ['id', 'sceneActorId', 'name', 'role', 'online']))
+  const wireWorkspace = pick(normalized.workspace, ['id', 'name'])
+  const wireSnapshot = {
+    schemaVersion: normalized.schemaVersion,
+    seq: normalized.seq,
+    workspace: wireWorkspace,
+    employees: wireEmployees,
+    tasks: Array.isArray(normalized.tasks) ? normalized.tasks : [],
+    events: Array.isArray(normalized.events) ? normalized.events : [],
+  }
+  if (normalized.whiteboard !== undefined) wireSnapshot.whiteboard = normalized.whiteboard
+
+  // seq 只放 snapshot 内（上游用它判重/拒绝乱序），validatePixOfficeFrame 也读 snapshot.seq。
+  //
+  // 内部 7 处代码（SSE 的 id/去重/STALE_SEQ 判定）仍读 frame.seq：
+  // 用**非枚举 getter** 挂上去 —— JSON.stringify 不会序列化它（线上帧仍是 {type, snapshot}，
+  // 上游 zod 严格对象不报 Unrecognized key），但代码访问 frame.seq 依然可用。
+  const envelope = { type: 'office.sync', snapshot: wireSnapshot }
+  // seatInfo 等"内部诊断信息"不进线上帧（上游 strict 会拒），但要能在进程内读到 ——
+  // 用非枚举属性挂在 snapshot 上：JSON.stringify 不会带上它。
+  if (normalized.seatInfo !== undefined) {
+    Object.defineProperty(wireSnapshot, 'seatInfo', {
+      value: normalized.seatInfo, enumerable: false, configurable: true, writable: false,
+    })
+  }
+  Object.defineProperty(envelope, 'seq', {
+    value: safeSeq, enumerable: false, configurable: true, writable: false,
+  })
+  return envelope
 }
 
 /**

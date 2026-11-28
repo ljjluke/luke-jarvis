@@ -4245,8 +4245,12 @@ test('T10 relay：员工超过场景容量时只保留场景能渲染的（v0.29
   // 多出来的会在同一 actorId 上撞车 → 上游只渲染一个实例 → 画面"两个人挤一个位置"。
   // 现在只保留 6 个进场景，其余通过 seatInfo.overflow 如实上报（左侧列表仍全量）。
   assert.strictEqual(frame.snapshot.employees.length, 6, `employees 应截到场景容量 6（实际 ${frame.snapshot.employees.length}）`)
-  assert.strictEqual(frame.snapshot.seatInfo.total, 260, '总数必须如实上报')
-  assert.strictEqual(frame.snapshot.seatInfo.overflow, 254, '溢出数必须如实上报')
+  // v0.15.12：seatInfo 不进线上帧（上游 zod strict 会拒），改为非枚举属性（内部可读）
+  const seatDesc = Object.getOwnPropertyDescriptor(frame.snapshot, 'seatInfo')
+  assert.ok(seatDesc && seatDesc.enumerable === false, 'seatInfo 必须是非枚举（不进线上 JSON）')
+  assert.strictEqual(frame.snapshot.seatInfo.total, 260, '总数必须如实上报（内部可读）')
+  assert.strictEqual(frame.snapshot.seatInfo.overflow, 254, '溢出数必须如实上报（内部可读）')
+  assert.ok(!JSON.stringify(frame).includes('seatInfo'), '线上帧绝不能包含 seatInfo（上游会整帧丢弃）')
   // actor 唯一是上游硬要求：重复 actorId 会被整批丢弃
   const actors = frame.snapshot.employees.map((e) => e.sceneActorId)
   assert.strictEqual(new Set(actors).size, actors.length, `actor 必须互不相同：${actors.join(',')}`)
@@ -4278,9 +4282,39 @@ test('T11 relay：SSE 帧字符串合法（data: <单帧 JSON> 可解析、无�
   assert.ok(str.endsWith('\n\n'), 'SSE 帧必须以空行结束')
   const jsonPart = str.slice(6).trim()
   const parsed = JSON.parse(jsonPart)
-  assert.strictEqual(parsed.seq, 3)
+  // v0.15.12：外层不再有 seq（上游 strict 会拒 "Unrecognized key: seq"），序号在 snapshot 内
+  assert.strictEqual(parsed.snapshot.seq, 3)
   assert.strictEqual(parsed.type, 'office.sync')
+  assert.ok(!Object.prototype.hasOwnProperty.call(parsed, 'seq'), '外层不得有 seq（上游会拒）')
   assert.ok(parsed.snapshot.employees.length === 1)
+})
+
+test('T12 relay：帧必须能通过**上游真实 zod schema**（core.p.safeParse）——这是画面能否渲染的唯一判据', async () => {
+  // v0.15.12 用户实测：「一直显示等待后端初始化办公室」。
+  // 根因：帧里有外层 seq / employees 里的 status/currentWork/congested/progressLine /
+  //      snapshot 里的 seatInfo —— 全是上游 strict 对象拒绝的字段 → safeParse 失败 → 整帧被丢。
+  // 本测试直接用上游 bundle 导出的 schema 校验，任何多余字段都会红。
+  let upstream = null
+  try {
+    upstream = await import('../office/assets/core-sPzm0MZD.js')
+  } catch { upstream = null }
+  if (!upstream || !upstream.p || typeof upstream.p.safeParse !== 'function') {
+    // 上游 assets 在发布包里可能被裁剪；此时退化为"字段白名单"断言，仍能防回归
+    const frame = buildPixOfficeFrame({ employees: [{ id: 'ceo', role: 'CEO', status: 'working' }] }, { seq: 1 })
+    const wire = JSON.parse(sseFrameString(frame).slice(6).trim())
+    assert.ok(!Object.prototype.hasOwnProperty.call(wire, 'seq'), '外层不得有 seq')
+    assert.ok(!Object.prototype.hasOwnProperty.call(wire.snapshot, 'seatInfo'), 'snapshot 不得有 seatInfo')
+    for (const e of wire.snapshot.employees) {
+      const extraKeys = Object.keys(e).filter((k) => !['id', 'sceneActorId', 'name', 'role', 'online'].includes(k))
+      assert.deepEqual(extraKeys, [], `employee 不得有额外字段：${extraKeys.join(',')}`)
+    }
+    return
+  }
+  const state = { employees: [{ id: 'ceo', role: 'CEO', status: 'working' }, { id: 'qa', role: '测试', status: 'idle' }] }
+  const frame = buildPixOfficeFrame(state, { seq: 1 })
+  const wire = JSON.parse(sseFrameString(frame).slice(6).trim())
+  const r = upstream.p.safeParse(wire)
+  assert.ok(r.success, `上游 zod 必须 PASS，实际：${r.success ? '' : r.error.issues.map((i) => `${i.path.join('.')}:${i.message}`).join('; ')}`)
 })
 
 test('T11 relay：上游事件枚举收敛——meeting/recruiting/employee/ceo 一律压成 note，非法 kind 被校验器拒绝', () => {
