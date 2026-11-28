@@ -4289,6 +4289,29 @@ test('T11 relay：SSE 帧字符串合法（data: <单帧 JSON> 可解析、无�
   assert.ok(parsed.snapshot.employees.length === 1)
 })
 
+test('T13 relay：员工被场景容量截断后，任务的 assigneeId 必须仍然存在（上游 superRefine 校验引用完整性）', async () => {
+  // 实测 dba：8 名员工、7 个任务；employees 截到 6 → 第 7/8 个员工被裁掉，
+  // 但 T2/T4a 仍指向被裁的员工 id → 上游报「任务负责人不存在」→ 整帧 FAIL → 画面空。
+  const many = Array.from({ length: 8 }, (_, i) => ({ id: 'e' + i, role: '角色' + i, status: 'working' }))
+  const tasks = Array.from({ length: 7 }, (_, i) => ({ id: 't' + i, subject: '任务' + i, assignee: '角色' + i, status: 'in_progress' }))
+  const frame = buildPixOfficeFrame({ employees: many, tasks }, { seq: 1 })
+  const empIds = new Set(frame.snapshot.employees.map((e) => e.id))
+  const bad = frame.snapshot.tasks.filter((t) => t.assigneeId && !empIds.has(String(t.assigneeId)))
+  assert.deepEqual(bad, [], `不得有指向不存在员工的任务：${bad.map((t) => `${t.id}→${t.assigneeId}`).join(', ')}`)
+  // 被裁掉的任务数用非枚举属性记录（供诊断，不进线上帧）
+  const dropped = Object.getOwnPropertyDescriptor(frame.snapshot, 'droppedTasks')
+  assert.ok(!dropped || dropped.enumerable === false, 'droppedTasks 必须是非枚举')
+  assert.ok(!JSON.stringify(frame).includes('droppedTasks'), '线上帧不得含 droppedTasks')
+  // 上游 schema 必须接受
+  let upstream = null
+  try { upstream = await import('../office/assets/core-sPzm0MZD.js') } catch {}
+  if (upstream && upstream.p && typeof upstream.p.safeParse === 'function') {
+    const wire = JSON.parse(sseFrameString(frame).slice(6).trim())
+    const r = upstream.p.safeParse(wire)
+    assert.ok(r.success, `上游 zod 必须 PASS：${r.success ? '' : r.error.issues.map((x) => `${x.path.join('.')}:${x.message}`).join('; ')}`)
+  }
+})
+
 test('T12 relay：帧必须能通过**上游真实 zod schema**（core.p.safeParse）——这是画面能否渲染的唯一判据', async () => {
   // v0.15.12 用户实测：「一直显示等待后端初始化办公室」。
   // 根因：帧里有外层 seq / employees 里的 status/currentWork/congested/progressLine /

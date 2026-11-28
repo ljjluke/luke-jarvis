@@ -80,13 +80,28 @@ export function buildPixOfficeFrame(state, opts = {}) {
   const wireEmployees = (Array.isArray(normalized.employees) ? normalized.employees : [])
     .map((e) => pick(e, ['id', 'sceneActorId', 'name', 'role', 'online']))
   const wireWorkspace = pick(normalized.workspace, ['id', 'name'])
+  // v0.15.13 根治：引用完整性（上游 zod superRefine 会校验 tasks[].assigneeId 必须在 employees 里）。
+  // employees 已按场景容量（6 个 actor）截断，则引用被截掉员工的任务必须一并裁掉，
+  // 否则整帧 FAIL：「任务负责人不存在」。
+  // 不改成"指向别的员工"——那会让任务张冠李戴，比不显示更糟。
+  const liveEmpIds = new Set(wireEmployees.map((e) => e.id))
+  const allTasks = Array.isArray(normalized.tasks) ? normalized.tasks : []
+  const keptTasks = allTasks.filter((t) => !t || !t.assigneeId || liveEmpIds.has(String(t.assigneeId)))
+  const droppedTaskCount = allTasks.length - keptTasks.length
+
   const wireSnapshot = {
     schemaVersion: normalized.schemaVersion,
     seq: normalized.seq,
     workspace: wireWorkspace,
     employees: wireEmployees,
-    tasks: Array.isArray(normalized.tasks) ? normalized.tasks : [],
+    tasks: keptTasks,
     events: Array.isArray(normalized.events) ? normalized.events : [],
+  }
+  if (droppedTaskCount > 0) {
+    // 诊断信息：不进线上帧（上游 strict 拒），但进程内/日志/UI 其它路径可读
+    Object.defineProperty(wireSnapshot, 'droppedTasks', {
+      value: droppedTaskCount, enumerable: false, configurable: true, writable: false,
+    })
   }
   if (normalized.whiteboard !== undefined) wireSnapshot.whiteboard = normalized.whiteboard
 
