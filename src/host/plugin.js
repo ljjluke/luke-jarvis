@@ -607,11 +607,25 @@ export function apply(ctx, config) {
             const m = q.match(/[?&]workspace=([^&]+)/)
             if (m) {
               const v = decodeURIComponent(m[1])
-              // 上游页面把 workspace 当**布尔开关**发（?workspace=1）；只有「存在且含 .jarvis/ 或 .agent-teams/」
-              // 的目录才当工作区（否则会把 workspace.id 派生成 jarvis-1，更严重的是能借它读到任意目录）。
+              // 上游页面把 workspace 当**布尔开关**发（?workspace=1，见 bundle 的 connect({workspace:true})）；
+              // 只有「存在且含 .jarvis/ 或 .agent-teams/」的目录才当工作区
+              // （否则会把 workspace.id 派生成 jarvis-1，更严重的是能借它读到任意目录）。
               const safe = safeWorkspaceArg(v)
               if (safe) return safe
             }
+            // v0.15.11 根治：bundle 硬编码 workspace:true → relay 收到的是 '1'，
+            // 但真实工作区在 **Referer** 里（Wings UI 给场景 iframe 拼的 ?workspace=<路径>）。
+            // 不解析它的话，relay 只能退回 defaultWorkspace（常见为空工作区）→ 画面空白。
+            try {
+              const ref = String((req && req.headers && (req.headers.referer || req.headers.referrer)) || '')
+              if (ref) {
+                const rm = ref.match(/[?&]workspace=([^&#]+)/)
+                if (rm) {
+                  const rv = safeWorkspaceArg(decodeURIComponent(rm[1]))
+                  if (rv) return rv
+                }
+              }
+            } catch { /* referer 不可解析：继续走默认 */ }
           } catch { /* 忽略 */ }
           if (PLUGIN_CONFIG.defaultWorkspace) {
             try { if (fsm.statSync && fsm.statSync(PLUGIN_CONFIG.defaultWorkspace).isDirectory()) return PLUGIN_CONFIG.defaultWorkspace } catch { /* 配置目录不存在则继续兜底 */ }
