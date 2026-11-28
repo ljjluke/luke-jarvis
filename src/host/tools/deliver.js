@@ -885,6 +885,11 @@ export const DELIVER_TOOLS = [
               const covMissing = await checkCoverageGate(fsSvc, projectDir, path)
               missing.push(...covMissing)
             } catch {}
+            // v0.15.9 根治：pre 里的「差异清单已销项（替代类 coverage）」是**静态文案**，
+            // 旧实现从未把它 drop → 无论覆盖矩阵多合格，收口闸永远报这一条 → 永远过不去。
+            // 覆盖矩阵的真实校验已由上面的 checkCoverageGate 承担（它会 push 真正的失败项），
+            // 所以这里把那条占位文案清掉即可（比喻性的"已销项"要求由真实检查兑现）。
+            _dropMissing(missing, (m) => m.startsWith('差异清单已销项'))
             // 会议：任务全交完却没开收口会 → 必开（逐项验收 + 遗留项分级）
             missing.push(...meetingGaps(projectDir, 'close', path, { teams: [...ownedSet] }))
             // ponder 核验（v0.16 恢复·用户定调 2026-11-19「每个员工思考时必须用 ponder」）：

@@ -318,6 +318,11 @@ export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
         try {
           const t = JSON.parse((await readTextSafe(fsSvc, path.join(tdir, String(n)))) || '{}')
           if (!t || !t.ended) continue
+          // v0.15.9 修正：只有"真交付"的结束才算完成成员任务。
+          // stopped（重复开单作废）/dropped/closed 是"没干活就结束"，不要求 ponder 核验——
+          // 否则作废的重复单会把收口闸永久卡死（实测 2 张 T1 作废单）。
+          const outcome = String((t.ended && t.ended.outcome) || '').toLowerCase()
+          if (!['completed', 'merged'].includes(outcome)) continue
           const asg = (Array.isArray(t.assignments) ? t.assignments : []).slice(-1)[0] || {}
           const who = String(asg.role || '')
           if (!who || who === 'captain' || who === 'CEO') continue
