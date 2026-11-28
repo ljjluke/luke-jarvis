@@ -116,25 +116,118 @@ function listTeams(projectDir, fs, path) {
   // 结果：新工作区团队一览永远空；老工作区显示 11 月 agent_teams 时代的残留假成员。
   // 修法：把 .jarvis/cards + .jarvis/tickets + STATUS.md + exec-map 推导出的事实
   // 叠加成同形团队（name='jarvis'），前端结构不用改。两源合并（老 .agent-teams 仍可见）。
+  // v0.15.9 根治：两套账本（.agent-teams/team.json 与 .jarvis/tickets）合并成唯一真相。
+  // 用户实测：团队一览同时出现 [数审复核组]（5 completed）与 [jarvis]（全 running），
+  // 同一批人、状态互相矛盾 → "完全没对上"。
+  //
+  // 合并口径（机械可判，不猜）：
+  //   · 角色归一：team.json 的 role 常写成"总经理（数据安全产品线 CEO，影子：范渊）"，
+  //     jarvis-facts 是干净职位名"总经理" → 取首段（遇 （/（/· /"影子"截断）再精确比。
+  //   · 成员：以 jarvis-facts 为基准（它有真实 status/statusLine/活跃度），
+  //     team.json 的成员用于补"更像人名的 name"与"这个角色确实在团队编制里"。
+  //   · 任务：两边合并按（归一 subject + 归一 assignee）去重；
+  //     状态取更强者（completed > claimed > in_progress > pending）——
+  //     团队账标了 completed 就是真干完了，不能因状态机没收到 report 就显示 running。
+  //   · 输出只留一个团队（source='jarvis-facts'），并标 mergedFrom 便于排查。
+  const roleKey = (r) => String(r || '').split(/[（(·]|[，,]?影子/)[0].replace(/[：:].*$/, '').trim().toLowerCase()
+  const STATUS_RANK = { completed: 5, dropped: 5, cancelled: 5, claimed: 3, running: 2, in_progress: 2, blocked: 1, pending: 0, failed: 0 }
+  // 任务归一键：优先从 subject 提取任务编号（T1/T3/T7… 或 P1.1 这类），
+  // 其次用 id 归一（ticket-xxx 去掉前缀）。**绝不用 subject 全文**——
+  // 实测 "…（技术判定官）" vs "…（技术判定官·主交付）" 只因后缀差一个词就被当成两条任务。
+  const taskKeyOf = (task) => {
+    const subj = String((task && task.subject) || (task && task.title) || '')
+    // v0.15.9：编号可带字母后缀（T4a/T4b），且 \b 在 "4|a" 之间不成立 →
+    // 用 [A-Za-z]? 显式吃后缀，边界改为「空白/冒号/顿号/逗号/括号/行尾」。
+    const m = subj.match(/^(?:任务\s*)?(T[\d]+[A-Za-z]?|P[\d.]+|G[\d]+|D[\d]+)(?=[\s:：、,，（(]|$)/i)
+      || subj.match(/(T[\d]+[A-Za-z]?)(?=[\s:：、,，（(]|$)/i)
+    if (m) return 'no:' + m[1].toUpperCase()
+    const id = String((task && task.id) || '').trim().toLowerCase()
+      .replace(/^ticket-m?/, '').replace(/^task-/, '')
+    return id ? 'id:' + id : ''
+  }
+  const rankOf = (st) => {
+    const k = String(st || '').toLowerCase()
+    if (k in STATUS_RANK) return STATUS_RANK[k]
+    if (/完成|completed|done/.test(k)) return 5
+    if (/claimed|认领/.test(k)) return 3
+    if (/running|progress|进行/.test(k)) return 2
+    return 0
+  }
   try {
     const facts = deriveJarvisFacts(projectDir, fs, path)
     const jt = jarvisTeamShape(facts, path)
     if (jt) {
-      // 同一角色若在 .agent-teams 与 jarvis 事实里都出现：保留 jarvis 那条（它才是真在跑的链路）
-      const jarvisRoles = new Set(jt.members.map((m) => m.role))
+      // 收集 .agent-teams 里的成员名（按归一 role 索引）与任务（供合并）
+      const atMembers = new Map()   // roleKey -> { name, role }
+      const atTasks = new Map()     // 任务归一键 -> task
       for (const t of teams) {
-        if (t.members.length && t.members.every((m) => jarvisRoles.has(m.role))) {
-          // 这个 .agent-teams 团队与 jarvis 事实完全重合 → 标记为陈旧快照，不重复展示
-          t.staleDuplicateOfJarvis = true
+        for (const m of (t.members || [])) {
+          const k = roleKey(m.role || m.name)
+          if (!k) continue
+          if (!atMembers.has(k)) atMembers.set(k, { name: String(m.name || ''), role: String(m.role || '') })
+        }
+        for (const task of (t.tasks || [])) {
+          const k = taskKeyOf(task) || (roleKey(task.assignee) + '|' + String(task.subject || '').slice(0, 40))
+          if (!atTasks.has(k)) atTasks.set(k, { ...task, __from: t.name })
         }
       }
+      // 成员：jarvis 为基准；用 team.json 的 name 覆盖更"像人名"的那个
+      for (const m of jt.members) {
+        const at = atMembers.get(roleKey(m.role))
+        if (at && at.name && at.name !== m.role) {
+          // 仅当 team.json 的 name 更短/更像姓名时才覆盖（避免把职位名换成完整描述）
+          if (String(at.name).length <= String(m.name || '').length + 6) m.name = at.name
+        }
+        if (at) m.inRoster = true
+      }
+      // 任务：jarvis 任务表 + team.json 已完成任务，按状态取强者合并
+      const mergedTasks = []
+      const seen = new Map()
+      for (const task of jt.tasks) {
+        const k = taskKeyOf(task) || (roleKey(task.assignee) + '|' + String(task.subject || '').slice(0, 40))
+        const prev = seen.get(k)
+        if (prev) {
+          // v0.15.9：同一编号有多张单（首次派发失败 + 重派）时，取状态更强 / 更新的那张，
+          // 否则用户会看到"T3 还在跑"而实际已完成（实测 ticket-mwyp6ath7 vs ticket-mwzt91831）。
+          const newer = (String(task.updatedAt || '') > String(prev.updatedAt || ''))
+          if (rankOf(task.status) > rankOf(prev.status) || (rankOf(task.status) === rankOf(prev.status) && newer)) {
+            const idx = mergedTasks.indexOf(prev)
+            if (idx >= 0) mergedTasks[idx] = task
+            seen.set(k, task)
+          }
+          continue
+        }
+        seen.set(k, task)
+        mergedTasks.push(task)
+      }
+      for (const [k, task] of atTasks) {
+        const existing = seen.get(k)
+        if (existing) {
+          if (rankOf(task.status) > rankOf(existing.status)) {
+            existing.status = task.status
+            existing.__statusMergedFrom = 'agent-teams'
+          }
+        } else {
+          mergedTasks.push({
+            id: String(task.id || ''),
+            subject: String(task.subject || ''),
+            assignee: String(task.assignee || ''),
+            status: String(task.status || 'pending'),
+            attempt: Number(task.attempt || 0),
+            __from: 'agent-teams',
+          })
+          seen.set(k, mergedTasks[mergedTasks.length - 1])
+        }
+      }
+      jt.tasks = mergedTasks
+      jt.mergedFrom = teams.map((t) => t.name)
+      teams.length = 0            // 只输出合并后的单一团队，不再并列展示两套账
       teams.push(jt)
       for (const tt of jt.tasks) (TERMINAL.has(tt.status) ? completed++ : open++)
     }
   } catch { /* 推导失败不阻断快照（画面退化为空，比崩好） */ }
   teams.sort((x, y) => (y.mtime || 0) - (x.mtime || 0))
-  const shown = teams.filter((t) => !t.staleDuplicateOfJarvis)
-  const marked = shown.map((t) => ({ ...t, active: activeNames.includes(t.name) || t.source === 'jarvis-facts' }))
+  const marked = teams.map((t) => ({ ...t, active: activeNames.includes(t.name) || t.source === 'jarvis-facts' }))
   return { teams: marked, open, completed, activeTeams: activeNames }
 }
 

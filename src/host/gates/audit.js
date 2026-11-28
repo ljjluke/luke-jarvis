@@ -307,6 +307,26 @@ export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
         }
       } catch {}
     }
+    // v0.15.9 根治：本部署派单走 jarvis/tickets（不是 .agent-teams/team.json），
+    // 两套账本同时存在时旧实现只认 team.json → jarvis 单永远对不上。
+    // 补读 .jarvis/tickets 中**已结束(ended)**的单，参与同一套 ponder 核验。
+    try {
+      const tdir = path.join(projectDir, '.jarvis/tickets')
+      const names = (await listNames(fsSvc, tdir)) || []
+      for (const n of names) {
+        if (!/^ticket-.*\.json$/.test(String(n))) continue
+        try {
+          const t = JSON.parse((await readTextSafe(fsSvc, path.join(tdir, String(n)))) || '{}')
+          if (!t || !t.ended) continue
+          const asg = (Array.isArray(t.assignments) ? t.assignments : []).slice(-1)[0] || {}
+          const who = String(asg.role || '')
+          if (!who || who === 'captain' || who === 'CEO') continue
+          const id = String(t.id || '')
+          if (!id || exempt.has(id)) continue
+          if (!completedMemberTasks.includes(id)) completedMemberTasks.push(id)
+        } catch {}
+      }
+    } catch {}
     if (completedMemberTasks.length === 0) return missing
     let verifyFiles = []
     try { verifyFiles = (await fsSvc.list(path.join(projectDir, '.jarvis/docs/ponder-verify'))) || [] } catch { verifyFiles = [] }
@@ -319,7 +339,19 @@ export async function checkPonderVerify(fsSvc, projectDir, path, owned) {
         if (String(rec.verdict || '').toUpperCase() === 'PASS' && rec.taskId) passed.add(String(rec.taskId))
       } catch {}
     }
-    const unverified = completedMemberTasks.filter((id) => !passed.has(id))
+    // v0.15.9：taskId 命名空间容错——team.json 的 t1/t3 与 tickets 的 ticket-xxx 是两套命名，
+    // ponder-verify 记录里的 taskId 可能任一形态。归一比较（去前缀/小写/互为子串）。
+    const normId = (x) => String(x || '').trim().toLowerCase()
+      .replace(/^ticket-m?/, '').replace(/^task-/, '').replace(/^t\.?/, '')
+    const passedNorm = new Set([...passed].map(normId))
+    const unverified = completedMemberTasks.filter((id) => {
+      const n = normId(id)
+      if (passedNorm.has(n)) return false
+      for (const pn of passedNorm) {
+        if (pn && (n === pn || (n && n.startsWith(pn)) || (pn && pn.startsWith(n)))) return false
+      }
+      return true
+    })
     if (unverified.length > 0) {
       missing.push(`ponder 核验缺失：${unverified.length}/${completedMemberTasks.length} 个成员任务没有 PASS 核验记录（${unverified.slice(0, 5).join('、')}）——这些单是 standard/complex 档，必须真跑 ponder 十阶段并留下核验。下一步：jarvis_ponder_check(runId=<成员回报的 run_id>, dataDir=<PONDER_DATA_DIR>, taskId=<该任务>, projectDir=${projectDir}) —— PASS 才会落 .jarvis/docs/ponder-verify/ 放行。若这单其实属于免跑档，请在任务单 meta.route 标 "easy-direct" 后重跑收口。`)
     }

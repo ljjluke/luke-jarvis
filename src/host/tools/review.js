@@ -698,7 +698,13 @@ export const REVIEW_TOOLS = [
       const fpIssue = checkContentFingerprint(String(args.evidenceDir ?? args.dataDir ?? '').trim(), String(args.claimedConclusion ?? '').trim())
       if (fpIssue) issues.push(fpIssue)
 
-      const ok = missing.length === 0 && orderViolations.length === 0 && agentShortfalls.length === 0
+      // v0.15.9 根治：SOLO 模式（成员 depth-1，起不了子 agent）下 agentShortfalls 恒非空，
+      // 若把它计入 ok 判定 → 永远 FAIL → 永远不写 ponder-verify 记录 → 收口闸永远拦
+      // → 造成"员工没跑 ponder"的假象（实际跑了完整十阶段，磁盘有 11 个文件）。
+      // 口径对齐：SOLO 已在 issues 里明确标注"按十阶段顺序+产出文件核验，不算缺陷"，
+      // 判定公式必须采纳同一口径——SOLO 时不要求 agent 数。
+      const agentOk = soloMode ? true : agentShortfalls.length === 0
+      const ok = missing.length === 0 && orderViolations.length === 0 && agentOk
         && (!claimed || runIdMatch) && (evidenceDir ? evidenceMissing.length === 0 : true) && !fpIssue
 
       // 核验留痕：PASS 且有 taskId → 写 .jarvis/docs/ponder-verify/<taskId>-<runId>.json

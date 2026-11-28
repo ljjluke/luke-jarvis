@@ -49,6 +49,15 @@ export const LONG_OPEN_MS = 7 * 24 * 60 * 60 * 1000
 const TERMINAL_STATES = new Set(['completed', 'cancelled', 'failed', 'dropped'])
 /** captain 不是员工（它就是贾维斯本人）。 */
 const CAPTAIN_ROLES = new Set(['captain', 'jarvis', '贾维斯', '老板'])
+/** 任务编号归一（T1/T3/T4a/T7/P1.1 等）——与 snapshot 的去重键同一口径。 */
+function taskNoKey(raw) {
+  const subj = String(raw || '')
+  const m = subj.match(/^(?:任务\s*)?(T[\d]+[A-Za-z]?|P[\d.]+|G[\d]+|D[\d]+)(?=[\s:：、,，（(]|$)/i)
+    || subj.match(/(T[\d]+[A-Za-z]?)(?=[\s:：、,，（(]|$)/i)
+  if (m) return m[1].toUpperCase()
+  const id = subj.trim().toLowerCase().replace(/^ticket-m?/, '').replace(/^task-/, '')
+  return id || ''
+}
 
 function readJson(file, fs) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null }
@@ -139,6 +148,27 @@ export function deriveJarvisFacts(projectDir, fs, path, opts = {}) {
   }
 
   // ③ 任务：.jarvis/tickets/*.json 里未结束的单
+
+  // ③b v0.15.9：.agent-teams/team.json 的完成态（跨源合并的唯一事实）
+  //   本部署成员从不调 jarvis_ticket(report)，tickets 的 ended 永远 null；
+  //   而团队账（team.json）会标 completed。二者必须合并，否则成员永远显示"在办"。
+  //   口径：任务编号（T1/T3/T4a…）归一匹配；team.json 标 completed → 该编号视为已完成。
+  const teamCompletedKeys = new Set()
+  try {
+    const td = path.join(base, '.agent-teams')
+    for (const team of fs.readdirSync(td)) {
+      if (/^(archive|\.|retired)/.test(String(team))) continue
+      let d = null
+      try { d = readJson(path.join(td, String(team), 'team.json'), fs) } catch { continue }
+      if (!d) continue
+      for (const task of (d.tasks || [])) {
+        if (String(task.status || '') !== 'completed') continue
+        const key = taskNoKey(task.subject || task.id)
+        if (key) teamCompletedKeys.add(key)
+      }
+    }
+  } catch { /* 无 .agent-teams 或读失败：不影响 */ }
+
   const ticketsDir = path.join(jv, 'tickets')
   const openTasks = []
   const allTasks = []
@@ -165,9 +195,16 @@ export function deriveJarvisFacts(projectDir, fs, path, opts = {}) {
         ended: t.ended ? { outcome: String(t.ended.outcome || ''), at: String(t.ended.at || '') } : null,
       }
       allTasks.push(rec)
-      if (!t.ended) openTasks.push(rec)
+      // v0.15.9：tickets 没 ended，但团队账里该编号已完成 → 视为已完成（跨源合并）
+      if (!t.ended && teamCompletedKeys.has(taskNoKey(t.title))) {
+        rec.ended = { outcome: 'completed', at: String(t.updatedAt || t.createdAt || ''), by: 'team.json-sync' }
+        rec.status = 'completed'
+        if (rec.reportState === '') rec.reportState = 'ready'
+      }
+      if (!rec.ended) openTasks.push(rec)   // v0.15.9：用合并后的 rec.ended（跨源已判完成的不算在办）
     }
   } catch { /* 无 tickets 目录 */ }
+
 
   // ④ exec-map：该角色是否还挂着子会话
   const execMap = readJson(path.join(ticketsDir, 'exec-map.json'), fs) || {}
@@ -177,13 +214,30 @@ export function deriveJarvisFacts(projectDir, fs, path, opts = {}) {
   for (const role of roleSet) {
     if (CAPTAIN_ROLES.has(role)) continue
     const emp = empByRole.get(role) || {}
-    const cur = openTasks.find((x) => x.assignee === role) || null
+    // v0.15.9：选「状态最强 / 最新」的那张（口径与 snapshot.listTeams 合并逻辑一致），
+    // 不再按数组顺序取第一个（旧实现会选中 11-27 首次派单失败的陈旧单 → 永远 stalled）。
+    const roleTasks = allTasks.filter((x) => x.assignee === role)
+    const RANK = { completed: 5, dropped: 5, cancelled: 5, failed: 3, blocked: 2, running: 1, in_progress: 1, pending: 0 }
+    const rankOfT = (t) => {
+      if (!t) return -1
+      if (t.ended) return 5
+      const k = String(t.status || '').toLowerCase()
+      return k in RANK ? RANK[k] : 0
+    }
+    const curOpen = roleTasks.filter((x) => !x.ended)
+      .sort((a, b) => (String(b.updatedAt || '') > String(a.updatedAt || '') ? 1 : -1))[0] || null
+    // 「当前任务」= 最新结束后，若仍有未结束单则用那张；否则用最近完成的那张（供展示"最后一件事"）
+    const latestDone = roleTasks.filter((x) => x.ended)
+      .sort((a, b) => (String(b.updatedAt || '') > String(a.updatedAt || '') ? 1 : -1))[0] || null
+    const cur = curOpen || latestDone
     const status = readStatus(path.join(jv, 'outputs', cur ? cur.id : '__none__', 'STATUS.md'), fs)
     const live = liveChildOf(execMap)
     const liveRec = live.get(role)
     let state = 'idle'
     let source = 'cards'
-    if (cur) {
+    // v0.15.9：只有「确有未结束单」才可能 working / stalled；
+    // 名下任务全部已完成 → idle（"最近完成"不代表还在干活）。
+    if (curOpen) {
       const statusFresh = status.mtime && (now - status.mtime) < STALE_MS
       const taskFresh = (() => {
         const at = Number(new Date(cur.updatedAt || cur.createdAt || 0)) || 0
